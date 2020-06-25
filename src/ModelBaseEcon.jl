@@ -12,8 +12,8 @@ using DiffResults
 using ForwardDiff
 using Printf
 
-
-
-
+include("Timer.jl")
+using .Timer
+export @timer, inittimer, stoptimer, printtimer
 
 end # module
