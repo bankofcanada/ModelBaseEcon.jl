@@ -16,4 +16,8 @@ include("Timer.jl")
 using .Timer
 export @timer, inittimer, stoptimer, printtimer
 
+include("Options.jl")
+using .OptionsMod
+export Options, getoption, getoption!, setoption!
+
 end # module
