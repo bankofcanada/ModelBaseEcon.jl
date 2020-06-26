@@ -62,7 +62,7 @@ has not been initialized.
 """
 struct ModelNotInitError <: ModelErrorBase end
 msg(::ModelNotInitError) = "Model not ready to use."
-hint(::ModelNotInitError) = "Call `initialize!(model)` first."
+hint(::ModelNotInitError) = "Call `@initialize model` first."
 
 
 """
@@ -75,8 +75,19 @@ struct NotImplementedError <: ModelErrorBase
 end
 msg(fe::NotImplementedError) = "Feature not implemented: $(fe.descr)."
 
+
+"""
+    struct EqnNotReadyError <: ModelErrorBase
+
+Concrete error type used to indicate that a given equation has not been prepared
+for use in the model yet.
+"""
+struct EqnNotReadyError <: ModelErrorBase end
+msg(::EqnNotReadyError) = "Equation not ready to use."
+hint(::EqnNotReadyError) = "Call `@initialize model` or `add_equation!()` first."
+
 ###########################################################
-# Part 2: Error handling
+# Part 2: Equations evaluation
 
 
 

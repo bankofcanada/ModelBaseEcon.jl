@@ -25,4 +25,9 @@ export Options, getoption, getoption!, setoption!
 # The "misc" - various types and functions
 include("misc.jl")
 
+# NOTE: The order of inclusions matters.
+include("abstract.jl")
+include("evaluation.jl")
+
+
 end # module

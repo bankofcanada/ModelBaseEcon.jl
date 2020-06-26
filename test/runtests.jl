@@ -15,3 +15,14 @@ using Test
     @test "name" ∈ o && o.name == "Zoro"
 end
 
+module E
+    using ModelBaseEcon
+end
+@testset "Evaluations" begin
+    ModelBaseEcon.initfuncs(E)
+    E.eval(ModelBaseEcon.makefuncs(:(x+3*y), [:x, :y], mod=E))
+    @test :resid_1 ∈ names(E, all=true)
+    @test :RJ_1 ∈ names(E, all=true)
+    @test E.resid_1([1.1, 2.3]) == 8.0
+    @test E.RJ_1([1.1, 2.3]) == (8.0, [1.0, 3.0])
+end
