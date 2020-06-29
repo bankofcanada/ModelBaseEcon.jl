@@ -28,6 +28,7 @@ include("misc.jl")
 # NOTE: The order of inclusions matters.
 include("abstract.jl")
 include("evaluation.jl")
-
+include("equation.jl")
+include("steadystate.jl")
 
 end # module
