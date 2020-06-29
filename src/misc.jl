@@ -76,16 +76,6 @@ end
 msg(fe::NotImplementedError) = "Feature not implemented: $(fe.descr)."
 
 
-"""
-    struct EqnNotReadyError <: ModelErrorBase
-
-Concrete error type used to indicate that a given equation has not been prepared
-for use in the model yet.
-"""
-struct EqnNotReadyError <: ModelErrorBase end
-msg(::EqnNotReadyError) = "Equation not ready to use."
-hint(::EqnNotReadyError) = "Call `@initialize model` or `add_equation!()` first."
-
 ###########################################################
 # Part 2: Equations evaluation
 

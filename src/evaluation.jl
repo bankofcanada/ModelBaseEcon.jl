@@ -1,4 +1,8 @@
 
+###########################################################
+# Part 1: Helper functions
+
+
 """
     precompilefuncs(resid, RJ, ::Val{N}) where N
 
@@ -143,4 +147,132 @@ function initfuncs(mod::Module)
     end)
     return nothing
 end
+
+###########################################################
+# Part 2: Evaluation data for models and equations
+
+"""
+    AbstractModelEvaluationData
+
+Base type for all model evaluation structures.
+Specific derived types would specialize in different types of models.
+"""
+abstract type AbstractModelEvaluationData end
+
+"""
+    eval_R!(res::AbstractArray{Float64,1}, point::AbstractArray{Float64, 2}, ::MED) where MED <: AbstractModelEvaluationData
+
+Evaluate the model residual at the given point using the given model evaluation structure.
+The residual is stored in the provided vector.
+
+### Implementation details (for developers)
+When creating a new type of model evaluation data, you must define a
+method of this function specialized to it.
+
+The `point` argument will be a 2d array, with the number of rows equal to
+`maxlag+maxlead+1` and the number of columns equal to the number of `variables+shocks+auxvars` of the model.
+The `res` vector will have the same length as the number of equations + auxiliary equations. 
+Your implementation must not modify `point` and must update `res`.
+
+See also: [`eval_RJ`](@ref)
+"""
+function eval_R! end
+export eval_R!
+eval_R!(res::AbstractVector{Float64}, point::AbstractMatrix{Float64}, ::AMED) where AMED <: AbstractModelEvaluationData = throw(NotImplementedError(AMED))
+
+"""
+    eval_RJ(point::AbstractArray{Float64, 2}, ::MED) where MED <: AbstractModelEvaluationData
+
+Evaluate the model residual and its Jacobian at the given point using the given model evaluation structure.
+Return a tuple, with the first element being the residual and the second element being the Jacobian.
+
+### Implementation details (for developers)
+When creating a new type of model evaluation data, you must define a
+method of this function specialized to it.
+
+The `point` argument will be a 2d array, with the number of rows equal to
+`maxlag+maxlead+1` and the number of columns equal to the number of `variables+shocks+auxvars` of the model.
+Your implementation must not modify `point` and must return the tuple of (residual, Jacobian) evaluated
+at the given `point`. The Jacobian is expected to be `SparseMatrixCSC` (*this might change in the future*).
+    
+See also: [`eval_R!`](@ref)
+"""
+function eval_RJ end
+export eval_RJ
+eval_RJ(point::AbstractMatrix{Float64}, ::AMED) where AMED <: AbstractModelEvaluationData = throw(NotImplementedError(AMED))
+
+
+# Model Evaluation Data that doesn't exist.
+
+"""
+    struct NoModelEvaluationData <: AbstractModelEvaluationData
+
+Specific type that indicates that the model cannot be evaluated.
+This is used as a placeholder while the model is being defined.
+During initialization, the actual model evaluation data is created.
+"""
+struct NoModelEvaluationData <: AbstractModelEvaluationData end
+global const NoMED = NoModelEvaluationData()
+eval_R!(res::AbstractVector{Float64}, point::AbstractMatrix{Float64}, ::NoModelEvaluationData) = throw(ModelNotInitError())
+eval_RJ(point::AbstractMatrix{Float64}, ::NoModelEvaluationData) = throw(ModelNotInitError())
+
+# The standard Model Evaluation Data used in the general case.
+
+"""
+    ModelEvaluationData <: AbstractModelEvaluationData
+
+The standard model evaluation data used in the general case and by default.
+"""
+struct ModelEvaluationData{E <: AbstractEquation, I} <: AbstractModelEvaluationData
+    alleqns::Vector{E}
+    allinds::Vector{I}
+    "Placeholder for the Jacobian matrix"
+    J::SparseMatrixCSC{Float64,Int64}
+    "Placeholder for the residual vector"
+    R::Vector{Float64}
+    rowinds::Vector{Vector{Int64}}
+end
+
+"""
+    ModelEvaluationData(model::AbstractModel)
+
+Create the standard evaluation data structure for the given model.
+"""
+function ModelEvaluationData(model::AbstractModel)
+    time0 = 1+model.maxlag
+    alleqns = model.alleqns
+    neqns = length(alleqns)
+    allinds = @timer [[CartesianIndex((time0+ti, vi)) for (ti,vi) in eqn.vinds] for eqn in alleqns]
+    ntimes = 1+model.maxlag+model.maxlead
+    nvars = length(model.allvars)
+    LI = LinearIndices((ntimes, nvars))
+    II = @timer reduce(vcat, (fill(Int64(i), length(eqn.vinds)) for (i,eqn) in enumerate(alleqns)))
+    JJ = @timer [LI[inds] for inds in allinds]
+    M = @timer SparseArrays.sparse(II, reduce(vcat, JJ), similar(II), neqns, ntimes*nvars)
+    M.nzval .= @timer 1:length(II)
+    rowinds = @timer [copy(M[i,LI[inds]].nzval) for (i,inds) in enumerate(JJ)]
+    ModelEvaluationData(alleqns, allinds, similar(M, Float64), Vector{Float64}(undef, neqns), rowinds)
+end
+
+function eval_R!(res::AbstractVector{Float64}, point::AbstractMatrix{Float64}, med::ModelEvaluationData)
+    # med === NoMED && throw(ModelNotInitError())
+    for (i, eqn, inds) in zip(1:length(med.alleqns), med.alleqns, med.allinds)
+        res[i] = eqn.eval_resid(point[inds])
+    end
+    return nothing
+end
+
+function eval_RJ(point::AbstractMatrix{Float64}, med::ModelEvaluationData)
+    # med === NoMED && throw(ModelNotInitError())
+    neqns = length(med.alleqns)
+    res = med.R
+    jac = med.J
+    for (i, eqn, inds, ri) in zip(1:neqns, med.alleqns, med.allinds, med.rowinds)
+        res[i], jac.nzval[ri] = eqn.eval_RJ(point[inds])
+    end
+    return res, jac
+end
+
+
+
 
