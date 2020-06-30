@@ -608,7 +608,8 @@ end
 
 export @initialize
 
-function initialize!(model::Model, modelmodule::Module = moduleof(model))
+function initialize!(model::Model, modelmodule::Module)
+    # Note: we cannot use moduleof here, because the equations are not initialized yet.
     if model.evaldata !== NoMED
         error("Model already initialized.")
     end
@@ -635,7 +636,13 @@ macro initialize(model::Symbol)
     # thismodule = @__MODULE__
     # modelmodule = __module__
     return quote
-        $(@__MODULE__).initialize!($(model))
+        $(@__MODULE__).initialize!($(model), $(__module__))
     end |> esc
 end
+
+##########################
+
+eval_RJ(x::AbstractMatrix{Float64}, m::Model) = eval_RJ(x, m.evaldata)
+eval_R!(r::AbstractVector{Float64}, x::AbstractMatrix{Float64}, m::Model) = eval_R!(r, x, m.evaldata)
+
 
