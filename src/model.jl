@@ -201,3 +201,151 @@ function Base.show(io::IO, model::Model)
     return nothing
 end
 
+################################################################
+# The macros used in the model definition.
+
+issymbol(::Symbol) = true
+issymbol(::Any) = false
+isequation(::Any) = false
+isequation(expr::Expr) = expr.head==:(=)
+
+# Note: These macros simply store the information into the corresponding 
+# arrays within the model instance. The actual processing is done in @initialize
+
+export @variables, @shocks, @parameters, @equations, @autoshocks, @autoexogenize
+
+"""
+    @variables model names...
+    @variables model begin
+        names...
+    end
+
+Define the names of transition variables in the model.
+
+### Example
+```jldoctest
+@variables model a b c
+
+# If the list is long, use a begin-end block separating names with newline or semicolon
+@variables model begin
+    a; b
+    c
+end
+````
+"""
+macro variables(model, block::Expr)
+    vars = filter(issymbol, block.args)
+    return esc(:( unique!(append!($(model).variables, $vars)), nothing ))
+end
+macro variables(model, vars::Symbol...)
+    return esc(:( unique!(append!($(model).variables, $vars)); nothing ))
+end
+
+"""
+    @shocks model names...
+    @shocks model begin
+        names...
+    end
+
+Define the names of transition shocks in the model.
+
+### Example
+```jldoctest
+@shocks model a_shk b_shk c_shk
+
+# If the list is long, use a begin-end block separating names with newline or semicolon
+@shocks model begin
+    a_shk; b_shk
+    c_shk
+end
+````
+"""
+macro shocks(model, block::Expr)
+    shks = filter(issymbol, block.args)
+    return esc(:( unique!(append!($(model).shocks, $shks)); nothing ))
+end
+macro shocks(model, shks::Symbol...)
+    return esc(:( unique!(append!($(model).shocks, $shks)); nothing ))
+end
+
+"""
+    @autoshocks model
+
+Create a list of shocks that matches the list of variables.  Each shock name is
+created from a variable name by appending "_shk".
+"""
+macro autoshocks(model)
+    esc(:(
+        $(model).shocks = map(x->Meta.parse("$(x)_shk"), $(model).variables);
+        nothing
+    ))
+end
+
+"""
+    @parameters model begin
+        name = value
+        ...
+    end
+
+Declare and define the model parameters. 
+
+The parameters must have values. Provide the information in a series of assignment
+statements wrapped inside a begin-end block. The names can be used in equations
+as if they were regular variables.
+"""
+macro parameters(model, args::Expr...)
+    mevalparam((sym, val)) = (sym, __module__.eval(val))
+    mevalparam(ex::Expr) = mevalparam(ex.args)
+    if length(args) == 1 && args[1].head == :block
+        args = args[1].args
+    end
+    args = filter(isequation, [args...])
+    params = Dict{Symbol, Any}(map(mevalparam, args))
+    return esc(:( merge!($(model).parameters, $(params)); nothing ))
+end
+
+"""
+    @autoexogenize model begin
+        varname = shkname
+        ...
+    end
+
+Define a mapping between variables and shocks that can be used to
+conveniently  swap exogenous and endogenous variables.
+"""
+macro autoexogenize(model, args::Expr...)
+    if length(args) == 1 && args[1].head == :block
+        args = args[1].args
+    end
+    args = filter(isequation, [args...])
+    autoexos = Dict{Symbol, Any}([ex.args for ex in args])
+    esc(:( merge!($(model).autoexogenize, $(autoexos)); nothing ))
+end
+
+
+"""
+Usage example:
+```
+@equations model begin
+    y[t] = a * y[t-1] + b * y[t+1] + y_shk[t]
+```
+"""
+macro equations(model, block::Expr)
+    if block.head != :block
+        error("list of equations mush be within a begin-end block")
+    end
+    eqns = Vector{Expr}()
+    eqn = Expr(:block)
+    for expr in block.args
+        if isa(expr, LineNumberNode)
+            push!(eqn.args, expr)
+        elseif isa(expr, Expr) && expr.head == :(=)
+            push!(eqn.args, expr)
+            push!(eqns, eqn)            
+            eqn = Expr(:block)
+        else
+            eqn = Expr(:block)
+        end
+    end
+    esc(:( push!($(model).equations, eval(Meta.quot($(eqns)))... ); nothing ))
+end
