@@ -40,6 +40,7 @@ Options:
 """
 struct Options 
     contents::Dict{Symbol, Any}
+    # Options() = new(Dict())
     Options(c::Dict{Symbol, <:Any}) = new(c)
 end
 
@@ -53,7 +54,7 @@ end
 Construct an Options instance with key-value pairs given as keyword arguments
 or as a list of pairs.
 """
-Options(; kwargs...) = Options(Dict(kwargs))
+Options(; kwargs...) = Options(Dict{Symbol, Any}(kwargs))
 # Options(pair::Pair{Symbol, T}) where T = Options(Dict(pair))
 Options(pairs::Pair{Symbol, <:Any}...) = Options(Dict(pairs...))
 Options(pairs::Pair{<:AbstractString, <:Any}...) = Options(Dict(Symbol(k)=>v for (k,v) in pairs))
@@ -105,14 +106,14 @@ function Base.show(io::IO, opts::Options)
     recur_io = IOContext(io, :SHOWN_SET => opts.contents,
                              :typeinfo => eltype(opts.contents),
                              :compact => get(io, :compact, true))
-    print(io, "Options:")
+    print(io, length(opts.contents), " Options:")
     if !isempty(opts)
         for (key, value) in opts.contents
-            print(io, "\n    ", key, "=")
+            print(io, "\n    ", key, " = ")
             show(recur_io, value)
         end
     end
-    print(io, "\n")
+    # print(io, "\n")
 end
 export getoption!, getoption, setoption!
 
@@ -200,4 +201,6 @@ setoption!(opts::Options, name::Symbol, value) = (push!(opts.contents, name => v
 
 Base.in(name, o::Options) = Symbol(name) ∈ keys(o.contents)
 
+Base.keys(o::Options) = keys(o.contents)
+Base.values(o::Options) = values(o.contents)
 end # module

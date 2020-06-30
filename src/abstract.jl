@@ -10,6 +10,9 @@ for fn in (:expr, :vinds, :vsyms, :eval_resid, :eval_RJ)
     end |> eval
 end
 
+@inline eval_resid(eqn::AE, x) where AE <: AbstractEquation = eval_resid(eqn)(x)
+@inline eval_RJ(eqn::AE, x) where AE <: AbstractEquation = eval_RJ(eqn)(x)
+
 # 
 Base.show(io::IO, eqn::AbstractEquation) = print(io, expr(eqn))
 
@@ -26,13 +29,28 @@ abstract type AbstractModel end
 @inline shocks(m::AM) where AM <: AbstractModel = getfield(m, :shocks)
 @inline nshocks(m::AM) where AM <: AbstractModel = length(shocks(m))
 
-@inline auxvars(m::AM) where AM <: AbstractModel = getfield(m, :auxvars)
-@inline nauxvars(m::AM) where AM <: AbstractModel = length(auxvars(m))
+# @inline auxvars(m::AM) where AM <: AbstractModel = getfield(m, :auxvars)
+# @inline nauxvars(m::AM) where AM <: AbstractModel = length(auxvars(m))
 
-@inline unknowns(m::AM) where AM <: AbstractModel = vcat(variables(m), shocks(m), auxvars(m))
-@inline nunknonws(m::AM) where AM <: AbstractModel = length(variables(m)) + length(shocks(m)) + length(auxvars(m))
+# @inline unknowns(m::AM) where AM <: AbstractModel = vcat(variables(m), shocks(m), auxvars(m))
+# @inline nunknonws(m::AM) where AM <: AbstractModel = length(variables(m)) + length(shocks(m)) + length(auxvars(m))
 
 @inline sstate(m::AM) where AM <: AbstractModel = getfield(m, :sstate)
 
 @inline parameters(m::AM) where AM <: AbstractModel = getfield(m, :parameters)
 
+@inline equations(m::AM) where AM <: AbstractModel = getfield(m, :equations)
+@inline nequations(m::AM) where AM <: AbstractModel =length(equations(m))
+
+#######
+
+
+@inline moduleof(f::Function) = parentmodule(f)
+@inline moduleof(e::AE) where AE <: AbstractEquation = parentmodule(eval_resid(e))
+function moduleof(m::AbstractModel)
+    eqns = equations(m)
+    if isempty(eqns)
+        error("Unable to determine the module containing the given model. Try adding equations to it and call `@initialize`.")
+    end
+    return moduleof(first(eqns))
+end

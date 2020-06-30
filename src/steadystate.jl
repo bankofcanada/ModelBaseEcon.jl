@@ -288,7 +288,7 @@ addition to the equations generated automatically from the dynamic system.
 
 """
 function setss!(model::AbstractModel, expr::Expr; type::Symbol,
-    modelmodule::Module = parentmodule(model))
+    modelmodule::Module = moduleof(model))
 
     if expr.head != :(=)
         error("Expected an equation, not $(expr.head)")
@@ -299,14 +299,14 @@ function setss!(model::AbstractModel, expr::Expr; type::Symbol,
 
     ###############################################
     #     ssprocess(val)
-    #
+    # 
     # Process the given value to extract information about mentioned parameters and variables.
     # This function has the side effect of populating the vectors 
     # `vinds`, `vsyms`, `val_params` and `source`
-    #
+    # 
     # Algorithm is recursive over the given expression. The bottom of the recursion is the
     # processing of a `Number`, a `Symbol`, (or a `LineNumberNode`). 
-    #
+    # 
     # we will store indices 
     local vinds = Int64[]
     local vsyms = Symbol[]
@@ -442,11 +442,11 @@ to help the steady state solver find the one you want to use.
 macro steadystate(model, type::Symbol, equation::Expr)
     thismodule = @__MODULE__
     modelmodule = __module__
-    return esc(:($(thismodule).setss!($(model), $(Meta.quot(equation)); type=$(QuoteNode(type)) )))  # , modelmodule=$(modelmodule))))
+    return esc(:($(thismodule).setss!($(model), $(Meta.quot(equation)); type = $(QuoteNode(type)))))  # , modelmodule=$(modelmodule))))
 end
 
 macro steadystate(model, equation::Expr)
     thismodule = @__MODULE__
-    modelmodule = __module__
-    return esc(:($(thismodule).setss!($(model), $(Meta.quot(equation)); type=:level ))) # , modelmodule=$(modelmodule))))
+
+    return esc(:($(thismodule).setss!($(model), $(Meta.quot(equation)); type = :level))) # , modelmodule=$(modelmodule))))
 end
