@@ -75,18 +75,3 @@ struct NotImplementedError <: ModelErrorBase
 end
 msg(fe::NotImplementedError) = "Feature not implemented: $(fe.descr)."
 
-
-###########################################################
-# Part 2: Equations evaluation
-
-
-
-
-
-
-
-
-
-
-
-
