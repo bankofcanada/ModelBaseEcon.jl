@@ -88,7 +88,7 @@ function Base.getproperty(model::Model, name::Symbol)
         return vcat(getfield(model, :variables), getfield(model, :shocks))
     elseif name == :alleqns
         return vcat(getfield(model, :equations), getfield(model, :auxeqns))
-    elseif name ∈ keys(getfield(model, :parameters))
+    elseif haskey(getfield(model, :parameters), name)
         return getindex(getfield(model, :parameters), name)
     elseif name ∈ getfield(model, :options)
         return getoption(model, name, nothing)
@@ -107,7 +107,7 @@ end
 function Base.setproperty!(model::Model, name::Symbol, val::Any)
     if name ∈ fieldnames(Model)
         return setfield!(model, name, val)
-    elseif name ∈ keys(getfield(model, :parameters))
+    elseif haskey(getfield(model, :parameters), name)
         return setindex!(getfield(model, :parameters), val, name)
     elseif name ∈ getfield(model, :options)
         return setoption!(model, name, val)
@@ -207,7 +207,7 @@ end
 issymbol(::Symbol) = true
 issymbol(::Any) = false
 isequation(::Any) = false
-isequation(expr::Expr) = expr.head==:(=)
+isequation(expr::Expr) = expr.head == :(=)
 
 # Note: These macros simply store the information into the corresponding 
 # arrays within the model instance. The actual processing is done in @initialize
@@ -235,7 +235,7 @@ end
 """
 macro variables(model, block::Expr)
     vars = filter(issymbol, block.args)
-    return esc(:( unique!(append!($(model).variables, $vars)), nothing ))
+    return esc(:(unique!(append!($(model).variables, $vars)), nothing))
 end
 macro variables(model, vars::Symbol...)
     return esc(:( unique!(append!($(model).variables, $vars)); nothing ))
@@ -300,7 +300,7 @@ macro parameters(model, args::Expr...)
         args = args[1].args
     end
     args = filter(isequation, [args...])
-    params = Dict{Symbol, Any}(map(mevalparam, args))
+    params = Dict{Symbol,Any}(map(mevalparam, args))
     return esc(:( merge!($(model).parameters, $(params)); nothing ))
 end
 
@@ -318,7 +318,7 @@ macro autoexogenize(model, args::Expr...)
         args = args[1].args
     end
     args = filter(isequation, [args...])
-    autoexos = Dict{Symbol, Any}([ex.args for ex in args])
+    autoexos = Dict{Symbol,Any}([ex.args for ex in args])
     esc(:( merge!($(model).autoexogenize, $(autoexos)); nothing ))
 end
 
@@ -347,5 +347,295 @@ macro equations(model, block::Expr)
             eqn = Expr(:block)
         end
     end
-    esc(:( push!($(model).equations, eval(Meta.quot($(eqns)))... ); nothing ))
+    esc(:( push!($(model).equations, eval(Meta.quot($(eqns)))...); nothing ))
 end
+
+################################################################
+# The processing of equations during model initialization.
+
+
+"""
+    process_equation(model::Model, expr; <keyword arguments>)
+
+Process the given expression in the context of the given model and create 
+an Equation() instance for it.
+
+!!! note
+    Internal function. There should be no need to call directly.
+
+### Implementation (for developers)
+
+"""
+function process_equation end
+# export process_equation
+process_equation(model::Model, expr::String; kwargs...) = process_equation(model, Meta.parse(expr); kwargs...)
+# process_equation(model::Model, val::Number; kwargs...) = process_equation(model, Expr(:block, val); kwargs...)
+# process_equation(model::Model, val::Symbol; kwargs...) = process_equation(model, Expr(:block, val); kwargs...)
+function process_equation(model::Model, expr::Expr; 
+    modelmodule::Module = moduleof(model), 
+    line = LineNumberNode(0))
+
+    # a list of all known time series 
+    allvars = [model.variables; model.shocks; model.auxvars]
+
+    # keep track of model parameters used in expression
+    parameters = Set{Symbol}()
+    # keep track of references to known time series in the expression
+    references = Dict{Tuple{Int64,Int64},Symbol}()
+    # keep track of the source code location where the equation was defined
+    #  (helps with tracking the locations of errors)
+    source = []
+
+    ###################
+    #    process(expr)
+    # 
+    # Process the expression, performing various tasks.
+    #  * keep track of mentions of parameters and variables (including shock)
+    #  * remove line numbers from expression, but keep track so we can insert it into the residual functions
+    #  * for each time-referenece of variable, create a dummy symbol that will be used in constructing the residual functions.
+    # 
+    # leave numbers alone
+    process(num::Number) = num
+    # store line number and discard it from the expression
+    function process(line::LineNumberNode)
+        push!(source, line)
+        return nothing
+    end
+    # Symbols are left alone.
+    # Mentions of parameters are tracked and left in place
+    # Mentions of time series throw errors (they must always have a t-reference)
+    function process(sym::Symbol)
+        if sym ∈ model.variables
+            error("Variable `$(sym)` without `t` reference.")
+        elseif sym ∈ model.shocks            
+            error("Shock `$(sym)` without `t` reference.")
+        elseif sym ∈ model.auxvars
+            error("Auxiliary `$(sym)` without `t` reference.")
+        elseif haskey(model.parameters, sym)
+            push!(parameters, sym)
+        end
+        return sym
+    end
+    # Main version of process() - it's recursive
+    function process(ex::Expr)
+        if ex.head == :ref
+            # expression is an indexing expression
+            name, index = ex.args
+            if haskey(model.parameters, name)
+                # indexing in a parameter - leave it alone, but keep track
+                push!(parameters, name)
+                return Expr(:ref, name, modelmodule.eval(index))
+            end
+            vind = indexin([name], allvars)[1]  # the index of the variable
+            if vind !== nothing
+                # indexing in a time series 
+                tind = modelmodule.eval(:(let t = 0; $index end))  # the lag or lead value
+                vsym = Symbol("#$name#$tind#")      # replace with a dummy symbol
+                push!(references, (tind, vind) => vsym) # keep track of indexes and dummy symbol
+                if tind > 0  # this isn't really necessary, it's just for pretty printing
+                    return Expr(:ref, name, :(t + $tind))
+                elseif tind < 0
+                    return Expr(:ref, name, :(t - $(-tind)))
+                else
+                    return Expr(:ref, name, :t)
+                end
+            end
+            error("Undefined reference $(ex).")
+        end
+        if ex.head == :(=)
+            # expression is an equation
+            # recursively process the two sides of the equation
+            lhs, rhs = ex.args
+            lhs = process(lhs)
+            rhs = process(rhs)
+            return Expr(:(=), lhs, rhs)
+        end
+        # if we're still here, recursively process the arguments
+        args = map(process, ex.args)
+        # remove `nothing`
+        filter!(args) do a
+            a !== nothing
+        end
+        if ex.head == :call
+            return Expr(:call, args...)
+        end
+        if ex.head == :block && length(args) == 1
+            return args[1]
+        end
+        if ex.head == :incomplete
+            # for incomplete expression, args[1] contains the error message
+            error(ex.args[1])
+        end
+        error("Can't process $(ex).")
+    end
+
+    ##################
+    #    make_residual_expression(expr)
+    # 
+    # Convert a processed equation into an expression that evaluates the residual.
+    # 
+    #  * each mention of a time-reference is replaced with its symbol
+    make_residual_expression(any) = any
+    function make_residual_expression(ex::Expr)
+        if ex.head == :ref
+            name, index = ex.args
+            vind = indexin([name], allvars)[1]
+            if vind !== nothing
+                # The index expression is either t, or t+n or t-n. We made sure of that in process() above.
+                if isa(index, Symbol) && index == :t
+                    tind = 0
+                elseif isa(index, Expr) && index.head == :call && index.args[1] == :- && index.args[2] == :t
+                    tind = -index.args[3]
+                elseif isa(index, Expr) && index.head == :call && index.args[1] == :+ && index.args[2] == :t
+                    tind = +index.args[3]
+                else
+                    error("Unrecognized t-reference expression $index.")
+                end
+                return references[(tind, vind)]
+            end
+        elseif ex.head == :(=)
+            return Expr(:call, :-, map(make_residual_expression, ex.args)...)
+        end
+        return Expr(ex.head, map(make_residual_expression, ex.args)...)
+    end
+
+    # call process() to gather information
+    expr = process(expr)
+    # if source information missing, set from argument
+    if isempty(source)
+        push!(source, line)
+    end
+    # collect the indices and dummy symbols of the mentioned variables
+    # NOTE: Julia documentation assures us that keys() and values() iterate elements of the Dict in the same order!
+    vinds = collect(keys(references))
+    vsyms = collect(values(references))
+    # make a residual expressoin for the eval function
+    residual = make_residual_expression(expr)
+    # add the source information to residual expression
+    residual = Expr(:block, source[1], residual)
+    resid, RJ = let mparams = model.parameters
+        # create a list of expressions that assign the values of model parameters to 
+        # variables of the same name
+        param_assigments = Expr(:block)
+        for p in parameters
+            # pval = mparams[p]
+            # ptype = typeof(pval)
+            pa = Expr(:(=), p, Expr(:ref, :( $(mparams) ), QuoteNode(p)))
+            # pa = :( $(p) = $(mparams[p]) )
+            push!(param_assigments.args, Expr(:local, pa))
+        end
+        funcs_expr = makefuncs(residual, vsyms, param_assigments; mod = modelmodule)
+        modelmodule.eval(funcs_expr)
+    end
+    return Equation(expr, residual, vinds, vsyms, resid, RJ)
+end
+
+
+# we must export this because we call it in the module where the model is being defined
+export add_equation!
+
+"""
+    add_equation!(model::Model, expr::Expr; modelmodule::Module)
+
+Process the given expression in the context of the given module, create
+the Equation() instance for it and add it to the model instance. 
+"""
+
+function add_equation!(model::Model, expr::Expr; modelmodule::Module = moduleof(model))
+    source = LineNumberNode[]
+    auxeqns = Expr[]
+
+    ##################################
+    # We process() the expression looking for substitutions. 
+    # If we find one, we create an auxiliary variable and equation.
+    # We also keep track of line number, so we can label the aux equation as
+    # defined on the same line.
+    # 
+    # We make sure to make a copy of the expression and not to overwrite it. 
+    # 
+    process(any) = any
+    function process(line::LineNumberNode)
+        push!(source, line)
+        return line
+    end
+    function process(expr::Expr)
+        # recursively process all arguments
+        args = []
+        for i in eachindex(expr.args)
+            push!(args, process(expr.args[i]))
+        end
+        if getoption!(model; substitutions = true)
+            if expr.head == :call && args[1] == :log && isa(args[2], Expr)
+                # log(something)
+                aux_expr = process_equation(model, args[2]; modelmodule = modelmodule)
+                if length(aux_expr.vinds) == 0
+                    # something doesn't contain any variables, no need for substitution
+                    return Expr(:call, :log, args[2])
+                end
+                # substitute log(something) with auxN and add equation exp(auxN) = something
+                naux = 1 + length(model.auxvars)
+                auxs = Symbol("aux$(naux)")
+                push!(model.auxvars, auxs)
+                push!(auxeqns, Expr(:(=), Expr(:call, :exp, Expr(:ref, auxs, :t)), args[2]))
+                return Expr(:ref, auxs, :t)
+            end
+        end
+        return Expr(expr.head, args...)
+    end
+
+    new_expr = process(expr)
+    if isempty(source)
+        push!(source, LineNumberNode(0))
+    end
+    eqn = process_equation(model, new_expr; modelmodule = modelmodule, line = source[1])
+    push!(model.equations, eqn)
+    model.maxlag = max(model.maxlag, eqn.maxlag)
+    model.maxlead = max(model.maxlead, eqn.maxlead)
+    for i ∈ eachindex(auxeqns)
+        eqn = process_equation(model, auxeqns[i]; modelmodule = modelmodule, line = source[1])
+        push!(model.auxeqns, eqn)
+        model.maxlag = max(model.maxlag, eqn.maxlag)
+        model.maxlead = max(model.maxlead, eqn.maxlead)
+    end
+    model.evaldata = NoMED
+    return model
+end
+@assert precompile(add_equation!, (Model, Expr))
+
+
+############################
+### Initialization routines
+
+export @initialize
+
+function initialize!(model::Model, modelmodule::Module = moduleof(model))
+    if model.evaldata !== NoMED
+        error("Model already initialized.")
+    end
+    initfuncs(modelmodule)
+    eqns = [e.expr for e in model.equations]
+    empty!(model.equations)
+    empty!(model.auxvars)
+    empty!(model.auxeqns)
+    for e in eqns
+        add_equation!(model, e; modelmodule = modelmodule)
+    end
+    model.evaldata = ModelEvaluationData(model)
+    # initssdata!(model)
+    return nothing
+end
+
+"""
+    @initialize model
+
+Prepare a model instance for analysis. Call this macro after all
+variable names, shock names and equations have been defined.
+"""
+macro initialize(model::Symbol)
+    # thismodule = @__MODULE__
+    # modelmodule = __module__
+    return quote
+        $(@__MODULE__).initialize!($(model))
+    end |> esc
+end
+

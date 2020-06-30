@@ -17,26 +17,26 @@ with the dual-number arythmetic required by ForwardDiff.
 function precompilefuncs(resid, RJ, ::Val{N}) where N
     ccall(:jl_generating_output, Cint, ()) == 1 || return nothing
 
-    tag = ForwardDiff.Tag{resid, Float64}
-    dual = ForwardDiff.Dual{tag, Float64, N}
-    duals = Array{dual, 1}
-    cfg = ForwardDiff.GradientConfig{tag, Float64, N, duals}
-    mdr = DiffResults.MutableDiffResult{1, Float64, Tuple{Array{Float64, 1}}}
+    tag = ForwardDiff.Tag{resid,Float64}
+    dual = ForwardDiff.Dual{tag,Float64,N}
+    duals = Array{dual,1}
+    cfg = ForwardDiff.GradientConfig{tag,Float64,N,duals}
+    mdr = DiffResults.MutableDiffResult{1,Float64,Tuple{Array{Float64,1}}}
 
     precompile(resid, (Array{Float64,1},)) || error("precompile")
     precompile(resid, (duals,)) || error("precompile")
     precompile(RJ, (Array{Float64,1},)) || error("precompile")
 
     for pred in (ForwardDiff.UNARY_PREDICATES ∪ Symbol[:-, :+, :log, :exp]) 
-        pred ∈ (:iseven, :isodd) || precompile(getfield(Base,pred), (Float64,)) || error("precompile")
-        precompile(getfield(Base,pred), (dual,)) || error("precompile")
+        pred ∈ (:iseven, :isodd) || precompile(getfield(Base, pred), (Float64,)) || error("precompile")
+        precompile(getfield(Base, pred), (dual,)) || error("precompile")
     end
 
     for pred in ForwardDiff.BINARY_PREDICATES ∪ Symbol[:+, :-, :*, :/, :^]
-        precompile(getfield(Base,pred), (Float64, Float64)) || error("precompile")
-        precompile(getfield(Base,pred), (dual, Float64)) || error("precompile")
-        precompile(getfield(Base,pred), (Float64, dual)) || error("precompile")
-        precompile(getfield(Base,pred), (dual, dual)) || error("precompile")
+        precompile(getfield(Base, pred), (Float64, Float64)) || error("precompile")
+        precompile(getfield(Base, pred), (dual, Float64)) || error("precompile")
+        precompile(getfield(Base, pred), (Float64, dual)) || error("precompile")
+        precompile(getfield(Base, pred), (dual, dual)) || error("precompile")
     end
 
     precompile(ForwardDiff.extract_gradient!, (Type{tag}, mdr, dual)) || error("precompile")
@@ -70,7 +70,7 @@ let funcsyms_state = 0
 end
 function funcsyms(mod::Module)
     fn1, fn2 = mod.eval(quote
-        let nms = names(@__MODULE__; all=true)
+        let nms = names(@__MODULE__; all = true)
             num = $(@__MODULE__).funcsyms_counter()
             local fn1 = Symbol("resid_$num")
             local fn2 = Symbol("RJ_$num")
@@ -105,12 +105,12 @@ Return a quote block to be evaluated in the module where the model is being defi
 The quote block contains definitions of the residual function and a second function
 that evaluates both the residual and its gradient.
 """
-function makefuncs(expr, vsyms, params_expr=nothing; mod::Module)
+function makefuncs(expr, vsyms, params_expr = nothing; mod::Module)
     fn1, fn2 = funcsyms(mod)
     x = gensym("x")
     nargs = length(vsyms)
     return quote
-        function $fn1($x::AbstractVector{T}) where T<:Real
+        function $fn1($x::AbstractVector{T}) where T <: Real
             ($(vsyms...),) = $x
             $(params_expr)
             $expr
@@ -130,21 +130,23 @@ and thier gradients.
 
 """
 function initfuncs(mod::Module)
-    mod.eval(quote
-        struct MyTag end
-        struct EquationGradient{DR,CFG} <: Function
-            fn1::Function
-            dr::DR
-            cfg::CFG
-        end
-        EquationGradient(fn1::Function, ::Val{N}) where N = EquationGradient(fn1, 
+    if :MyTag ∉ names(mod; all = true)
+        mod.eval(quote
+            struct MyTag end
+            struct EquationGradient{DR,CFG} <: Function
+                fn1::Function
+                dr::DR
+                cfg::CFG
+            end
+            EquationGradient(fn1::Function, ::Val{N}) where N = EquationGradient(fn1, 
                 $(@__MODULE__).DiffResults.DiffResult(zero(Float64), zeros(Float64, N)),
                 $(@__MODULE__).ForwardDiff.GradientConfig(fn1, zeros(Float64, N), $(@__MODULE__).ForwardDiff.Chunk{N}(), MyTag))
-        function (s::EquationGradient)(x::AbstractVector{Float64})
-            $(@__MODULE__).ForwardDiff.gradient!(s.dr, s.fn1, x, s.cfg)
-            return s.dr.value, s.dr.derivs[1]
-        end
-    end)
+            function (s::EquationGradient)(x::AbstractVector{Float64})
+                $(@__MODULE__).ForwardDiff.gradient!(s.dr, s.fn1, x, s.cfg)
+                return s.dr.value, s.dr.derivs[1]
+            end
+        end)
+    end
     return nothing
 end
 
@@ -223,7 +225,7 @@ eval_RJ(point::AbstractMatrix{Float64}, ::NoModelEvaluationData) = throw(ModelNo
 
 The standard model evaluation data used in the general case and by default.
 """
-struct ModelEvaluationData{E <: AbstractEquation, I} <: AbstractModelEvaluationData
+struct ModelEvaluationData{E <: AbstractEquation,I} <: AbstractModelEvaluationData
     alleqns::Vector{E}
     allinds::Vector{I}
     "Placeholder for the Jacobian matrix"
@@ -239,18 +241,18 @@ end
 Create the standard evaluation data structure for the given model.
 """
 function ModelEvaluationData(model::AbstractModel)
-    time0 = 1+model.maxlag
+    time0 = 1 + model.maxlag
     alleqns = model.alleqns
     neqns = length(alleqns)
-    allinds = @timer [[CartesianIndex((time0+ti, vi)) for (ti,vi) in eqn.vinds] for eqn in alleqns]
-    ntimes = 1+model.maxlag+model.maxlead
+    allinds = @timer [[CartesianIndex((time0 + ti, vi)) for (ti, vi) in eqn.vinds] for eqn in alleqns]
+    ntimes = 1 + model.maxlag + model.maxlead
     nvars = length(model.allvars)
     LI = LinearIndices((ntimes, nvars))
-    II = @timer reduce(vcat, (fill(Int64(i), length(eqn.vinds)) for (i,eqn) in enumerate(alleqns)))
+    II = @timer reduce(vcat, (fill(Int64(i), length(eqn.vinds)) for (i, eqn) in enumerate(alleqns)))
     JJ = @timer [LI[inds] for inds in allinds]
-    M = @timer SparseArrays.sparse(II, reduce(vcat, JJ), similar(II), neqns, ntimes*nvars)
+    M = @timer SparseArrays.sparse(II, reduce(vcat, JJ), similar(II), neqns, ntimes * nvars)
     M.nzval .= @timer 1:length(II)
-    rowinds = @timer [copy(M[i,LI[inds]].nzval) for (i,inds) in enumerate(JJ)]
+    rowinds = @timer [copy(M[i,LI[inds]].nzval) for (i, inds) in enumerate(JJ)]
     ModelEvaluationData(alleqns, allinds, similar(M, Float64), Vector{Float64}(undef, neqns), rowinds)
 end
 
