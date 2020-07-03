@@ -85,12 +85,12 @@ Rows are sorted in order of decreasing total time.
 
 See also: [`@timer`](@ref)
 """
-function printtimer(io::IO=Base.stdout)
+function printtimer(io::IO = Base.stdout)
     global timerData    
     if timerData !== nothing
         @printf(io, "%10s  %10s  %s\n", "Calls", "Seconds", "Source")
         items = collect(timerData)
-        items = sort(items, lt=(l,r)->r[2][:seconds]<l[2][:seconds])
+        items = sort(items, lt = (l, r)->r[2][:seconds] < l[2][:seconds])
         for (src, val) ∈ items
             @printf(io, "% 10d  %10.3f  %s\n", val[:calls], val[:seconds], src)
         end
@@ -144,7 +144,7 @@ macro timer(args...)
             local t = time()
             val = $(esc(code))
             t = time() - t
-            local td = get!(timerData, $name, Dict(:calls=>0, :seconds=>0.0))
+            local td = get!(timerData, $name, Dict(:calls => 0, :seconds => 0.0))
             td[:calls] += 1
             td[:seconds] += t
             timerData[$name] = td

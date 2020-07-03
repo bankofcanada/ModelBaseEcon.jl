@@ -52,6 +52,17 @@ mutable struct Model <: AbstractModel
         ModelFlags(), SteadyStateData(), [], [], [], Dict(), Dict(), 0, 0, [], [], NoMED)
 end
 
+
+@inline auxvars(m::Model) = getfield(m, :auxvars)
+@inline nauxvars(m::Model) = length(auxvars(m))
+
+# We have to specialize allvars() nallvars() because we have auxvars here
+@inline allvars(m::Model) = vcat(variables(m), shocks(m), auxvars(m))
+@inline nallvars(m::Model) = length(variables(m)) + length(shocks(m)) + length(auxvars(m))
+
+@inline alleqns(m::Model) = vcat(equations(m), getfield(m, :auxeqns))
+@inline nalleqns(m::Model) = length(equations(m)) + length(getfield(m, :auxeqns))
+
 ################################################################
 # Specialize Options methods to the Model type
 
@@ -622,7 +633,7 @@ function initialize!(model::Model, modelmodule::Module)
         add_equation!(model, e; modelmodule = modelmodule)
     end
     model.evaldata = ModelEvaluationData(model)
-    # initssdata!(model)
+    initssdata!(model)
     return nothing
 end
 
@@ -644,5 +655,7 @@ end
 
 eval_RJ(x::AbstractMatrix{Float64}, m::Model) = eval_RJ(x, m.evaldata)
 eval_R!(r::AbstractVector{Float64}, x::AbstractMatrix{Float64}, m::Model) = eval_R!(r, x, m.evaldata)
-
+@inline printsstate(io::IO, m::Model) = printsstate(io, m.sstate)
+@inline printsstate(m::Model) = printsstate(m.sstate)
+@inline issssolved(m::Model) = issssolved(m.sstate)
 

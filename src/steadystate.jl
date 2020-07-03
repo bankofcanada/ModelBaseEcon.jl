@@ -207,22 +207,22 @@ Create a steady state equation from the given dynamic equation for the given mod
 """
 function make_sseqn(model::AbstractModel, eqn::Equation; shift::Int64 = 0)
     local vinds = Int64[]
-    local nvariables = nvariables(model)
-    local nshocks = nshocks(model)
-    local nauxvars = nauxvars(model)
+    local nvars = nvariables(model)
+    local nshks = nshocks(model)
+    # local nauxvars = nauxvars(model)
     # ssind converts the dynamic index (t, v) into 
     # the corresponding indexes of steady state unknowns. 
     # Returned value is a list of length 0, 1, or 2.
     function ssind((ti, vi), )::Array{Int64,1}
-        if nvariables < vi <= nvariables + nshocks
+        if nvars < vi <= nvars + nshks
             # The mentioned variable is a shock. No steady state unknown for it.
             return []
         else
             # In the dynamic equation the indexing goes - variables, shocks, auxvars
             # In the steady state equation the indexing goes - variables, auxvars
-            # So, if the dynamic variable is an auxvar, we have to subtract nshocks.
-            if vi > nvariables
-                vi -= nshocks
+            # So, if the dynamic variable is an auxvar, we have to subtract nshks.
+            if vi > nvars
+                vi -= nshks
             end
             # The level unknown has index 2*vi-1.
             # The slope unknown has index 2*vi, but it in the equation only if its coefficient is not 0.
@@ -233,11 +233,11 @@ function make_sseqn(model::AbstractModel, eqn::Equation; shift::Int64 = 0)
             end
         end
     end
-    local sstate = sstate(model)
+    local ss = sstate(model)
     # The steady state indexes.
     vinds = unique(vcat(map(ssind, eqn.vinds)...))
     # The corresponding steady state symbols
-    vsyms = sstate.vars[vinds]
+    vsyms = ss.vars[vinds]
     # In the next loop we build the matrix JT which transforms
     # from the steady state values to the dynamic point values. 
     JT = zeros(length(eqn.vinds), length(vinds))
@@ -247,13 +247,13 @@ function make_sseqn(model::AbstractModel, eqn::Equation; shift::Int64 = 0)
         # The coefficient for the level is 1.0 and for the slope is ti+shift.
         # Note that the level is always an unknown, but the slope may not be,
         # depending on whether ti+shift is 0.
-        if nvariables < vi <= nvariables + nshocks
+        if nvars < vi <= nvars + nshks
             # It's a shock, skip it
             continue
         else
-            if vi > nvariables
+            if vi > nvars
                 # It's an aux variable
-                vi -= nshocks
+                vi -= nshks
             end
             vi_lvl = indexin([2vi - 1,], vinds)[1]
             vi_slp = indexin([2vi,], vinds)[1]
@@ -450,3 +450,48 @@ macro steadystate(model, equation::Expr)
 
     return esc(:($(thismodule).setss!($(model), $(Meta.quot(equation)); type = :level))) # , modelmodule=$(modelmodule))))
 end
+
+"""
+    initssdata!(m::AbstractModel)
+
+Initialize the steady state data structure of the given model.
+
+!!! note
+    Do not call directly. This is an internal function, called during [`@initialize`](@ref)
+"""
+function initssdata!(model::AbstractModel)
+    ss = sstate(model)
+    empty!(ss.vars)
+    empty!(ss.values)
+    empty!(ss.mask)
+    shks = Set(shocks(model))
+    for var in allvars(model)
+        if var in shks
+            continue
+        end
+        push!(ss.vars, Symbol("$(var)#lvl"), Symbol("$(var)#slp"))
+        push!(ss.values, 1.0, 0.0)  # default initial guess for level and slope
+        push!(ss.mask, false, false)
+    end
+    empty!(ss.equations)
+    for eqn in alleqns(model)
+        push!(ss.equations, make_sseqn(model, eqn; shift = 0))
+    end
+    if ! model.flags.ssZeroSlope
+        shift = model.options.shift
+        for eqn in alleqns(model)
+            push!(ss.equations, make_sseqn(model, eqn; shift = shift))
+        end
+    end
+    empty!(ss.constraints)
+    return nothing
+end
+
+export issssolved
+"""
+    issssolved(sstate::SteadyStateData)
+
+Return `true` if the steady state has been solved, or `false` otherwise.
+"""
+@inline issssolved(ss::SteadyStateData) = all(ss.mask)
+

@@ -29,18 +29,18 @@ abstract type AbstractModel end
 @inline shocks(m::AM) where AM <: AbstractModel = getfield(m, :shocks)
 @inline nshocks(m::AM) where AM <: AbstractModel = length(shocks(m))
 
-# @inline auxvars(m::AM) where AM <: AbstractModel = getfield(m, :auxvars)
-# @inline nauxvars(m::AM) where AM <: AbstractModel = length(auxvars(m))
-
-# @inline unknowns(m::AM) where AM <: AbstractModel = vcat(variables(m), shocks(m), auxvars(m))
-# @inline nunknonws(m::AM) where AM <: AbstractModel = length(variables(m)) + length(shocks(m)) + length(auxvars(m))
+@inline allvars(m::AM) where AM <: AbstractModel = vcat(variables(m), shocks(m))
+@inline nallvars(m::AM) where AM <: AbstractModel = length(variables(m)) + length(shocks(m))
 
 @inline sstate(m::AM) where AM <: AbstractModel = getfield(m, :sstate)
 
 @inline parameters(m::AM) where AM <: AbstractModel = getfield(m, :parameters)
 
 @inline equations(m::AM) where AM <: AbstractModel = getfield(m, :equations)
-@inline nequations(m::AM) where AM <: AbstractModel =length(equations(m))
+@inline nequations(m::AM) where AM <: AbstractModel = length(equations(m))
+
+@inline alleqns(m::AM) where AM <: AbstractModel = getfield(m, :equations)
+@inline nalleqns(m::AM) where AM <: AbstractModel = length(equations(m))
 
 #######
 

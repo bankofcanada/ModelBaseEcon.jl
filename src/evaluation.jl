@@ -158,6 +158,11 @@ end
 
 Base type for all model evaluation structures.
 Specific derived types would specialize in different types of models.
+
+### Implementaion (for developers)
+Derived types must specialize two functions
+  * [`eval_R!`](@ref) - evaluate the residual
+  * [`eval_RJ`](@ref) - evaluate the residual and its Jacobian
 """
 abstract type AbstractModelEvaluationData end
 

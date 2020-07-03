@@ -12,12 +12,12 @@ msg(::EqnNotReadyError) = "Equation not ready to use."
 hint(::EqnNotReadyError) = "Call `@initialize model` or `add_equation!()` first."
 
 ###############################################
-#
+# 
 
 # Equation expressions typed by the user are of course valid equations, however
 # during processing we use recursive algorithms, with the bottom of the recursion
 # being a Number or a Symbol.  So we need a type that allows these.
-const ExtExpr = Union{Expr, Symbol, Number}
+const ExtExpr = Union{Expr,Symbol,Number}
 
 "Placeholder evaluation function to use in Equation costruction while it is being created"
 @inline eqnnotready(x...) = throw(EqnNotReadyError())
@@ -53,7 +53,7 @@ struct Equation <: AbstractEquation
     `(t, v)`, where `t` is the lag (if negative), 0, or the lead (if positive) and `v` 
     is the index of the variable/shock.
     """
-    vinds::Vector{Tuple{Int64, Int64}}   # (t, v) indices of the relevant variables 
+    vinds::Vector{Tuple{Int64,Int64}}   # (t, v) indices of the relevant variables 
     "Symbols used in `resid` replacing mentions of variables and shocks"
     vsyms::Vector{Symbol}  # symbols representing the relevant variables in resid
     "maximum lag mentioned in `expr`"
@@ -64,7 +64,7 @@ struct Equation <: AbstractEquation
     eval_resid::Function  # function evaluating the residual
     "A callable (function) evaluating the (residual, gradient) pair. Argument is a vector of Float64 same lenght as `vinds`"
     eval_RJ::Function     # Function evaluating the residual and its gradient
-    #
+    # 
     # dummy constructor - just stores the expresstion without any processing
     Equation(expr::ExtExpr) = new(expr, Expr(:block), [], [], 0, 0, eqnnotready, eqnnotready)
     # default constructor
@@ -73,7 +73,7 @@ struct Equation <: AbstractEquation
     # constructor that computes maxlag and maxlead on the fly
     function Equation(expr, resid, vinds, vsyms, eval_resid, eval_RJ) 
         # compute `maxlag` and `maxlead`
-        maxlag, maxlead = (isempty(vinds) ? (0,0) : extrema(v[1] for v in vinds).*(-1, 1))
+        maxlag, maxlead = (isempty(vinds) ? (0, 0) : extrema(v[1] for v in vinds) .* (-1, 1))
         # call the default constructor
         return new(expr, resid, vinds, vsyms, maxlag, maxlead, eval_resid, eval_RJ)
     end

@@ -39,9 +39,9 @@ Options:
 ```
 """
 struct Options 
-    contents::Dict{Symbol, Any}
+    contents::Dict{Symbol,Any}
     # Options() = new(Dict())
-    Options(c::Dict{Symbol, <:Any}) = new(c)
+    Options(c::Dict{Symbol,<:Any}) = new(c)
 end
 
 ############
@@ -54,10 +54,10 @@ end
 Construct an Options instance with key-value pairs given as keyword arguments
 or as a list of pairs.
 """
-Options(; kwargs...) = Options(Dict{Symbol, Any}(kwargs))
+Options(; kwargs...) = Options(Dict{Symbol,Any}(kwargs))
 # Options(pair::Pair{Symbol, T}) where T = Options(Dict(pair))
-Options(pairs::Pair{Symbol, <:Any}...) = Options(Dict(pairs...))
-Options(pairs::Pair{<:AbstractString, <:Any}...) = Options(Dict(Symbol(k)=>v for (k,v) in pairs))
+Options(pairs::Pair{Symbol,<:Any}...) = Options(Dict(pairs...))
+Options(pairs::Pair{<:AbstractString,<:Any}...) = Options(Dict(Symbol(k) => v for (k, v) in pairs))
 
 """
     Options(::Options)
@@ -142,14 +142,14 @@ if the name of the option is not a valid identifier.
 """
 function getoption end
 function getoption(opts::Options; kwargs...)
-    if length(kwargs)==1 
+    if length(kwargs) == 1 
         return get(opts.contents, first(kwargs)...)
     else
         return tuple((get(opts.contents, kv...) for kv in kwargs)...)
     end
 end
 getoption(opts::Options, name::Symbol, default) = get(opts.contents, name, default)
-getoption(opts::Options, name::S where S<:AbstractString, default) = get(opts.contents, Symbol(name), default)
+getoption(opts::Options, name::S where S <: AbstractString, default) = get(opts.contents, Symbol(name), default)
 
 """
     getoption!(o::Options; name=default [, name=default, ...])
@@ -168,14 +168,14 @@ if the name of the option is not a valid identifier.
 """
 function getoption! end
 function getoption!(opts::Options; kwargs...)
-    if length(kwargs)==1 
+    if length(kwargs) == 1 
         return get!(opts.contents, first(kwargs)...)
     else
         return tuple((get!(opts.contents, kv...) for kv in kwargs)...)
     end
 end
 getoption!(opts::Options, name::Symbol, default) = get!(opts.contents, name, default)
-getoption!(opts::Options, name::S where S<:AbstractString, default) = get!(opts.contents, Symbol(name), default)
+getoption!(opts::Options, name::S where S <: AbstractString, default) = get!(opts.contents, Symbol(name), default)
 
 """
     setoption!(o::Options; name=default [, name=default, ...])
@@ -194,7 +194,7 @@ if the name of the option is not a valid identifier.
 """
 function setoption! end
 setoption!(opts::Options; kwargs...) = (push!(opts.contents, kwargs...); opts)
-setoption!(opts::Options, name::S where S<:AbstractString, value) = (push!(opts.contents, Symbol(name) => value); opts)
+setoption!(opts::Options, name::S where S <: AbstractString, value) = (push!(opts.contents, Symbol(name) => value); opts)
 setoption!(opts::Options, name::Symbol, value) = (push!(opts.contents, name => value); opts)
 
 ############
