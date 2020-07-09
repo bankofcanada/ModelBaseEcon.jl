@@ -48,15 +48,45 @@ struct SteadyStateData
     SteadyStateData() = new([], [], [], [], [])
 end
 
-export alleqn
+export alleqns
 """
-    alleqn(ssd::SteadyStateData)
+    alleqns(ssd::SteadyStateData)
 
 Return a list of all steady state equations. 
 
 The list contains all equations derived from the dynamic system and all explicitly added steady state constraints.
 """
-@inline alleqn(ssd::SteadyStateData) = vcat(ssd.equations, ssd.constraints)
+@inline alleqns(ssd::SteadyStateData) = vcat(ssd.equations, ssd.constraints)
+
+export neqns
+"""
+    neqns(ssd::SteadyStateData)
+
+Return the total number of equations in the steady state system, including the ones derived from the dynamic system and the
+ones added explicitly as steady state constraints.
+"""
+@inline neqns(ssd::SteadyStateData) = length(ssd.equations) + length(ssd.constraints)
+
+export geteqn
+"""
+    geteqn(i, ssd::SteadyStateData)
+
+Return the i-th steady state equation. Index i is interpreted as in the output of `alleqns`.
+Calling `geteqn(i, sdd)` has the same effect as `alleqn(ssd)[i]`, but it's more efficient.
+
+### Example
+```julia
+# Iterate all equations like this:
+for i = 1:neqns(ssd)
+    eqn = geteqn(i, ssd)
+    # do something awesome with `eqn` and `i`
+end
+```
+"""
+function geteqn(i::Integer, ssd::SteadyStateData)
+    ci = i - length(ssd.equations)
+    return ci > 0 ? ssd.constraints[ci] : ssd.equations[i]
+end
 
 Base.show(io::IO, ssd::SteadyStateData) = print(io, length(ssd.constraints), " Steady State Constraints:\n    ", join(ssd.constraints, "\n    "))
 
@@ -413,10 +443,9 @@ function setss!(model::AbstractModel, expr::Expr; type::Symbol,
                 return sscon
             end
         end
-    else
-        push!(ss.constraints, sscon)
-        return sscon
     end
+    push!(ss.constraints, sscon)
+    return sscon
 end
 
 

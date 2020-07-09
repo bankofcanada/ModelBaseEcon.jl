@@ -198,16 +198,17 @@ function Base.show(io::IO, model::Model)
     nvarshk = nvar + nshk
     if nvar == nshk == nprm == neqn == 0
         print(io, "Empty model")
-    elseif !get(io, :compact, true) && nvar < 20 && nshk < 20 && neqn < 20
-        # full print
-        fullprint(io, model)
-        println(io, "Maximum lag: ", model.maxlag)
-        println(io, "Maximum lead: ", model.maxlead)
-    else  # compact print
+    elseif get(io, :compact, false) || nvar + nshk > 20 || neqn > 20
+        # compact print
         print(io, nvar, " variable(s), ")
         print(io, nshk, " shock(s), ")
         print(io, nprm, " parameter(s), ")
         print(io, neqn, " equations(s) with ", length(model.auxeqns), " auxiliary equations.")
+    else  
+        # full print
+        fullprint(io, model)
+        println(io, "Maximum lag: ", model.maxlag)
+        println(io, "Maximum lead: ", model.maxlead)
     end
     return nothing
 end
@@ -659,3 +660,57 @@ eval_R!(r::AbstractVector{Float64}, x::AbstractMatrix{Float64}, m::Model) = eval
 @inline printsstate(m::Model) = printsstate(m.sstate)
 @inline issssolved(m::Model) = issssolved(m.sstate)
 
+##########################
+
+export update_auxvars
+"""
+    update_auxvars(point, model; tol=model.tol, default=0.0)
+
+Calculate the values of auxiliary variables from the given values of regular variables and shocks.
+
+Auxiliary variables were introduced as substitutions, e.g. log(expression) was replaced by aux1 and
+equation was added exp(aux1) = expression, where expression contains regular variables and shocks.
+
+This function uses the auxiliary equation to compute the value of the auxiliary variable for the
+given values of other variables. Note that the given values of other variables might be inadmissible, 
+in the sense that expression is negative. If that happens, the auxiliary variable is set to the given 
+`default` value.
+
+If the `point` array does not contain space for the auxiliary variables, it is extended appropriately.
+
+If there are no auxiliary variables/equations in the model, return *a copy* of `point`.
+
+!!! note
+    The current implementation is specialized only to log substitutions.
+    TODO: implement a general approach that would work for any substitution.
+"""
+function update_auxvars(data::AbstractArray{Float64,2}, model::Model; 
+                tol::Float64 = model.options.tol, default::Float64 = 0.0
+)
+    nauxs = length(model.auxvars)
+    if nauxs == 0
+        return copy(data)
+    end
+    (nt, nv) = size(data)
+    nvarshk = length(model.variables) + length(model.shocks)
+    if nv ∉ (nvarshk, nvarshk + nauxs)
+        error("Incorrect number of columns $nv. Expected $nvarshk or $(nvarshk + nauxs).")
+    end
+    mintimes = 1 + model.maxlag + model.maxlead
+    if nt < mintimes
+        error("Insufficient time periods $nt. Expected $mintimes or more.")
+    end
+    result = [data[:,1:nvarshk] zeros(nt, length(model.auxvars))]
+    for (i, eqn) in enumerate(model.auxeqns)
+        for t in (model.maxlag + 1):(nt - model.maxlead)
+            idx = [CartesianIndex((t + ti, vi)) for (ti, vi) in eqn.vinds]
+            res = eqn.eval_resid(result[idx])
+            if res < 1.0
+                result[t, nvarshk + i] = log(1.0 - res)
+            else
+                result[t, nvarshk + i] = default
+            end
+        end
+    end
+    return result
+end

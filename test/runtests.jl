@@ -61,9 +61,16 @@ end
 end
 
 @testset "M1.sstate" begin
-    @test issssolved(M1.model) == false
-    M1.model.sstate.mask .= true
-    @test issssolved(M1.model) == true
+    let m = M1.model
+        @test issssolved(m) == false
+        M1.model.sstate.mask .= true
+        @test issssolved(m) == true
+        @test neqns(m.sstate) == 2
+        @steadystate m y = 5
+        @test length(m.sstate.constraints) == 1
+        @test neqns(m.sstate) == 3
+        @test length(alleqns(m.sstate)) == 3
+    end
 end
 
 @testset "M1.lin" begin
@@ -93,6 +100,34 @@ end
         end
     end
 end
+
+
+module AUX
+using ModelBaseEcon
+model = Model()
+@variables model x y
+@equations model begin
+    x[t + 1] = log(x[t] - x[t - 1])
+    y[t + 1] = y[t] + log(y[t - 1])
+end
+@initialize model
+end
+@testset "AUX" begin
+    let m = AUX.model
+        @test m.nvars == 2
+        @test m.nshks == 0
+        @test m.nauxs == 2
+        @test length(m.auxeqns) == 2
+        x = ones(2, 2)
+        @test_throws ErrorException update_auxvars(x, m)
+        x = 2 .* ones(4, 2)
+        ax = update_auxvars(x, m; default = 0.1)
+        @test size(ax) == (4, 4)
+        @test x == ax[:, 1:2]
+        @test ax[:, 3:4] == [0.0 0.0; 0.1 log(2.0); 0.1 log(2.0); 0.0 0.0]
+    end
+end
+
 
 @using_example M2
 @testset "M2" begin
