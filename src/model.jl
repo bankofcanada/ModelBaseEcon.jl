@@ -662,7 +662,7 @@ eval_R!(r::AbstractVector{Float64}, x::AbstractMatrix{Float64}, m::Model) = eval
 
 ##########################
 
-export update_auxvars
+# export update_auxvars
 """
     update_auxvars(point, model; tol=model.tol, default=0.0)
 
