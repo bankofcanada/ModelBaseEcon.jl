@@ -119,9 +119,9 @@ end
         @test m.nauxs == 2
         @test length(m.auxeqns) == 2
         x = ones(2, 2)
-        @test_throws ErrorException update_auxvars(x, m)
+        @test_throws ErrorException ModelBaseEcon.update_auxvars(x, m)
         x = 2 .* ones(4, 2)
-        ax = update_auxvars(x, m; default = 0.1)
+        ax = ModelBaseEcon.update_auxvars(x, m; default = 0.1)
         @test size(ax) == (4, 4)
         @test x == ax[:, 1:2]
         @test ax[:, 3:4] == [0.0 0.0; 0.1 log(2.0); 0.1 log(2.0); 0.0 0.0]
