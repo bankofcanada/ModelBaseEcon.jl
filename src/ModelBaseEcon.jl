@@ -19,8 +19,6 @@ export @timer, inittimer, stoptimer, printtimer
 
 # The Options submodule
 include("Options.jl")
-using .OptionsMod
-export Options, getoption, getoption!, setoption!
 
 # The "misc" - various types and functions
 include("misc.jl")

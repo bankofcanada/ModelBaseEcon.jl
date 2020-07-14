@@ -204,3 +204,6 @@ Base.in(name, o::Options) = Symbol(name) ∈ keys(o.contents)
 Base.keys(o::Options) = keys(o.contents)
 Base.values(o::Options) = values(o.contents)
 end # module
+
+using .OptionsMod
+export Options, getoption, getoption!, setoption!

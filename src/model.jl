@@ -103,7 +103,7 @@ function Base.getproperty(model::Model, name::Symbol)
         return getindex(getfield(model, :parameters), name)
     elseif name ∈ getfield(model, :options)
         return getoption(model, name, nothing)
-    elseif name ∈ fieldnames(getfield(model, :flags))
+    elseif name ∈ fieldnames(ModelFlags)
         return getfield(getfield(model, :flags), name)
     else
         error("type Model has no property $name")
