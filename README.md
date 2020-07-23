@@ -1,3 +1,5 @@
+[![Build Status](https://travis-ci.com/bankofcanada/ModelBaseEcon.jl.svg?token=YqWsQuowmx6VN8LWn3m7&branch=master)](https://travis-ci.com/bankofcanada/ModelBaseEcon.jl)
+
 # ModelBaseEcon
 
 This package is part of the StateSpaceEcon ecosystem.
