@@ -22,6 +22,6 @@ makedocs(sitename = "ModelBaseEcon.jl",
     ]
 )
 
-# deploydocs(
-#     repo = "github.com/bankofcanada/ModelBaseEcon.jl.git",
-# )
+deploydocs(
+    repo = "github.com/bankofcanada/ModelBaseEcon.jl.git",
+)
