@@ -11,8 +11,8 @@ Abstract error type, base for specific error types used in ModelBaseEcon.
 # Implementation (note for developers)
 
 When implementing a derived error type, override two functions: 
-  * [`msg(e::SomeModelError)`](@ref) returning a string with the error message;
-  * [`hint(e::SomeModelError)`](@ref) returning a string containing a suggestion
+  * [`msg(e::SomeModelError)`](@ref msg) returning a string with the error message;
+  * [`hint(e::SomeModelError)`](@ref hint) returning a string containing a suggestion
     of how to fix the problem. Optional, if not implemented for a type, the fallback
     implementation returns an empty string.
 
