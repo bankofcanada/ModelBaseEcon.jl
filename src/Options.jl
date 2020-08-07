@@ -2,6 +2,13 @@
     OptionsMod
 
 Sub-module of ModelBaseEcon, although it can be used independently.
+Implements the [`Options`](@ref) data structure.
+
+## Contents
+  * [`Options`](@ref)
+  * [`getoption`](@ref) - read the value of an option
+  * [`getoption!`](@ref) - if not present, also create an option
+  * [`setoption!`](@ref) - create or update the value of an option 
 
 """
 module OptionsMod
@@ -12,14 +19,16 @@ export Options, getoption, getoption!, setoption!
     Options
 
 A collection of key-value pairs representing the options controlling the
-behaviour or the definition of a Model object. The key is the option name 
-and is always a Symbol, or converted to Symbol, while the value can be anything.
+behaviour or the definition of a Model object. The key is the option name and is
+always a Symbol, or converted to Symbol, while the value can be anything.
 
-The options can be accessed using dot notation. Functions `getoption` and
-`setoption` are also provided. They can be used for programmatic processing
-of options as well as when the option name is not a valid Julia identifier.
+The options can be accessed using dot notation. Functions [`getoption`](@ref)
+and [`setoption!`](@ref) are also provided. They can be used for programmatic
+processing of options as well as when the option name is not a valid Julia
+identifier.
 
-See also: [`Options`](@ref), [`getoption`](@ref), [`getoption!`](@ref), [`setoption`](@ref)
+See also: [`Options`](@ref), [`getoption`](@ref), [`getoption!`](@ref),
+[`setoption!`](@ref)
 
 # Examples
 ```jldoctest
@@ -49,10 +58,10 @@ end
 
 """
     Options(key=value, ...)
-    Options(key=>value, ...)
+    Options(:key=>value, ...)
 
-Construct an Options instance with key-value pairs given as keyword arguments
-or as a list of pairs.
+Construct an Options instance with key-value pairs given as keyword arguments or
+as a list of pairs. If the latter is used, each key must be a `Symbol`.
 """
 Options(; kwargs...) = Options(Dict{Symbol,Any}(kwargs))
 # Options(pair::Pair{Symbol, T}) where T = Options(Dict(pair))
@@ -64,7 +73,7 @@ Options(pairs::Pair{<:AbstractString,<:Any}...) = Options(Dict(Symbol(k) => v fo
 
 Construct an Options instance as an exact copy of an existing instance.
 """
-Options(opts::Options) = Options(Dict(opts.contents))
+Options(opts::Options) = Options(deepcopy(Dict(opts.contents)))
     
 ############
 # merge
@@ -155,16 +164,16 @@ getoption(opts::Options, name::S where S <: AbstractString, default) = get(opts.
     getoption!(o::Options; name=default [, name=default, ...])
     getoption!(o::Options, name, default)
 
-Retrieve the value of an option or a set of options. If the name does not
-match an existing option, the Options instance is updated by inserting
-the given name and default value.
+Retrieve the value of an option or a set of options. If the name does not match
+an existing option, the Options instance is updated by inserting the given name
+and default value.
 
-The return value is the value of the option requested (or the default).
-In the first version of the function, if there are more than
-one options requested, the return value is a tuple.
+The return value is the value of the option requested (or the default). In the
+first version of the function, if there are more than one options requested, the
+return value is a tuple.
 
-In the second version, the name could be a symbol or a string, which can be helpful
-if the name of the option is not a valid identifier.
+In the second version, the name could be a symbol or a string, which can be
+helpful if the name of the option is not a valid identifier.
 """
 function getoption! end
 function getoption!(opts::Options; kwargs...)
@@ -181,16 +190,16 @@ getoption!(opts::Options, name::S where S <: AbstractString, default) = get!(opt
     setoption!(o::Options; name=default [, name=default, ...])
     setoption!(o::Options, name, default)
 
-Retrieve the value of an option or a set of options. If the name does not
-match an existing option, the Options instance is updated by inserting
-the given name and default value.
+Retrieve the value of an option or a set of options. If the name does not match
+an existing option, the Options instance is updated by inserting the given name
+and default value.
 
-The return value is the value of the option requested (or the default).
-In the first version of the function, if there are more than
-one options requested, the return value is a tuple.
+The return value is the value of the option requested (or the default). In the
+first version of the function, if there are more than one options requested, the
+return value is a tuple.
 
-In the second version, the name could be a symbol or a string, which can be helpful
-if the name of the option is not a valid identifier.
+In the second version, the name could be a symbol or a string, which can be
+helpful if the name of the option is not a valid identifier.
 """
 function setoption! end
 setoption!(opts::Options; kwargs...) = (push!(opts.contents, kwargs...); opts)

@@ -10,28 +10,28 @@ Abstract error type, base for specific error types used in ModelBaseEcon.
 
 # Implementation (note for developers)
 
-When implementing a derived error type, override two functions: 
-  * [`msg(e::SomeModelError)`](@ref msg) returning a string with the error message;
-  * [`hint(e::SomeModelError)`](@ref hint) returning a string containing a suggestion
-    of how to fix the problem. Optional, if not implemented for a type, the fallback
+When implementing a derived error type, override two functions:
+  * `msg(e::SomeModelError)` returning a string with the error message;
+  * `hint(e::SomeModelError)` returning a string containing a suggestion of how
+    to fix the problem. Optional, if not implemented for a type, the fallback
     implementation returns an empty string.
 
 """
 abstract type ModelErrorBase <: Exception end
 export ModelErrorBase
 """
-    msg(::ME) where ME <: ModelErrorBase
+    msg(::ModelErrorBase)
 
 Return the error message - a description of what went wrong.
 """
-msg(::ME) where ME <: ModelErrorBase = "Unknown error"
+msg(::ModelErrorBase) = "Unknown error"
 
 """
-    hint(::ME) where ME <: ModelErrorBase
+    hint(::ModelErrorBase)
 
 Return the hint message - a suggestion of how the problem might be fixed.
 """
-hint(::ME) where ME <: ModelErrorBase = ""
+hint(::ModelErrorBase) = ""
 
 function Base.showerror(io::IO, me::ME) where ME <: ModelErrorBase
     # MEstr = split("$(ME)", ".")[end]
@@ -52,7 +52,7 @@ Concrete error type used when no specific error description is available.
 struct ModelError <: ModelErrorBase end
 export ModelError
 
-@inline modelerror(ME::Type{<:ModelErrorBase} = ModelError, args...; kwargs...) = throw(ME(args...; kwargs...))
+@inline modelerror(ME::Type{<:ModelErrorBase}=ModelError, args...; kwargs...) = throw(ME(args...; kwargs...))
 
 
 """
