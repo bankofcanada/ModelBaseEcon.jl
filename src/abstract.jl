@@ -42,6 +42,11 @@ abstract type AbstractModel end
 @inline alleqns(m::AM) where AM <: AbstractModel = getfield(m, :equations)
 @inline nalleqns(m::AM) where AM <: AbstractModel = length(equations(m))
 
+export parameters
+export variables, nvariables
+export shocks, nshocks
+export equations, nequations
+export sstate
 #######
 
 

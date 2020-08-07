@@ -88,8 +88,22 @@ function geteqn(i::Integer, ssd::SteadyStateData)
     return ci > 0 ? ssd.constraints[ci] : ssd.equations[i]
 end
 
-Base.show(io::IO, ssd::SteadyStateData) = print(io, length(ssd.constraints), " Steady State Constraints:\n    ", join(ssd.constraints, "\n    "))
-
+Base.show(io::IO, ::MIME"text/plain", ssd::SteadyStateData) = show(io, ssd)
+Base.show(io::IO, ssd::SteadyStateData) = begin
+    if issssolved(ssd)
+        println(io, "Steady state solved.")
+    else
+        println(io, "Steady state not solved.")
+    end
+    if isempty(ssd.constraints)
+        println(io, "No additional constraints.")
+    else
+        println(io, length(ssd.constraints), " additional constraints.")
+        for c in ssd.constraints
+            println(io, "    ", c)
+        end
+    end
+end
 
 #####
 # These are used for indexing in the values vector
