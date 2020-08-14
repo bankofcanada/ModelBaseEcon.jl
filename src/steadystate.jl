@@ -176,8 +176,16 @@ function Base.setindex!(sstate::SteadyStateData, val, var::Symbol)
         throw(SSMissingVariableError(v))
     elseif val isa Number
         sstate.values[ind] = val
+    elseif val isa NamedTuple
+        if :level in keys(val)
+            sstate.values[ind] = val.level
+        end
+        if :slope in keys(val)
+            sstate.values[ind+1] = val.slope
+        end
     else
-        sstate.values[ind:ind+1] .= val[1:2]
+        sstate.values[ind] = val[1]
+        sstate.values[ind+1] = val[2]
     end
 end
 

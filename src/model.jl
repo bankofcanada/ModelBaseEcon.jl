@@ -15,7 +15,8 @@ mutable struct ModelFlags
     ModelFlags() = new(false, false)
 end
 
-Base.show(io::IO, ::MIME"text/plain", flags::ModelFlags) = begin
+Base.show(io::IO, ::MIME"text/plain", flags::ModelFlags) = show(io, flags)
+function Base.show(io::IO, flags::ModelFlags)
     names, values = [], []
     for f in fieldnames(ModelFlags)
         push!(names, string(f))
