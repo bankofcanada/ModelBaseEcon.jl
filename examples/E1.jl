@@ -3,7 +3,7 @@
 Simplest example of model with 1 variable, 1 shock and 1 transition equation.
 It shows the boilerplate code for creating models.
 """
-module M1
+module E1
 
 using ModelBaseEcon
 

@@ -1,9 +1,9 @@
 
 """
 Simple model with 3 variables, 3 shocks and 3 transition equations.
-Like M2, but with more lags/leads.
+Like E2, but with more lags/leads.
 """
-module  M3
+module  E3
 
 using ModelBaseEcon
 

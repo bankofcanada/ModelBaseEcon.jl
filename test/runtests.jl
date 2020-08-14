@@ -66,22 +66,22 @@ function compare_RJ_R!_(m::Model)
     @test R ≈ S
 end
 
-@using_example M1
-@testset "M1" begin
-    @test length(M1.model.parameters) == 2
-    @test length(M1.model.variables) == 1
-    @test length(M1.model.shocks) == 1
-    @test length(M1.model.equations) == 1
-    @test M1.model.maxlag == 1
-    @test M1.model.maxlead == 1
-    test_eval_RJ(M1.model, [0.0], [-0.5 1.0 -0.5 0.0 -1.0 0.0])
-    compare_RJ_R!_(M1.model)
+@using_example E1
+@testset "E1" begin
+    @test length(E1.model.parameters) == 2
+    @test length(E1.model.variables) == 1
+    @test length(E1.model.shocks) == 1
+    @test length(E1.model.equations) == 1
+    @test E1.model.maxlag == 1
+    @test E1.model.maxlead == 1
+    test_eval_RJ(E1.model, [0.0], [-0.5 1.0 -0.5 0.0 -1.0 0.0])
+    compare_RJ_R!_(E1.model)
 end
 
-@testset "M1.sstate" begin
-    let m = M1.model
+@testset "E1.sstate" begin
+    let m = E1.model
         @test issssolved(m) == false
-        M1.model.sstate.mask .= true
+        E1.model.sstate.mask .= true
         @test issssolved(m) == true
         @test neqns(m.sstate) == 2
         @steadystate m y = 5
@@ -91,8 +91,8 @@ end
     end
 end
 
-@testset "M1.lin" begin
-    m = deepcopy(M1.model)
+@testset "E1.lin" begin
+    m = deepcopy(E1.model)
     with_linearized(m) do lm
         @test islinearized(lm)
         test_eval_RJ(lm, [0.0], [-0.5 1.0 -0.5 0.0 -1.0 0.0])
@@ -108,8 +108,8 @@ end
     @test islinearized(m)
 end
 
-@testset "M1.params" begin
-    let m = M1.model
+@testset "E1.params" begin
+    let m = E1.model
         for α = 0.0:0.1:1.0
             β = 1.0 - α
             m.α = α
@@ -147,24 +147,23 @@ end
 end
 
 
-@using_example M2
-@testset "M2" begin
-    @test length(M2.model.parameters) == 3
-    @test length(M2.model.variables) == 3
-    @test length(M2.model.shocks) == 3
-    @test length(M2.model.equations) == 3
-    @test M2.model.maxlag == 1
-    @test M2.model.maxlead == 1
-    test_eval_RJ(M2.model, [0.0, 0.0, 0.0], 
+@using_example E2
+@testset "E2" begin
+    @test length(E2.model.parameters) == 3
+    @test length(E2.model.variables) == 3
+    @test length(E2.model.shocks) == 3
+    @test length(E2.model.equations) == 3
+    @test E2.model.maxlag == 1
+    @test E2.model.maxlead == 1
+    test_eval_RJ(E2.model, [0.0, 0.0, 0.0], 
         [-.5      1  -.48     0    0  0    0   -.02     0  0  -1  0  0  0 0 0  0 0;
            0  -.375     0  -.75    1  0    0  -.125     0  0   0  0  0 -1 0 0  0 0;
            0      0  -.02     0  .02  0  -.5      1  -.48  0   0  0  0  0 0 0 -1 0])
-    compare_RJ_R!_(M2.model)
+    compare_RJ_R!_(E2.model)
 end
 
-
 @testset "sstate" begin
-    m = M2.model
+    m = E2.model
     ss = m.sstate
     empty!(ss.constraints)
     out = let io = IOBuffer()
@@ -191,18 +190,16 @@ end
     @test ss[:rate].level == 21 && ss["rate"].slope == 0.21
 end
 
-
-
-@using_example M3
-@testset "M3" begin
-    @test length(M3.model.parameters) == 3
-    @test length(M3.model.variables) == 3
-    @test length(M3.model.shocks) == 3
-    @test length(M3.model.equations) == 3
-    @test M3.model.maxlag == 2
-    @test M3.model.maxlead == 3
-    compare_RJ_R!_(M3.model)
-    test_eval_RJ(M3.model, [0.0, 0.0, 0.0], 
+@using_example E3
+@testset "E3" begin
+    @test length(E3.model.parameters) == 3
+    @test length(E3.model.variables) == 3
+    @test length(E3.model.shocks) == 3
+    @test length(E3.model.equations) == 3
+    @test E3.model.maxlag == 2
+    @test E3.model.maxlead == 3
+    compare_RJ_R!_(E3.model)
+    test_eval_RJ(E3.model, [0.0, 0.0, 0.0], 
         sparse(
             [1, 1, 2, 1, 3, 1, 1, 2, 2, 3,  3,  3,  1,  2,  3,  3,  1,  2,  3],
             [2, 3, 3, 4, 4, 5, 6, 8, 9, 9, 13, 14, 15, 15, 15, 16, 21, 27, 33],
@@ -213,17 +210,17 @@ end
     )
 end
 
-@using_example M6
-@testset "M6" begin
-    @test length(M6.model.parameters) == 2
-    @test length(M6.model.variables) == 6
-    @test length(M6.model.shocks) == 2
-    @test length(M6.model.equations) == 6
-    @test M6.model.maxlag == 2
-    @test M6.model.maxlead == 3
-    compare_RJ_R!_(M6.model)
-    nt = 1 + M6.model.maxlag + M6.model.maxlead
-    test_eval_RJ(M6.model, [-0.0027, -0.0025, 0.0, 0.0, 0.0, 0.0], 
+@using_example E6
+@testset "E6" begin
+    @test length(E6.model.parameters) == 2
+    @test length(E6.model.variables) == 6
+    @test length(E6.model.shocks) == 2
+    @test length(E6.model.equations) == 6
+    @test E6.model.maxlag == 2
+    @test E6.model.maxlead == 3
+    compare_RJ_R!_(E6.model)
+    nt = 1 + E6.model.maxlag + E6.model.maxlead
+    test_eval_RJ(E6.model, [-0.0027, -0.0025, 0.0, 0.0, 0.0, 0.0], 
         sparse(
             [2, 2, 2, 3, 5, 2, 2, 2, 1, 1, 3, 4, 1, 3, 6, 5, 5, 4, 4, 6, 6, 2, 1],
             [1, 2, 3, 3, 3, 4, 5, 6, 8, 9, 9, 9, 10, 15, 15, 20, 21, 26, 27, 32, 33, 39, 45],
