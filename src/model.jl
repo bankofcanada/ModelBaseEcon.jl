@@ -10,8 +10,23 @@ const defaultoptions = Options(
 )
 
 mutable struct ModelFlags
+    linear::Bool
     ssZeroSlope::Bool
-    ModelFlags() = new(false)
+    ModelFlags() = new(false, false)
+end
+
+Base.show(io::IO, ::MIME"text/plain", flags::ModelFlags) = show(io, flags)
+function Base.show(io::IO, flags::ModelFlags)
+    names, values = [], []
+    for f in fieldnames(ModelFlags)
+        push!(names, string(f))
+        push!(values, getfield(flags, f))
+    end
+    align = maximum(length, names) + 3
+    println(io, "ModelFlags")
+    for (n, v) in zip(names, values)
+        println(io, lpad(n, align), " = ", v)
+    end
 end
 
 """

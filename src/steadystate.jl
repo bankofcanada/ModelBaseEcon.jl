@@ -88,8 +88,22 @@ function geteqn(i::Integer, ssd::SteadyStateData)
     return ci > 0 ? ssd.constraints[ci] : ssd.equations[i]
 end
 
-Base.show(io::IO, ssd::SteadyStateData) = print(io, length(ssd.constraints), " Steady State Constraints:\n    ", join(ssd.constraints, "\n    "))
-
+Base.show(io::IO, ::MIME"text/plain", ssd::SteadyStateData) = show(io, ssd)
+Base.show(io::IO, ssd::SteadyStateData) = begin
+    if issssolved(ssd)
+        println(io, "Steady state solved.")
+    else
+        println(io, "Steady state not solved.")
+    end
+    if isempty(ssd.constraints)
+        println(io, "No additional constraints.")
+    else
+        println(io, length(ssd.constraints), " additional constraints.")
+        for c in ssd.constraints
+            println(io, "    ", c)
+        end
+    end
+end
 
 #####
 # These are used for indexing in the values vector
@@ -107,6 +121,31 @@ struct SSMissingVariableError <: ModelErrorBase
 end
 msg(me::SSMissingVariableError) = "Steady state variable $(me.var) not found."
 
+struct SSVarData{DATA <: AbstractVector{Float64}}
+    name::Symbol
+    index::Int
+    value::DATA
+end
+
+Base.propertynames(::SSVarData) = (:level, :slope)
+Base.getproperty(vd::SSVarData, prop::Symbol) = prop == :level ? getfield(vd, :value)[1] : 
+                                                prop == :slope ? getfield(vd, :value)[2] : 
+                                                                 getfield(vd, prop)
+Base.setproperty!(vd::SSVarData, prop::Symbol, val) = prop == :level ? setindex!(getfield(vd, :value), val, 1) :
+                                                      prop == :slope ? setindex!(getfield(vd, :value), val, 2) :
+                                                                       setfield!(vd, prop, val)
+
+Base.getindex(vd::SSVarData, i::Int) = getindex(vd.value, i)
+Base.getindex(vd::SSVarData, s::Symbol) = getproperty(vd, s)
+Base.getindex(vd::SSVarData, s::AbstractString) = getproperty(vd, Symbol(s))
+Base.setindex!(vd::SSVarData, val, i::Int) = setindex!(vd.value, val, i)
+Base.setindex!(vd::SSVarData, val, s::Symbol) = setproperty!(vd, s, val)
+Base.setindex!(vd::SSVarData, val, s::AbstractString) = setproperty!(vd, Symbol(s), val)
+
+
+Base.show(io::IO, ::MIME"text/plan", vd::SSVarData) = show(io, vd)
+Base.show(io::IO, vd::SSVarData) = print(io, vd.name, " : ", NamedTuple{(:level, :slope)}(vd.value))
+
 # ssvarindex() - return the index of a steady state value given its Symbol
 # If the symbol might end in #lvl or #slp, if not #lvl is assumed
 function ssvarindex(v::Symbol, vars::AbstractArray{Symbol})
@@ -121,10 +160,34 @@ function ssvarindex(v::Symbol, vars::AbstractArray{Symbol})
 end
 
 @inline Base.getindex(sstate::SteadyStateData, var::String) = getindex(sstate, Symbol(var))
-Base.getindex(sstate::SteadyStateData, var::Symbol) = getindex(getfield(sstate, :values), ssvarindex(var, sstate.vars))
+function Base.getindex(sstate::SteadyStateData, var::Symbol)
+    ind = indexin([Symbol("$var#lvl")], sstate.vars)[1]
+    if ind === nothing
+        throw(SSMissingVariableError(var))
+    else
+        return SSVarData(var, ind, view(sstate.values, ind:ind+1))
+    end
+end
 
 Base.setindex!(sstate::SteadyStateData, val, var::String) = setindex!(sstate, val, Symbol(var))
-Base.setindex!(sstate::SteadyStateData, val, var::Symbol) = setindex!(getfield(sstate, :values), val, ssvarindex(var, sstate.vars))
+function Base.setindex!(sstate::SteadyStateData, val, var::Symbol) 
+    ind = indexin([Symbol("$var#lvl")], sstate.vars)[1]
+    if ind === nothing
+        throw(SSMissingVariableError(v))
+    elseif val isa Number
+        sstate.values[ind] = val
+    elseif val isa NamedTuple
+        if :level in keys(val)
+            sstate.values[ind] = val.level
+        end
+        if :slope in keys(val)
+            sstate.values[ind+1] = val.slope
+        end
+    else
+        sstate.values[ind] = val[1]
+        sstate.values[ind+1] = val[2]
+    end
+end
 
 ########
 # Implement access to steady state values using dot notation
