@@ -2,7 +2,7 @@
 """
     Model for testing steady state solver with linear growth variables.
 """
-module M6
+module E6
 
 using ModelBaseEcon
 
