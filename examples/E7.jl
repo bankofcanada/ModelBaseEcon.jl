@@ -2,7 +2,7 @@
 """
     Model for testing steady state solver with non-linear equations
 """
-module M7
+module E7
 
 using ModelBaseEcon
 

@@ -1,8 +1,8 @@
 
 """
-    A version of M7 for testing linearization
+    A version of E7 for testing linearization
 """
-module M7A
+module E7A
 
 using ModelBaseEcon
 
