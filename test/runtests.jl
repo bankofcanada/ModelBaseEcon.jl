@@ -76,6 +76,14 @@ end
     @test E1.model.maxlead == 1
     test_eval_RJ(E1.model, [0.0], [-0.5 1.0 -0.5 0.0 -1.0 0.0])
     compare_RJ_R!_(E1.model)
+    @test E1.model.tol == E1.model.options.tol
+    tol = E1.model.tol
+    E1.model.tol = tol * 10
+    @test E1.model.options.tol == E1.model.tol
+    E1.model.tol = tol
+    @test E1.model.linear == E1.model.flags.linear
+    E1.model.linear = true
+    @test E1.model.linear
 end
 
 @testset "E1.sstate" begin
@@ -110,15 +118,21 @@ end
 
 @testset "E1.params" begin
     let m = E1.model
+        @test propertynames(m.parameters) == (:α, :β)
+        m.β = :(1.0 - α)
+        m.parameters.beta = :β
         for α = 0.0:0.1:1.0
-            β = 1.0 - α
             m.α = α
-            m.β = β
-            test_eval_RJ(m, [0.0], [-α 1.0 -β 0.0 -1.0 0.0;])
+            test_eval_RJ(m, [0.0], [-α 1.0 -m.beta 0.0 -1.0 0.0;])
         end
     end
+    let io = IOBuffer(), m = E1.model
+        show(io, m.parameters)
+        @test length(split(String(take!(io)), '\n')) == 1
+        show(io, MIME"text/plain"(), m.parameters)
+        @test length(split(String(take!(io)), '\n')) == 4
+    end
 end
-
 
 module AUX
 using ModelBaseEcon
@@ -178,11 +192,11 @@ end
     end
     @test length(out) == 3
     @test length(split(out[end], "=")) == 2
-    #
+    # 
     @test propertynames(ss) == tuple(variables(m)...)
     @test ss.pinf.level == ss.pinf[1]
     @test ss.pinf.slope == ss.pinf[2]
-    ss.pinf = (level=2.3, slope=0.7)
+    ss.pinf = (level = 2.3, slope = 0.7)
     @test ss.values[1:2] == [2.3, 0.7]
     @test ss[:rate] == ss["rate"]
     ss["rate"].level = 21
