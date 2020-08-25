@@ -419,13 +419,20 @@ function process_equation(model::Model, expr::Expr;
     #  (helps with tracking the locations of errors)
     source = []
 
+    error_process(msg) = begin
+        if !isempty(source)
+            @error "During processing\n  $(expr)\n  $(source[1])"
+        end
+        throw(ArgumentError(msg))
+    end
+
     ###################
     #    process(expr)
     # 
     # Process the expression, performing various tasks.
-    #  * keep track of mentions of parameters and variables (including shock)
+    #  * keep track of mentions of parameters and variables (including shocks)
     #  * remove line numbers from expression, but keep track so we can insert it into the residual functions
-    #  * for each time-referenece of variable, create a dummy symbol that will be used in constructing the residual functions.
+    #  * for each time-referenece of variable, create a dummy symbol that will be used in constructing the residual functions
     # 
     # leave numbers alone
     process(num::Number) = num
@@ -439,13 +446,20 @@ function process_equation(model::Model, expr::Expr;
     # Mentions of time series throw errors (they must always have a t-reference)
     function process(sym::Symbol)
         if sym ∈ model.variables
-            error("Variable `$(sym)` without `t` reference.")
-        elseif sym ∈ model.shocks            
-            error("Shock `$(sym)` without `t` reference.")
+            error_process("Variable `$(sym)` without `t` reference.")
+        elseif sym ∈ model.shocks
+            error_process("Shock `$(sym)` without `t` reference.")
         elseif sym ∈ model.auxvars
-            error("Auxiliary `$(sym)` without `t` reference.")
+            error_process("Auxiliary `$(sym)` without `t` reference.")
         elseif haskey(model.parameters, sym)
             push!(parameters, sym)
+        else
+            # is this symbol valid in the model module?
+            try
+                modelmodule.eval(sym)
+            catch
+                error_process("Unknown symbol `$(sym)`.")
+            end
         end
         return sym
     end
@@ -473,7 +487,7 @@ function process_equation(model::Model, expr::Expr;
                     return Expr(:ref, name, :t)
                 end
             end
-            error("Undefined reference $(ex).")
+            error_process("Undefined reference $(ex).")
         end
         if ex.head == :(=)
             # expression is an equation
@@ -489,6 +503,13 @@ function process_equation(model::Model, expr::Expr;
         filter!(args) do a
             a !== nothing
         end
+        if ex.head == :if
+            if length(args) == 3
+                return Expr(:call, :ifelse, args...)
+            else
+                error_process("Unable to process an `if` statement with a single branch. Use function `ifelse` instead.")
+            end
+        end
         if ex.head == :call
             return Expr(:call, args...)
         end
@@ -499,7 +520,7 @@ function process_equation(model::Model, expr::Expr;
             # for incomplete expression, args[1] contains the error message
             error(ex.args[1])
         end
-        error("Can't process $(ex).")
+        error_process("Can't process $(ex).")
     end
 
     ##################
@@ -535,9 +556,7 @@ function process_equation(model::Model, expr::Expr;
     # call process() to gather information
     expr = process(expr)
     # if source information missing, set from argument
-    if isempty(source)
-        push!(source, line)
-    end
+    push!(source, line)
     # collect the indices and dummy symbols of the mentioned variables
     # NOTE: Julia documentation assures us that keys() and values() iterate elements of the Dict in the same order!
     vinds = collect(keys(references))
