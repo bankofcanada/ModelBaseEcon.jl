@@ -28,6 +28,7 @@ include("abstract.jl")
 include("evaluation.jl")
 include("equation.jl")
 include("steadystate.jl")
+include("parameters.jl")
 include("model.jl")
 include("linearize.jl")
 

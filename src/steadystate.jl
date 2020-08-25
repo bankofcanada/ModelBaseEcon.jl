@@ -165,7 +165,7 @@ function Base.getindex(sstate::SteadyStateData, var::Symbol)
     if ind === nothing
         throw(SSMissingVariableError(var))
     else
-        return SSVarData(var, ind, view(sstate.values, ind:ind+1))
+        return SSVarData(var, ind, view(sstate.values, ind:ind + 1))
     end
 end
 
@@ -181,11 +181,11 @@ function Base.setindex!(sstate::SteadyStateData, val, var::Symbol)
             sstate.values[ind] = val.level
         end
         if :slope in keys(val)
-            sstate.values[ind+1] = val.slope
+            sstate.values[ind + 1] = val.slope
         end
     else
         sstate.values[ind] = val[1]
-        sstate.values[ind+1] = val[2]
+        sstate.values[ind + 1] = val[2]
     end
 end
 
@@ -208,7 +208,7 @@ function Base.setproperty!(ssd::SteadyStateData, name::Symbol, val)
     end
 end
 
-function Base.propertynames(ssd::SteadyStateData, private = false)
+function Base.propertynames(ssd::SteadyStateData, private=false)
     if private
         return ((Symbol(split("$v", "#")[1]) for v in ssd.vars[1:2:end])..., fieldnames(SteadyStateData)...)
     else
@@ -298,7 +298,7 @@ Create a steady state equation from the given dynamic equation for the given mod
 !!! note
     Internal function, do not call directly.
 """
-function make_sseqn(model::AbstractModel, eqn::Equation; shift::Int64 = 0)
+function make_sseqn(model::AbstractModel, eqn::Equation; shift::Int64=0)
     local vinds = Int64[]
     local nvars = nvariables(model)
     local nshks = nshocks(model)
@@ -381,7 +381,7 @@ addition to the equations generated automatically from the dynamic system.
 
 """
 function setss!(model::AbstractModel, expr::Expr; type::Symbol,
-    modelmodule::Module = moduleof(model))
+    modelmodule::Module=moduleof(model))
 
     if expr.head != :(=)
         error("Expected an equation, not $(expr.head)")
@@ -450,7 +450,7 @@ function setss!(model::AbstractModel, expr::Expr; type::Symbol,
         end
         if val.head == :block
             # in a begin-end block, process each line and gather the results
-            args = filter(x->x !== nothing, map(ssprocess, val.args))
+            args = filter(x -> x !== nothing, map(ssprocess, val.args))
             if length(args) == 1
                 # Only one thing left - no need for the begin-end anymore
                 return args[1]
@@ -460,11 +460,11 @@ function setss!(model::AbstractModel, expr::Expr; type::Symbol,
             end
         elseif val.head == :call
             # in a function call, process each argument, but not the function name (args[1]) and reassemble the call
-            args = filter(x->x !== nothing, map(ssprocess, val.args[2:end]))
+            args = filter(x -> x !== nothing, map(ssprocess, val.args[2:end]))
             return Expr(:call, val.args[1], args...)
         else
             # whatever this it, process each subexpression and reassemble it
-            args = filter(x->x !== nothing, map(ssprocess, val.args))
+            args = filter(x -> x !== nothing, map(ssprocess, val.args))
             return Expr(val.head, args...)
         end
     end
@@ -485,14 +485,10 @@ function setss!(model::AbstractModel, expr::Expr; type::Symbol,
         # variables of the same name
         param_assigments = Expr(:block)
         for p in unique(val_params)
-            # pval = mparams[p]
-            # ptype = typeof(pval)
-            pa = Expr(:(=), p, Expr(:ref, :( $(mparams) ), QuoteNode(p)))
-            # pa = :( $(p) = $(mparams[p]) )
-            push!(param_assigments.args, Expr(:local, pa))
+            push!(param_assigments.args, :( local $(p) = $(mparams).$(p) ))
         end
         residual = Expr(:block, source[1], :($(lhs) - $(rhs)))
-        funcs_expr = makefuncs(residual, vsyms, param_assigments; mod = modelmodule)
+        funcs_expr = makefuncs(residual, vsyms, param_assigments; mod=modelmodule)
         modelmodule.eval(funcs_expr)
     end
     # We have all the ingredients to create the instance of SteadyStateEquation
@@ -534,13 +530,13 @@ to help the steady state solver find the one you want to use.
 macro steadystate(model, type::Symbol, equation::Expr)
     thismodule = @__MODULE__
     modelmodule = __module__
-    return esc(:($(thismodule).setss!($(model), $(Meta.quot(equation)); type = $(QuoteNode(type)))))  # , modelmodule=$(modelmodule))))
+    return esc(:($(thismodule).setss!($(model), $(Meta.quot(equation)); type=$(QuoteNode(type)))))  # , modelmodule=$(modelmodule))))
 end
 
 macro steadystate(model, equation::Expr)
     thismodule = @__MODULE__
 
-    return esc(:($(thismodule).setss!($(model), $(Meta.quot(equation)); type = :level))) # , modelmodule=$(modelmodule))))
+    return esc(:($(thismodule).setss!($(model), $(Meta.quot(equation)); type=:level))) # , modelmodule=$(modelmodule))))
 end
 
 """
@@ -567,12 +563,12 @@ function initssdata!(model::AbstractModel)
     end
     empty!(ss.equations)
     for eqn in alleqns(model)
-        push!(ss.equations, make_sseqn(model, eqn; shift = 0))
+        push!(ss.equations, make_sseqn(model, eqn; shift=0))
     end
     if ! model.flags.ssZeroSlope
         shift = model.options.shift
         for eqn in alleqns(model)
-            push!(ss.equations, make_sseqn(model, eqn; shift = shift))
+            push!(ss.equations, make_sseqn(model, eqn; shift=shift))
         end
     end
     empty!(ss.constraints)
