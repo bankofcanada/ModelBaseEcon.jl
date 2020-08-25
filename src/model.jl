@@ -2,11 +2,11 @@
 export Model
 
 const defaultoptions = Options(
-    shift = 10,
-    substitutions = true, 
-    tol = 1e-10, 
-    maxiter = 20,
-    verbose = false
+    shift=10,
+    substitutions=true, 
+    tol=1e-10, 
+    maxiter=20,
+    verbose=false
 )
 
 mutable struct ModelFlags
@@ -49,7 +49,7 @@ mutable struct Model <: AbstractModel
     # transition equations
     equations::Vector{Equation}
     # parameters 
-    parameters::Dict{Symbol,Any}
+    parameters::Parameters
     # auto-exogenize mapping of variables and shocks
     autoexogenize::Dict{Symbol,Symbol}
     #### Things we compute
@@ -63,8 +63,8 @@ mutable struct Model <: AbstractModel
     evaldata::AbstractModelEvaluationData
     # 
     # constructor of an empty model
-    Model(opts::Options = defaultoptions) = new(merge(defaultoptions, opts), 
-        ModelFlags(), SteadyStateData(), [], [], [], Dict(), Dict(), 0, 0, [], [], NoMED)
+    Model(opts::Options=defaultoptions) = new(merge(defaultoptions, opts), 
+        ModelFlags(), SteadyStateData(), [], [], [], Parameters(), Dict(), 0, 0, [], [], NoMED)
 end
 
 
@@ -115,7 +115,7 @@ function Base.getproperty(model::Model, name::Symbol)
     elseif name == :alleqns
         return vcat(getfield(model, :equations), getfield(model, :auxeqns))
     elseif haskey(getfield(model, :parameters), name)
-        return getindex(getfield(model, :parameters), name)
+        return getproperty(getfield(model, :parameters), name)
     elseif name ∈ getfield(model, :options)
         return getoption(model, name, nothing)
     elseif name ∈ fieldnames(ModelFlags)
@@ -125,7 +125,7 @@ function Base.getproperty(model::Model, name::Symbol)
     end
 end
 
-function Base.propertynames(model::Model, private = false)
+function Base.propertynames(model::Model, private=false)
     return (fieldnames(Model)..., :nvars, :nshks, :nauxs, :allvars, :varshks, :alleqns, 
     keys(getfield(model, :options))..., fieldnames(ModelFlags)...,)
 end
@@ -134,7 +134,7 @@ function Base.setproperty!(model::Model, name::Symbol, val::Any)
     if name ∈ fieldnames(Model)
         return setfield!(model, name, val)
     elseif haskey(getfield(model, :parameters), name)
-        return setindex!(getfield(model, :parameters), val, name)
+        return setproperty!(getfield(model, :parameters), name, val)
     elseif name ∈ getfield(model, :options)
         return setoption!(model, name, val)
     elseif name ∈ fieldnames(ModelFlags)
@@ -155,7 +155,7 @@ function fullprint(io::IO, model::Model)
     nprm = length(model.parameters)  
     neqn = length(model.equations)  
     nvarshk = nvar + nshk
-    function print_thing(io, thing; len = 0, maxlen = 40, last = false) 
+    function print_thing(io, thing; len=0, maxlen=40, last=false) 
         s = string(thing); print(io, s)
         len += length(s) + 2
         last && (println(io), return 0)
@@ -164,34 +164,34 @@ function fullprint(io::IO, model::Model)
     let len = 15
         print(io, length(model.variables), " variable(s): ")
         for v in model.variables[1:end - 1]
-            len = print_thing(io, v; len = len)
+            len = print_thing(io, v; len=len)
         end
-        nvar > 0 && print_thing(io, model.variables[end]; last = true)
+        nvar > 0 && print_thing(io, model.variables[end]; last=true)
     end
     let len = 15
         print(io, length(model.shocks), " shock(s): ")
         for v in model.shocks[1:end - 1]
-            len = print_thing(io, v; len = len)
+            len = print_thing(io, v; len=len)
         end
-        nshk > 0 && print_thing(io, model.shocks[end]; last = true)
+        nshk > 0 && print_thing(io, model.shocks[end]; last=true)
     end
     let len = 15
         print(io, length(model.parameters), " parameter(s): ")
         params = collect(keys(model.parameters))
         for k in params[1:end - 1]
             v = model.parameters[k]
-            len = print_thing(io, "$(k) = $(v)"; len = len)
+            len = print_thing(io, "$(k) = $(v)"; len=len)
         end
         if nprm > 0 
             k = params[end]
             v = model.parameters[k]
-            len = print_thing(io, "$(k) = $(v)"; len = len, last = true)
+            len = print_thing(io, "$(k) = $(v)"; len=len, last=true)
         end
     end
     print(io, length(model.equations), " equations(s) with ", length(model.auxeqns), " auxiliary equations: \n")
     function print_aux_eq(bi)
         v = model.auxeqns[bi]
-        for (_, ai) in filter(tv->tv[2] > nvarshk, v.vinds)
+        for (_, ai) in filter(tv -> tv[2] > nvarshk, v.vinds)
             ci = ai - nvarshk
             ci < bi && print_aux_eq(ci)
         end
@@ -199,7 +199,7 @@ function fullprint(io::IO, model::Model)
     end
     for (i, v) in enumerate(model.equations)
         println(io, "   E$i:   ", v)
-        for (_, ai) in filter(tv->tv[2] > nvarshk, v.vinds)
+        for (_, ai) in filter(tv -> tv[2] > nvarshk, v.vinds)
             print_aux_eq(ai - nvarshk)
         end
     end
@@ -303,7 +303,7 @@ created from a variable name by appending "_shk".
 """
 macro autoshocks(model)
     esc(:(
-        $(model).shocks = map(x->Meta.parse("$(x)_shk"), $(model).variables);
+        $(model).shocks = map(x -> Meta.parse("$(x)_shk"), $(model).variables);
         nothing
     ))
 end
@@ -321,14 +321,20 @@ statements wrapped inside a begin-end block. The names can be used in equations
 as if they were regular variables.
 """
 macro parameters(model, args::Expr...)
-    mevalparam((sym, val)) = (sym, __module__.eval(val))
-    mevalparam(ex::Expr) = mevalparam(ex.args)
     if length(args) == 1 && args[1].head == :block
         args = args[1].args
     end
-    args = filter(isequation, [args...])
-    params = Dict{Symbol,Any}(map(mevalparam, args))
-    return esc(:( merge!($(model).parameters, $(params)); nothing ))
+    args = filter(a -> a isa Expr && a.head == :(=), [args...])
+    ret = Expr(:block)
+    for a in args
+        if a isa Expr && a.head == :(=)
+            key, value = a.args
+            key = QuoteNode(key)
+            value = Meta.quot(value)
+            push!(ret.args, :(push!($(model).parameters, $(key) => $(value))))
+        end
+    end
+    return esc(ret)
 end
 
 """
@@ -368,7 +374,7 @@ macro equations(model, block::Expr)
             push!(eqn.args, expr)
         elseif isa(expr, Expr) && expr.head == :(=)
             push!(eqn.args, expr)
-            push!(eqns, eqn)            
+            push!(eqns, eqn)
             eqn = Expr(:block)
         else
             eqn = Expr(:block)
@@ -399,8 +405,8 @@ process_equation(model::Model, expr::String; kwargs...) = process_equation(model
 # process_equation(model::Model, val::Number; kwargs...) = process_equation(model, Expr(:block, val); kwargs...)
 # process_equation(model::Model, val::Symbol; kwargs...) = process_equation(model, Expr(:block, val); kwargs...)
 function process_equation(model::Model, expr::Expr; 
-    modelmodule::Module = moduleof(model), 
-    line = LineNumberNode(0))
+    modelmodule::Module=moduleof(model), 
+    line=LineNumberNode(0))
 
     # a list of all known time series 
     allvars = [model.variables; model.shocks; model.auxvars]
@@ -545,13 +551,9 @@ function process_equation(model::Model, expr::Expr;
         # variables of the same name
         param_assigments = Expr(:block)
         for p in parameters
-            # pval = mparams[p]
-            # ptype = typeof(pval)
-            pa = Expr(:(=), p, Expr(:ref, :( $(mparams) ), QuoteNode(p)))
-            # pa = :( $(p) = $(mparams[p]) )
-            push!(param_assigments.args, Expr(:local, pa))
+            push!(param_assigments.args, :( local $(p) = $(mparams).$(p) ))
         end
-        funcs_expr = makefuncs(residual, vsyms, param_assigments; mod = modelmodule)
+        funcs_expr = makefuncs(residual, vsyms, param_assigments; mod=modelmodule)
         modelmodule.eval(funcs_expr)
     end
     return Equation(expr, residual, vinds, vsyms, resid, RJ)
@@ -568,7 +570,7 @@ Process the given expression in the context of the given module, create
 the Equation() instance for it and add it to the model instance. 
 """
 
-function add_equation!(model::Model, expr::Expr; modelmodule::Module = moduleof(model))
+function add_equation!(model::Model, expr::Expr; modelmodule::Module=moduleof(model))
     source = LineNumberNode[]
     auxeqns = Expr[]
 
@@ -591,10 +593,10 @@ function add_equation!(model::Model, expr::Expr; modelmodule::Module = moduleof(
         for i in eachindex(expr.args)
             push!(args, process(expr.args[i]))
         end
-        if getoption!(model; substitutions = true)
+        if getoption!(model; substitutions=true)
             if expr.head == :call && args[1] == :log && isa(args[2], Expr)
                 # log(something)
-                aux_expr = process_equation(model, args[2]; modelmodule = modelmodule)
+                aux_expr = process_equation(model, args[2]; modelmodule=modelmodule)
                 if length(aux_expr.vinds) == 0
                     # something doesn't contain any variables, no need for substitution
                     return Expr(:call, :log, args[2])
@@ -614,12 +616,12 @@ function add_equation!(model::Model, expr::Expr; modelmodule::Module = moduleof(
     if isempty(source)
         push!(source, LineNumberNode(0))
     end
-    eqn = process_equation(model, new_expr; modelmodule = modelmodule, line = source[1])
+    eqn = process_equation(model, new_expr; modelmodule=modelmodule, line=source[1])
     push!(model.equations, eqn)
     model.maxlag = max(model.maxlag, eqn.maxlag)
     model.maxlead = max(model.maxlead, eqn.maxlead)
     for i ∈ eachindex(auxeqns)
-        eqn = process_equation(model, auxeqns[i]; modelmodule = modelmodule, line = source[1])
+        eqn = process_equation(model, auxeqns[i]; modelmodule=modelmodule, line=source[1])
         push!(model.auxeqns, eqn)
         model.maxlag = max(model.maxlag, eqn.maxlag)
         model.maxlead = max(model.maxlead, eqn.maxlead)
@@ -641,12 +643,13 @@ function initialize!(model::Model, modelmodule::Module)
         error("Model already initialized.")
     end
     initfuncs(modelmodule)
+    model.parameters.mod[] = modelmodule
     eqns = [e.expr for e in model.equations]
     empty!(model.equations)
     empty!(model.auxvars)
     empty!(model.auxeqns)
     for e in eqns
-        add_equation!(model, e; modelmodule = modelmodule)
+        add_equation!(model, e; modelmodule=modelmodule)
     end
     model.evaldata = ModelEvaluationData(model)
     initssdata!(model)
@@ -700,7 +703,7 @@ If there are no auxiliary variables/equations in the model, return *a copy* of `
     TODO: implement a general approach that would work for any substitution.
 """
 function update_auxvars(data::AbstractArray{Float64,2}, model::Model; 
-                tol::Float64 = model.options.tol, default::Float64 = 0.0
+                tol::Float64=model.options.tol, default::Float64=0.0
 )
     nauxs = length(model.auxvars)
     if nauxs == 0
