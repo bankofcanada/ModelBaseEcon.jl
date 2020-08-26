@@ -45,6 +45,19 @@ end
     @test_throws ModelBaseEcon.ModelErrorBase ModelBaseEcon.modelerror()
 end
 
+@testset "ifelse" begin
+    m = Model()
+    @variables m x
+    @equations m begin
+        x[t] = 0
+    end
+    @initialize m
+    @test_throws ArgumentError ModelBaseEcon.process_equation(m, :(y[t] = 0))
+    @test_throws ArgumentError ModelBaseEcon.process_equation(m, :(x[t] = p))
+    @test_throws ArgumentError ModelBaseEcon.process_equation(m, :(x[t] = if false 2 end))
+    @test ModelBaseEcon.process_equation(m, :(x[t] = if false 2 else 0 end)) isa Equation
+    @test ModelBaseEcon.process_equation(m, :(x[t] = ifelse(false, 2, 0))) isa Equation
+end
 
 ############################################################################
 
