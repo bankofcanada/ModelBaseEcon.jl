@@ -367,20 +367,20 @@ macro equations(model, block::Expr)
     if block.head != :block
         error("list of equations mush be within a begin-end block")
     end
-    eqns = Vector{Expr}()
+    ret = Expr(:block)
     eqn = Expr(:block)
     for expr in block.args
         if isa(expr, LineNumberNode)
             push!(eqn.args, expr)
         elseif isa(expr, Expr) && expr.head == :(=)
             push!(eqn.args, expr)
-            push!(eqns, eqn)
+            push!(ret.args, :(push!($model.equations, $(Meta.quot(eqn)))))
             eqn = Expr(:block)
         else
             eqn = Expr(:block)
         end
     end
-    esc(:( push!($(model).equations, eval(Meta.quot($(eqns)))...); nothing ))
+    return esc(ret)
 end
 
 ################################################################
@@ -420,10 +420,12 @@ function process_equation(model::Model, expr::Expr;
     source = []
 
     error_process(msg) = begin
-        if !isempty(source)
-            @error "During processing\n  $(expr)\n  $(source[1])"
-        end
+        @error "During processing of\n  $(expr)"
         throw(ArgumentError(msg))
+    end
+
+    warn_process(msg) = begin
+        @warn "During processing of\n  $(expr)\n  $(msg)"
     end
 
     ###################
@@ -446,9 +448,11 @@ function process_equation(model::Model, expr::Expr;
     # Mentions of time series throw errors (they must always have a t-reference)
     function process(sym::Symbol)
         if sym ∈ model.variables
-            error_process("Variable `$(sym)` without `t` reference.")
+            warn_process("Variable `$(sym)` without `t` reference. Assuming `$(sym)[t]`")
+            return Expr(:ref, sym, :t)
         elseif sym ∈ model.shocks
-            error_process("Shock `$(sym)` without `t` reference.")
+            warn_process("Shock `$(sym)` without `t` reference. Assuming `$(sym)[t]`")
+            return Expr(:ref, sym, :t)
         elseif sym ∈ model.auxvars
             error_process("Auxiliary `$(sym)` without `t` reference.")
         elseif haskey(model.parameters, sym)
@@ -518,7 +522,7 @@ function process_equation(model::Model, expr::Expr;
         end
         if ex.head == :incomplete
             # for incomplete expression, args[1] contains the error message
-            error(ex.args[1])
+            error_process(ex.args[1])
         end
         error_process("Can't process $(ex).")
     end
@@ -607,6 +611,15 @@ function add_equation!(model::Model, expr::Expr; modelmodule::Module=moduleof(mo
         return line
     end
     function process(expr::Expr)
+        if expr.head == :macrocall
+            mfunc = Symbol(replace(string(expr.args[1]), "@" => "meta_"))
+            margs = map(filter(x -> !isa(x, LineNumberNode), expr.args[2:end])) do arg
+                arg isa Expr ? Meta.quot(arg) : 
+                arg isa Symbol ? QuoteNode(arg) : 
+                arg 
+            end
+            expr = eval(Expr(:call, mfunc, margs...))
+        end
         # recursively process all arguments
         args = []
         for i in eachindex(expr.args)

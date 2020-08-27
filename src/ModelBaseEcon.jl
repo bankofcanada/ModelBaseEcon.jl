@@ -29,6 +29,7 @@ include("evaluation.jl")
 include("equation.jl")
 include("steadystate.jl")
 include("parameters.jl")
+include("metafuncs.jl")
 include("model.jl")
 include("linearize.jl")
 
