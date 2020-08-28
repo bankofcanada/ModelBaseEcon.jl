@@ -3,7 +3,7 @@ export Model
 
 const defaultoptions = Options(
     shift=10,
-    substitutions=true, 
+    substitutions=false, 
     tol=1e-10, 
     maxiter=20,
     verbose=false
@@ -231,11 +231,6 @@ end
 ################################################################
 # The macros used in the model definition.
 
-issymbol(::Symbol) = true
-issymbol(::Any) = false
-isequation(::Any) = false
-isequation(expr::Expr) = expr.head == :(=)
-
 # Note: These macros simply store the information into the corresponding 
 # arrays within the model instance. The actual processing is done in @initialize
 
@@ -261,7 +256,7 @@ end
 ````
 """
 macro variables(model, block::Expr)
-    vars = filter(issymbol, block.args)
+    vars = filter(a -> a isa Symbol, block.args)
     return esc(:(unique!(append!($(model).variables, $vars)), nothing))
 end
 macro variables(model, vars::Symbol...)
@@ -288,7 +283,7 @@ end
 ````
 """
 macro shocks(model, block::Expr)
-    shks = filter(issymbol, block.args)
+    shks = filter(a -> a isa Symbol, block.args)
     return esc(:( unique!(append!($(model).shocks, $shks)); nothing ))
 end
 macro shocks(model, shks::Symbol...)
@@ -350,7 +345,7 @@ macro autoexogenize(model, args::Expr...)
     if length(args) == 1 && args[1].head == :block
         args = args[1].args
     end
-    args = filter(isequation, [args...])
+    args = filter(a -> a isa Expr && a.head == :(=), [args...])
     autoexos = Dict{Symbol,Any}([ex.args for ex in args])
     esc(:( merge!($(model).autoexogenize, $(autoexos)); nothing ))
 end
@@ -387,6 +382,14 @@ end
 # The processing of equations during model initialization.
 
 
+error_process(msg, expr) = begin
+    throw(ArgumentError("$msg\n  During processing of\n  $(expr)"))
+end
+
+warn_process(msg, expr) = begin
+    @warn "$msg\n  During processing of\n  $(expr)"
+end
+
 """
     process_equation(model::Model, expr; <keyword arguments>)
 
@@ -419,15 +422,6 @@ function process_equation(model::Model, expr::Expr;
     #  (helps with tracking the locations of errors)
     source = []
 
-    error_process(msg) = begin
-        @error "During processing of\n  $(expr)"
-        throw(ArgumentError(msg))
-    end
-
-    warn_process(msg) = begin
-        @warn "During processing of\n  $(expr)\n  $(msg)"
-    end
-
     ###################
     #    process(expr)
     # 
@@ -448,13 +442,13 @@ function process_equation(model::Model, expr::Expr;
     # Mentions of time series throw errors (they must always have a t-reference)
     function process(sym::Symbol)
         if sym ∈ model.variables
-            warn_process("Variable `$(sym)` without `t` reference. Assuming `$(sym)[t]`")
+            warn_process("Variable `$(sym)` without `t` reference. Assuming `$(sym)[t]`", expr)
             return Expr(:ref, sym, :t)
         elseif sym ∈ model.shocks
-            warn_process("Shock `$(sym)` without `t` reference. Assuming `$(sym)[t]`")
+            warn_process("Shock `$(sym)` without `t` reference. Assuming `$(sym)[t]`", expr)
             return Expr(:ref, sym, :t)
         elseif sym ∈ model.auxvars
-            error_process("Auxiliary `$(sym)` without `t` reference.")
+            error_process("Auxiliary `$(sym)` without `t` reference.", expr)
         elseif haskey(model.parameters, sym)
             push!(parameters, sym)
         else
@@ -462,7 +456,7 @@ function process_equation(model::Model, expr::Expr;
             try
                 modelmodule.eval(sym)
             catch
-                error_process("Unknown symbol `$(sym)`.")
+                error_process("Unknown symbol `$(sym)`.", expr)
             end
         end
         return sym
@@ -491,7 +485,7 @@ function process_equation(model::Model, expr::Expr;
                     return Expr(:ref, name, :t)
                 end
             end
-            error_process("Undefined reference $(ex).")
+            error_process("Undefined reference $(ex).", expr)
         end
         if ex.head == :(=)
             # expression is an equation
@@ -511,7 +505,7 @@ function process_equation(model::Model, expr::Expr;
             if length(args) == 3
                 return Expr(:call, :ifelse, args...)
             else
-                error_process("Unable to process an `if` statement with a single branch. Use function `ifelse` instead.")
+                error_process("Unable to process an `if` statement with a single branch. Use function `ifelse` instead.", expr)
             end
         end
         if ex.head == :call
@@ -522,9 +516,9 @@ function process_equation(model::Model, expr::Expr;
         end
         if ex.head == :incomplete
             # for incomplete expression, args[1] contains the error message
-            error_process(ex.args[1])
+            error_process(ex.args[1], expr)
         end
-        error_process("Can't process $(ex).")
+        error_process("Can't process $(ex).", expr)
     end
 
     ##################
@@ -547,7 +541,7 @@ function process_equation(model::Model, expr::Expr;
                 elseif isa(index, Expr) && index.head == :call && index.args[1] == :+ && index.args[2] == :t
                     tind = +index.args[3]
                 else
-                    error("Unrecognized t-reference expression $index.")
+                    error_process("Unrecognized t-reference expression $index.", expr)
                 end
                 return references[(tind, vind)]
             end
@@ -612,13 +606,16 @@ function add_equation!(model::Model, expr::Expr; modelmodule::Module=moduleof(mo
     end
     function process(expr::Expr)
         if expr.head == :macrocall
-            mfunc = Symbol(replace(string(expr.args[1]), "@" => "meta_"))
+            mfunc = Symbol(replace(string(expr.args[1]), "@" => "at_"))
+            if !isdefined(modelmodule, mfunc)
+                error_process("Unknown meta function $(expr.args[1]).", expr)
+            end
             margs = map(filter(x -> !isa(x, LineNumberNode), expr.args[2:end])) do arg
                 arg isa Expr ? Meta.quot(arg) : 
                 arg isa Symbol ? QuoteNode(arg) : 
                 arg 
             end
-            expr = eval(Expr(:call, mfunc, margs...))
+            expr = modelmodule.eval(Expr(:call, mfunc, margs...))
         end
         # recursively process all arguments
         args = []
