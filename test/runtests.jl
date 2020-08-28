@@ -61,11 +61,15 @@ end
 
 @testset "meta" begin
     mod = Model()
+    @parameters mod a=0.1, b=1.0-a
     @variables mod x
     @shocks mod sx
     @equations mod begin
         x[t - 1] = sx[t + 1]
         @lag(x[t]) = @lag(sx[t + 2])
+        # 
+        x[t - 1] + a = sx[t + 1] + 3
+        @lag(x[t] + a) = @lag(sx[t + 2] + 3)
         # 
         x[t - 2] = sx[t]
         @lag(x[t], 2) = @lead(sx[t - 2], 2)
@@ -98,7 +102,15 @@ end
     for i = 2:2:length(mod.equations)
         @test mod.equations[i - 1].expr == mod.equations[i].expr
     end
+    # test errors and warnings
+    mod.warn.no_t = false
+    @test  add_equation!(mod, :(x = sx[t])) isa Model
+    @test  add_equation!(mod, :(x[t] = sx)) isa Model
+    @test mod.equations[end].expr == :(x[t] = sx[t])
     @test_throws ArgumentError add_equation!(mod, :(@notametafunction(x[t]) = 7))
+    @test_throws ArgumentError add_equation!(mod, :(x[t] = unknownsymbol))
+    @test_throws ArgumentError add_equation!(mod, :(x[t] = unknownseries[t]))
+    @test_throws ArgumentError add_equation!(mod, :(x[t] = let c = 5; sx[t+c]; end))
 end
 
 ############################################################################

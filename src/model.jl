@@ -6,7 +6,8 @@ const defaultoptions = Options(
     substitutions=false, 
     tol=1e-10, 
     maxiter=20,
-    verbose=false
+    verbose=false,
+    warn=Options(no_t=true)
 )
 
 mutable struct ModelFlags
@@ -422,6 +423,12 @@ function process_equation(model::Model, expr::Expr;
     #  (helps with tracking the locations of errors)
     source = []
 
+    add_reference(sym, tind) = add_reference(sym, tind, indexin([sym], allvars)[1])
+    add_reference(sym::Symbol, tind::Int, vind::Int) = begin
+        vsym = Symbol("#$sym#$tind#")           # replace with a dummy symbol
+        push!(references, (tind, vind) => vsym) # keep track of indexes and dummy symbol
+    end
+
     ###################
     #    process(expr)
     # 
@@ -442,10 +449,16 @@ function process_equation(model::Model, expr::Expr;
     # Mentions of time series throw errors (they must always have a t-reference)
     function process(sym::Symbol)
         if sym ∈ model.variables
-            warn_process("Variable `$(sym)` without `t` reference. Assuming `$(sym)[t]`", expr)
+            if model.warn.no_t
+                warn_process("Variable `$(sym)` without `t` reference. Assuming `$(sym)[t]`", expr)
+            end
+            add_reference(sym, 0)
             return Expr(:ref, sym, :t)
         elseif sym ∈ model.shocks
-            warn_process("Shock `$(sym)` without `t` reference. Assuming `$(sym)[t]`", expr)
+            if model.warn.no_t
+                warn_process("Shock `$(sym)` without `t` reference. Assuming `$(sym)[t]`", expr)
+            end
+            add_reference(sym, 0)
             return Expr(:ref, sym, :t)
         elseif sym ∈ model.auxvars
             error_process("Auxiliary `$(sym)` without `t` reference.", expr)
@@ -473,17 +486,10 @@ function process_equation(model::Model, expr::Expr;
             end
             vind = indexin([name], allvars)[1]  # the index of the variable
             if vind !== nothing
-                # indexing in a time series 
+                # indexing in a time series
                 tind = modelmodule.eval(:(let t = 0; $index end))  # the lag or lead value
-                vsym = Symbol("#$name#$tind#")      # replace with a dummy symbol
-                push!(references, (tind, vind) => vsym) # keep track of indexes and dummy symbol
-                if tind > 0  # this isn't really necessary, it's just for pretty printing
-                    return Expr(:ref, name, :(t + $tind))
-                elseif tind < 0
-                    return Expr(:ref, name, :(t - $(-tind)))
-                else
-                    return Expr(:ref, name, :t)
-                end
+                add_reference(name, tind, vind)
+                return normal_ref(name, tind)
             end
             error_process("Undefined reference $(ex).", expr)
         end
