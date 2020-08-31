@@ -16,7 +16,7 @@ function at_lag(expr::Expr, n=1)
     if expr.head == :ref 
         var, index = expr.args
         if has_t(index)
-            return normal_ref(var, eval(:(let t = 0; $index - $n end)))
+            return Expr(:ref, var, :($index - $n))
         end
     end
     return Expr(expr.head, at_lag.(expr.args, n)...)
@@ -73,7 +73,7 @@ at_dlog(expr::Expr, args...) = at_d(:(log($expr)), args...)
 Apply moving sum with n periods backwards on the given expression.
 For example: `@movsum(x[t], 3) = x[t] + x[t-1] + x[t-2]`.
 """
-at_movsum(expr::Expr, n) = Expr(:call, :+, expr, (at_lag(expr, i) for i=1:n-1)...)
+at_movsum(expr::Expr, n) = Expr(:call, :+, expr, (at_lag(expr, i) for i = 1:n - 1)...)
 
 """
     @movav(expr, n)

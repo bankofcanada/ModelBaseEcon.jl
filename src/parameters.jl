@@ -91,7 +91,7 @@ struct ParamLink{N}
     depends::NTuple{N,Symbol}
     link::Expr
 end
-ParamLink(deps::Vector{Symbol}, expr) = ParamLink(tuple(deps...), expr)
+ParamLink(deps::Vector{Symbol}, expr::Expr) = ParamLink(tuple(deps...), expr)
 getdepends(p::ParamLink) = p.depends   
 
 Base.show(io::IO, p::ParamLink) = show(io, MIME"text/plain"(), p)
@@ -122,18 +122,31 @@ end
 function Base.setindex!(pars::Parameters, val, key)
     if val isa Expr
         deps = build_deps!(Symbol[], keys(pars), val)
-        # recursively scan the dependencies of the dependencies
-        # we must not allow circular dependencies.
-        alldeps = copy(deps)
-        while length(alldeps) > 0
-            d = pop!(alldeps)
-            ddeps = getdepends(pars[d])
-            if key ∈ ddeps
-                throw(ArgumentError("Circular dependency of $(key) and $(d) in redefinition of $(key)."))
+        if isempty(deps)
+            # no dependencies on other parameters. Is it a vector, 
+            # or some other expression that evaluates to a constant?
+            try
+                val = pars.mod.eval(val)
+            catch
+                # no. keep is as an expression that will be pasted in the
+                # residual functions. hopefully at that time it will be valid, if
+                # not they'll get an error.
+                ParamLink(Symbol[], val)
             end
-            append!(alldeps, ddeps)
+        else
+            # recursively scan the dependencies of the dependencies
+            # we must not allow circular dependencies.
+            alldeps = copy(deps)
+            while length(alldeps) > 0
+                d = pop!(alldeps)
+                ddeps = getdepends(pars[d])
+                if key ∈ ddeps
+                    throw(ArgumentError("Circular dependency of $(key) and $(d) in redefinition of $(key)."))
+                end
+                append!(alldeps, ddeps)
+            end
+            val = ParamLink(deps, val)
         end
-        val = ParamLink(deps, val)
     elseif val isa Symbol && val in keys(pars)
         val = ParamAlias(val)
     end
