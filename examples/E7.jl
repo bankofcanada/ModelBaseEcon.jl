@@ -7,6 +7,7 @@ module E7
 using ModelBaseEcon
 
 model = Model()
+model.substitutions = true
 
 @parameters model begin
     delta = 0.1000000000000000 
