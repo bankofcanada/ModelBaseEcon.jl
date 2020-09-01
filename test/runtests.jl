@@ -19,6 +19,43 @@ using Test
     @test o.name == "Zoro"
 end
 
+@testset "Vars" begin
+    y1 = :y
+    y2 = ModelSymbol(:y)
+    y3 = ModelSymbol("y3", :y)
+    y4 = ModelSymbol(quote "y4" y end)
+    @test_throws ArgumentError ModelSymbol(:(x+5))
+    @test y1 == y2
+    @test y3 == y1
+    @test y1 == y4
+    @test y2 == y3
+    @test y2 == y4
+    @test y3 == y4
+    ally = Symbol[y1,y2,y3,y4]
+    @test y1 in ally
+    @test y2 in ally
+    @test y3 in ally
+    @test y4 in ally
+    @test indexin([y1,y2,y3,y4], ally) == [1,1,1,1]
+    ally = ModelSymbol[y1,y2,y3,y4,:y,quote "y5" y end]
+    @test indexin([y1,y2,y3,y4], ally) == [1,1,1,1]
+    @test length(unique(hash.(ally))) == 1
+    ally = Dict{Symbol,Any}()
+    get!(ally, y1, "y1")
+    get!(ally, y2, "y2")
+    @test length(ally) == 1
+    @test ally[y3] == "y1"
+    ally = Dict{ModelSymbol,Any}()
+    get!(ally, y1, "y1")
+    get!(ally, y2, "y2")
+    @test length(ally) == 1
+    @test ally[y3] == "y1"
+    @test sprint(print, y2, context=IOContext(stdout, :compact => true)) == "y"
+    @test sprint(print, y2, context=IOContext(stdout, :compact => false)) == "y"
+    @test sprint(print, y3, context=IOContext(stdout, :compact => true)) == "y"
+    @test sprint(print, y3, context=IOContext(stdout, :compact => false)) == "\"y3\" y"
+end
+
 module E
     using ModelBaseEcon
 end
@@ -61,7 +98,7 @@ end
 
 @testset "meta" begin
     mod = Model()
-    @parameters mod a=0.1, b=1.0-a
+    @parameters mod a = 0.1, b = 1.0 - a
     @variables mod x
     @shocks mod sx
     @equations mod begin
@@ -99,18 +136,28 @@ end
         @movav(x[t] + 0.3x[t + 2],3) = 0
     end
     @initialize mod
+
+    compare_resids(e1, e2) = (
+        e1.resid.head == e2.resid.head  && (
+            (length(e1.resid.args) == length(e2.resid.args) == 2 && e1.resid.args[2] == e2.resid.args[2]) ||
+            (length(e1.resid.args) == length(e2.resid.args) == 1 && e1.resid.args[1] == e2.resid.args[1]) 
+        )
+    )
+
     for i = 2:2:length(mod.equations)
-        @test mod.equations[i - 1].expr == mod.equations[i].expr
+        @test compare_resids(mod.equations[i - 1], mod.equations[i])
     end
     # test errors and warnings
     mod.warn.no_t = false
     @test  add_equation!(mod, :(x = sx[t])) isa Model
     @test  add_equation!(mod, :(x[t] = sx)) isa Model
-    @test mod.equations[end].expr == :(x[t] = sx[t])
+    @test  add_equation!(mod, :(x[t] = sx[t])) isa Model
+    @test compare_resids(mod.equations[end], mod.equations[end - 1])
+    @test compare_resids(mod.equations[end], mod.equations[end - 2])
     @test_throws ArgumentError add_equation!(mod, :(@notametafunction(x[t]) = 7))
     @test_throws ArgumentError add_equation!(mod, :(x[t] = unknownsymbol))
     @test_throws ArgumentError add_equation!(mod, :(x[t] = unknownseries[t]))
-    @test_throws ArgumentError add_equation!(mod, :(x[t] = let c = 5; sx[t+c]; end))
+    @test_throws ArgumentError add_equation!(mod, :(x[t] = let c = 5; sx[t + c]; end))
 end
 
 ############################################################################
@@ -164,7 +211,7 @@ end
         @test neqns(m.sstate) == 3
         @test length(alleqns(m.sstate)) == 3
     end
-end
+    end
 
 @testset "E1.lin" begin
     m = deepcopy(E1.model)
@@ -199,7 +246,7 @@ end
         show(io, MIME"text/plain"(), m.parameters)
         @test length(split(String(take!(io)), '\n')) == 4
     end
-end
+    end
 
 module AUX
 using ModelBaseEcon
@@ -226,7 +273,7 @@ end
         @test x == ax[:, 1:2]
         @test ax[:, 3:4] == [0.0 0.0; 0.1 log(2.0); 0.1 log(2.0); 0.0 0.0]
     end
-end
+    end
 
 
 @using_example E2
@@ -244,7 +291,7 @@ end
     compare_RJ_R!_(E2.model)
 end
 
-@testset "sstate" begin
+@testset "E2.sstate" begin
     m = E2.model
     ss = m.sstate
     empty!(ss.constraints)

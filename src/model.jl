@@ -44,9 +44,9 @@ mutable struct Model <: AbstractModel
     sstate::SteadyStateData
     #### Inputs from user
     # transition variables
-    variables::Vector{Symbol}
+    variables::Vector{ModelSymbol}
     # shock variables
-    shocks::Vector{Symbol}
+    shocks::Vector{ModelSymbol}
     # transition equations
     equations::Vector{Equation}
     # parameters 
@@ -151,42 +151,54 @@ end
 export fullprint
 fullprint(model::Model) = fullprint(Base.stdout, model)
 function fullprint(io::IO, model::Model)
+    io = IOContext(io, :compact => true, :limit => false)
     nvar = length(model.variables)
     nshk = length(model.shocks)
     nprm = length(model.parameters)  
     neqn = length(model.equations)  
     nvarshk = nvar + nshk
-    function print_thing(io, thing; len=0, maxlen=40, last=false) 
-        s = string(thing); print(io, s)
+    function print_things(io, things...; len=0, maxlen=40, last=false) 
+        s = sprint(print, things...; context=io, sizehint=0) 
+        print(io, s)
         len += length(s) + 2
         last && (println(io), return 0)
         (len > maxlen) ? (print(io, "\n    "); return 4) : (print(io, ", "); return len)
     end
     let len = 15
         print(io, length(model.variables), " variable(s): ")
-        for v in model.variables[1:end - 1]
-            len = print_thing(io, v; len=len)
+        if nvar == 0 
+            println(io)
+        else
+            for v in model.variables[1:end - 1]
+                len = print_things(io, v; len=len)
+            end
+            print_things(io, model.variables[end]; last=true)
         end
-        nvar > 0 && print_thing(io, model.variables[end]; last=true)
     end
     let len = 15
         print(io, length(model.shocks), " shock(s): ")
-        for v in model.shocks[1:end - 1]
-            len = print_thing(io, v; len=len)
+        if nshk == 0
+            println(io)
+        else
+            for v in model.shocks[1:end - 1]
+                len = print_things(io, v; len=len)
+            end
+            print_things(io, model.shocks[end]; last=true)
         end
-        nshk > 0 && print_thing(io, model.shocks[end]; last=true)
     end
     let len = 15
         print(io, length(model.parameters), " parameter(s): ")
-        params = collect(keys(model.parameters))
-        for k in params[1:end - 1]
-            v = model.parameters[k]
-            len = print_thing(io, "$(k) = $(v)"; len=len)
-        end
-        if nprm > 0 
+        if nprm == 0
+            println(io)
+        else
+            params = collect(keys(model.parameters))
+            for k in params[1:end - 1]
+                v = model.parameters[k]
+                len = print_things(io, k, " = ", v; len=len)
+            end
             k = params[end]
             v = model.parameters[k]
-            len = print_thing(io, "$(k) = $(v)"; len=len, last=true)
+            len = print_things(io, k, " = ", v; len=len, last=true)
         end
     end
     print(io, length(model.equations), " equations(s) with ", length(model.auxeqns), " auxiliary equations: \n")
@@ -235,7 +247,7 @@ end
 # Note: These macros simply store the information into the corresponding 
 # arrays within the model instance. The actual processing is done in @initialize
 
-export @variables, @shocks, @parameters, @equations, @autoshocks, @autoexogenize
+export @variables, @shocks, @parameters, @equations #= , @autoshocks =#, @autoexogenize
 
 """
     @variables model names...
@@ -257,8 +269,8 @@ end
 ````
 """
 macro variables(model, block::Expr)
-    vars = filter(a -> a isa Symbol, block.args)
-    return esc(:(unique!(append!($(model).variables, $vars)), nothing))
+    vars = filter(a -> !isa(a, LineNumberNode), block.args)
+    return esc(:(unique!(append!($(model).variables, $vars)); nothing ))
 end
 macro variables(model, vars::Symbol...)
     return esc(:( unique!(append!($(model).variables, $vars)); nothing ))
@@ -284,25 +296,25 @@ end
 ````
 """
 macro shocks(model, block::Expr)
-    shks = filter(a -> a isa Symbol, block.args)
+    shks = filter(a -> !isa(a, LineNumberNode), block.args)
     return esc(:( unique!(append!($(model).shocks, $shks)); nothing ))
 end
 macro shocks(model, shks::Symbol...)
     return esc(:( unique!(append!($(model).shocks, $shks)); nothing ))
 end
 
-"""
-    @autoshocks model
+# """
+#     @autoshocks model
 
-Create a list of shocks that matches the list of variables.  Each shock name is
-created from a variable name by appending "_shk".
-"""
-macro autoshocks(model)
-    esc(:(
-        $(model).shocks = map(x -> Meta.parse("$(x)_shk"), $(model).variables);
-        nothing
-    ))
-end
+# Create a list of shocks that matches the list of variables.  Each shock name is
+# created from a variable name by appending "_shk".
+# """
+# macro autoshocks(model)
+#     esc(:(
+#         $(model).shocks = map(x -> Meta.parse("$(x)_shk"), $(model).variables);
+#         nothing
+#     ))
+# end
 
 """
     @parameters model begin
@@ -361,20 +373,28 @@ Usage example:
 """
 macro equations(model, block::Expr)
     if block.head != :block
-        error("list of equations mush be within a begin-end block")
+        error("A list of equations mush be within a begin-end block")
     end
     ret = Expr(:block)
     eqn = Expr(:block)
     for expr in block.args
         if isa(expr, LineNumberNode)
             push!(eqn.args, expr)
-        elseif isa(expr, Expr) && expr.head == :(=)
+            continue
+        end
+        if isa(expr, Expr) && expr.head == :(=)
             push!(eqn.args, expr)
             push!(ret.args, :(push!($model.equations, $(Meta.quot(eqn)))))
             eqn = Expr(:block)
-        else
-            eqn = Expr(:block)
+            continue
         end
+        if isa(expr, Expr) && expr.head == :macrocall && expr.args[1] == docvar.args[1]
+            push!(eqn.args, expr)
+            push!(ret.args, :(push!($model.equations, $(Meta.quot(eqn)))))
+            eqn = Expr(:block)
+            continue
+        end
+        eqn = Expr(:block)
     end
     return esc(ret)
 end
@@ -410,7 +430,8 @@ process_equation(model::Model, expr::String; kwargs...) = process_equation(model
 # process_equation(model::Model, val::Symbol; kwargs...) = process_equation(model, Expr(:block, val); kwargs...)
 function process_equation(model::Model, expr::Expr; 
     modelmodule::Module=moduleof(model), 
-    line=LineNumberNode(0))
+    line=LineNumberNode(0),
+    doc="")
 
     # a list of all known time series 
     allvars = [model.variables; model.shocks; model.auxvars]
@@ -425,7 +446,7 @@ function process_equation(model::Model, expr::Expr;
 
     add_reference(sym, tind) = add_reference(sym, tind, indexin([sym], allvars)[1])
     add_reference(sym::Symbol, tind::Int, vind::Int) = begin
-        vsym = Symbol("#$sym#$tind#")           # replace with a dummy symbol
+        vsym = Symbol("$sym#$tind#")           # replace with a dummy symbol
         push!(references, (tind, vind) => vsym) # keep track of indexes and dummy symbol
     end
 
@@ -476,6 +497,29 @@ function process_equation(model::Model, expr::Expr;
     end
     # Main version of process() - it's recursive
     function process(ex::Expr)
+        if ex.head == :macrocall && ex.args[1] == docvar.args[1]
+            line = ex.args[2]
+            doc *= ex.args[3]
+            return process(ex.args[4])
+        end
+        if ex.head == :macrocall
+            # if ex.args[1] == docvar.args[1]
+            #     push!(source, ex.args[2])
+            #     doc = ex.args[3]
+            #     return process(ex.args[4])
+            # end
+            mfunc = Symbol(replace(string(ex.args[1]), "@" => "at_"))
+            if !isdefined(modelmodule, mfunc)
+                error_process("Unknown meta function $(ex.args[1]).", ex)
+            end
+            margs = map(filter(x -> !isa(x, LineNumberNode), ex.args[3:end])) do arg
+                arg = process(arg)
+                arg isa Expr ? Meta.quot(arg) : 
+                arg isa Symbol ? QuoteNode(arg) : 
+                arg 
+            end
+            ex = modelmodule.eval(Expr(:call, mfunc, margs...))
+        end
         if ex.head == :ref
             # expression is an indexing expression
             name, index = ex.args
@@ -558,7 +602,7 @@ function process_equation(model::Model, expr::Expr;
     end
 
     # call process() to gather information
-    expr = process(expr)
+    new_expr = process(expr)
     # if source information missing, set from argument
     push!(source, line)
     # collect the indices and dummy symbols of the mentioned variables
@@ -566,7 +610,7 @@ function process_equation(model::Model, expr::Expr;
     vinds = collect(keys(references))
     vsyms = collect(values(references))
     # make a residual expressoin for the eval function
-    residual = make_residual_expression(expr)
+    residual = make_residual_expression(new_expr)
     # add the source information to residual expression
     residual = Expr(:block, source[1], residual)
     resid, RJ = let mparams = model.parameters
@@ -579,7 +623,7 @@ function process_equation(model::Model, expr::Expr;
         funcs_expr = makefuncs(residual, vsyms, param_assigments; mod=modelmodule)
         modelmodule.eval(funcs_expr)
     end
-    return Equation(expr, residual, vinds, vsyms, resid, RJ)
+    return Equation(doc, expr, residual, vinds, vsyms, resid, RJ)
 end
 
 
@@ -596,6 +640,7 @@ the Equation() instance for it and add it to the model instance.
 function add_equation!(model::Model, expr::Expr; modelmodule::Module=moduleof(model))
     source = LineNumberNode[]
     auxeqns = Expr[]
+    doc = ""
 
     ##################################
     # We process() the expression looking for substitutions. 
@@ -611,17 +656,19 @@ function add_equation!(model::Model, expr::Expr; modelmodule::Module=moduleof(mo
         return line
     end
     function process(expr::Expr)
+        if expr.head == :block && expr.args[1] isa LineNumberNode && length(expr.args) == 2
+            push!(source, expr.args[1])
+            return process(expr.args[2])
+        end
         if expr.head == :macrocall
-            mfunc = Symbol(replace(string(expr.args[1]), "@" => "at_"))
-            if !isdefined(modelmodule, mfunc)
-                error_process("Unknown meta function $(expr.args[1]).", expr)
+            mname, mline = expr.args[1:2]
+            margs = expr.args[3:end]
+            push!(source, mline)
+            if mname == docvar.args[1]
+                doc = margs[1]
+                return process(margs[2])
             end
-            margs = map(filter(x -> !isa(x, LineNumberNode), expr.args[2:end])) do arg
-                arg isa Expr ? Meta.quot(arg) : 
-                arg isa Symbol ? QuoteNode(arg) : 
-                arg 
-            end
-            expr = modelmodule.eval(Expr(:call, mfunc, margs...))
+            return Expr(:macrocall, mname, nothing, process.(margs)...)
         end
         # recursively process all arguments
         args = []
@@ -651,7 +698,7 @@ function add_equation!(model::Model, expr::Expr; modelmodule::Module=moduleof(mo
     if isempty(source)
         push!(source, LineNumberNode(0))
     end
-    eqn = process_equation(model, new_expr; modelmodule=modelmodule, line=source[1])
+    eqn = process_equation(model, new_expr; modelmodule=modelmodule, line=source[1], doc=doc)
     push!(model.equations, eqn)
     model.maxlag = max(model.maxlag, eqn.maxlag)
     model.maxlead = max(model.maxlead, eqn.maxlead)

@@ -39,6 +39,7 @@ the Model object, which may not be available at the time the equation expression
 is first read.
 """
 struct Equation <: AbstractEquation
+    doc::String
     "The original expression entered by the user"
     expr::ExtExpr      # original expression
     """
@@ -64,24 +65,20 @@ struct Equation <: AbstractEquation
     eval_resid::Function  # function evaluating the residual
     "A callable (function) evaluating the (residual, gradient) pair. Argument is a vector of Float64 same lenght as `vinds`"
     eval_RJ::Function     # Function evaluating the residual and its gradient
-    # 
-    # dummy constructor - just stores the expresstion without any processing
-    Equation(expr::ExtExpr) = new(expr, Expr(:block), [], [], 0, 0, eqnnotready, eqnnotready)
-    # default constructor
-    Equation(expr, resid, vinds, vsyms, maxlag, maxlead, eval_resid, eval_RJ) =
-        new(expr, resid, vinds, vsyms, maxlag, maxlead, eval_resid, eval_RJ)
-    # constructor that computes maxlag and maxlead on the fly
-    function Equation(expr, resid, vinds, vsyms, eval_resid, eval_RJ) 
-        # compute `maxlag` and `maxlead`
-        maxlag, maxlead = (isempty(vinds) ? (0, 0) : extrema(v[1] for v in vinds) .* (-1, 1))
-        # call the default constructor
-        return new(expr, resid, vinds, vsyms, maxlag, maxlead, eval_resid, eval_RJ)
-    end
+end
+
+# 
+# dummy constructor - just stores the expresstion without any processing
+Equation(expr::ExtExpr) = Equation("", expr, Expr(:block), [], [], 0, 0, eqnnotready, eqnnotready)
+
+# constructor that computes maxlag and maxlead on the fly
+function Equation(doc, expr, resid, vinds, vsyms, eval_resid, eval_RJ) 
+    # compute `maxlag` and `maxlead`
+    maxlag, maxlead = (isempty(vinds) ? (0, 0) : extrema(v[1] for v in vinds) .* (-1, 1))
+    # call the default constructor
+    return Equation(doc, expr, resid, vinds, vsyms, maxlag, maxlead, eval_resid, eval_RJ)
 end
 
 # Allows us to pass a Number of a Symbol or a raw Expr to calls where Equation is expected.
 Base.convert(::Type{Equation}, e::ExtExpr) = Equation(e)
-
-
-
 

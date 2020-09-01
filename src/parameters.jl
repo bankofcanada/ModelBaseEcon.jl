@@ -76,7 +76,7 @@ end
 getdepends(p::ParamAlias) = (p.name,)    # alias depends on its target
 
 Base.show(io::IO, p::ParamAlias) = show(io, MIME"text/plain"(), p)
-Base.show(io::IO, ::MIME"text/plain", p::ParamAlias) = print(io, "Alias of: ", p.name)
+Base.show(io::IO, ::MIME"text/plain", p::ParamAlias) = get(io, :compact, false) ? print(io, "Alias of: ", p.name) : print(io, p.name)
 
 """
     struct ParamLink
@@ -95,7 +95,7 @@ ParamLink(deps::Vector{Symbol}, expr::Expr) = ParamLink(tuple(deps...), expr)
 getdepends(p::ParamLink) = p.depends   
 
 Base.show(io::IO, p::ParamLink) = show(io, MIME"text/plain"(), p)
-Base.show(io::IO, ::MIME"text/plain", p::ParamLink) = begin
+Base.show(io::IO, ::MIME"text/plain", p::ParamLink) = get(io, :compact, false) ? print(io, p.link) : begin
     length(p.depends) == 0 && (print(io, "External link: ", p.link); return)
     length(p.depends) == 1 && (print(io, "Link to ", p.depends[1], ": ", p.link); return)
     print(io, "Link to (", join(p.depends, ", "), "): ", p.link)

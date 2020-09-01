@@ -16,12 +16,14 @@ struct SteadyStateEquation <: AbstractEquation
     eval_resid::Function
     eval_RJ::Function
     # The default constructor
-    SteadyStateEquation(type, vinds, vsyms, expr, eval_resid, eval_RJ) = 
-            new(type, vinds, vsyms, expr, eval_resid, eval_RJ)
+    # SteadyStateEquation(type, vinds, vsyms, expr, eval_resid, eval_RJ) = 
+    #         new(type, vinds, vsyms, expr, eval_resid, eval_RJ)
     # # Constructor that automatically adds `eval_RJ` from `eval_resid`
     # SteadyStateEquation(type, vinds, vsyms, expr, eval_resid) = 
     #         new(type, vinds, vsyms, expr, eval_resid, make_eval_RJ(eval_resid, length(vinds)))
 end
+
+doc(::SteadyStateEquation) = ""
 
 
 ########################################################
