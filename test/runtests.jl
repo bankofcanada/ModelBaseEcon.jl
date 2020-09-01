@@ -19,6 +19,41 @@ using Test
     @test o.name == "Zoro"
 end
 
+@testset "Vars" begin
+    y1 = :y
+    y2 = ModelSymbol(:y)
+    y3 = ModelSymbol("y3", :y)
+    y4 = ModelSymbol(quote "y4" y end)
+    @test y1 == y2
+    @test y1 == y3
+    @test y1 == y4
+    @test y2 == y3
+    @test y2 == y4
+    @test y3 == y4
+    ally = Symbol[y1,y2,y3,y4]
+    @test y1 in ally
+    @test y2 in ally
+    @test y3 in ally
+    @test y4 in ally
+    @test indexin([y1,y2,y3,y4], ally) == [1,1,1,1]
+    ally = ModelSymbol[y1,y2,y3,y4,quote "y5" y end]
+    @test indexin([y1,y2,y3,y4], ally) == [1,1,1,1]
+    ally = Dict{Symbol,Any}()
+    get!(ally, y1, "y1")
+    get!(ally, y2, "y2")
+    @test length(ally) == 1
+    @test ally[y3] == "y1"
+    ally = Dict{ModelSymbol,Any}()
+    get!(ally, y1, "y1")
+    get!(ally, y2, "y2")
+    @test length(ally) == 1
+    @test ally[y3] == "y1"
+    @test sprint(print, y2, context=IOContext(stdout, :compact => true)) == "y"
+    @test sprint(print, y2, context=IOContext(stdout, :compact => false)) == "y"
+    @test sprint(print, y3, context=IOContext(stdout, :compact => true)) == "y"
+    @test sprint(print, y3, context=IOContext(stdout, :compact => false)) == "\"y3\" y"
+end
+
 module E
     using ModelBaseEcon
 end
@@ -61,7 +96,7 @@ end
 
 @testset "meta" begin
     mod = Model()
-    @parameters mod a=0.1, b=1.0-a
+    @parameters mod a = 0.1, b = 1.0 - a
     @variables mod x
     @shocks mod sx
     @equations mod begin
@@ -115,12 +150,12 @@ end
     @test  add_equation!(mod, :(x = sx[t])) isa Model
     @test  add_equation!(mod, :(x[t] = sx)) isa Model
     @test  add_equation!(mod, :(x[t] = sx[t])) isa Model
-    @test compare_resids(mod.equations[end], mod.equations[end-1])
-    @test compare_resids(mod.equations[end], mod.equations[end-2])
+    @test compare_resids(mod.equations[end], mod.equations[end - 1])
+    @test compare_resids(mod.equations[end], mod.equations[end - 2])
     @test_throws ArgumentError add_equation!(mod, :(@notametafunction(x[t]) = 7))
     @test_throws ArgumentError add_equation!(mod, :(x[t] = unknownsymbol))
     @test_throws ArgumentError add_equation!(mod, :(x[t] = unknownseries[t]))
-    @test_throws ArgumentError add_equation!(mod, :(x[t] = let c = 5; sx[t+c]; end))
+    @test_throws ArgumentError add_equation!(mod, :(x[t] = let c = 5; sx[t + c]; end))
 end
 
 ############################################################################
@@ -174,7 +209,7 @@ end
         @test neqns(m.sstate) == 3
         @test length(alleqns(m.sstate)) == 3
     end
-end
+    end
 
 @testset "E1.lin" begin
     m = deepcopy(E1.model)
@@ -209,7 +244,7 @@ end
         show(io, MIME"text/plain"(), m.parameters)
         @test length(split(String(take!(io)), '\n')) == 4
     end
-end
+    end
 
 module AUX
 using ModelBaseEcon
@@ -236,7 +271,7 @@ end
         @test x == ax[:, 1:2]
         @test ax[:, 3:4] == [0.0 0.0; 0.1 log(2.0); 0.1 log(2.0); 0.0 0.0]
     end
-end
+    end
 
 
 @using_example E2
