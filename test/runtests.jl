@@ -24,8 +24,9 @@ end
     y2 = ModelSymbol(:y)
     y3 = ModelSymbol("y3", :y)
     y4 = ModelSymbol(quote "y4" y end)
+    @test_throws ArgumentError ModelSymbol(:(x+5))
     @test y1 == y2
-    @test y1 == y3
+    @test y3 == y1
     @test y1 == y4
     @test y2 == y3
     @test y2 == y4
@@ -36,8 +37,9 @@ end
     @test y3 in ally
     @test y4 in ally
     @test indexin([y1,y2,y3,y4], ally) == [1,1,1,1]
-    ally = ModelSymbol[y1,y2,y3,y4,quote "y5" y end]
+    ally = ModelSymbol[y1,y2,y3,y4,:y,quote "y5" y end]
     @test indexin([y1,y2,y3,y4], ally) == [1,1,1,1]
+    @test length(unique(hash.(ally))) == 1
     ally = Dict{Symbol,Any}()
     get!(ally, y1, "y1")
     get!(ally, y2, "y2")
