@@ -44,9 +44,9 @@ mutable struct Model <: AbstractModel
     sstate::SteadyStateData
     #### Inputs from user
     # transition variables
-    variables::Vector{Symbol}
+    variables::Vector{ModelSymbol}
     # shock variables
-    shocks::Vector{Symbol}
+    shocks::Vector{ModelSymbol}
     # transition equations
     equations::Vector{Equation}
     # parameters 
@@ -235,7 +235,7 @@ end
 # Note: These macros simply store the information into the corresponding 
 # arrays within the model instance. The actual processing is done in @initialize
 
-export @variables, @shocks, @parameters, @equations, @autoshocks, @autoexogenize
+export @variables, @shocks, @parameters, @equations #=, @autoshocks =#, @autoexogenize
 
 """
     @variables model names...
@@ -257,8 +257,8 @@ end
 ````
 """
 macro variables(model, block::Expr)
-    vars = filter(a -> a isa Symbol, block.args)
-    return esc(:(unique!(append!($(model).variables, $vars)), nothing))
+    vars = filter(a -> !isa(a, LineNumberNode), block.args)
+    return esc(:(unique!(append!($(model).variables, $vars)); nothing ))
 end
 macro variables(model, vars::Symbol...)
     return esc(:( unique!(append!($(model).variables, $vars)); nothing ))
@@ -284,25 +284,25 @@ end
 ````
 """
 macro shocks(model, block::Expr)
-    shks = filter(a -> a isa Symbol, block.args)
+    shks = filter(a -> !isa(a, LineNumberNode), block.args)
     return esc(:( unique!(append!($(model).shocks, $shks)); nothing ))
 end
 macro shocks(model, shks::Symbol...)
     return esc(:( unique!(append!($(model).shocks, $shks)); nothing ))
 end
 
-"""
-    @autoshocks model
+# """
+#     @autoshocks model
 
-Create a list of shocks that matches the list of variables.  Each shock name is
-created from a variable name by appending "_shk".
-"""
-macro autoshocks(model)
-    esc(:(
-        $(model).shocks = map(x -> Meta.parse("$(x)_shk"), $(model).variables);
-        nothing
-    ))
-end
+# Create a list of shocks that matches the list of variables.  Each shock name is
+# created from a variable name by appending "_shk".
+# """
+# macro autoshocks(model)
+#     esc(:(
+#         $(model).shocks = map(x -> Meta.parse("$(x)_shk"), $(model).variables);
+#         nothing
+#     ))
+# end
 
 """
     @parameters model begin
