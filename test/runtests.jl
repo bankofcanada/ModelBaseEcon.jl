@@ -99,14 +99,24 @@ end
         @movav(x[t] + 0.3x[t + 2],3) = 0
     end
     @initialize mod
+
+    compare_resids(e1, e2) = (
+        e1.resid.head == e2.resid.head  && (
+            (length(e1.resid.args) == length(e2.resid.args) == 2 && e1.resid.args[2] == e2.resid.args[2]) ||
+            (length(e1.resid.args) == length(e2.resid.args) == 1 && e1.resid.args[1] == e2.resid.args[1]) 
+        )
+    )
+
     for i = 2:2:length(mod.equations)
-        @test mod.equations[i - 1].expr == mod.equations[i].expr
+        @test compare_resids(mod.equations[i - 1], mod.equations[i])
     end
     # test errors and warnings
     mod.warn.no_t = false
     @test  add_equation!(mod, :(x = sx[t])) isa Model
     @test  add_equation!(mod, :(x[t] = sx)) isa Model
-    @test mod.equations[end].expr == :(x[t] = sx[t])
+    @test  add_equation!(mod, :(x[t] = sx[t])) isa Model
+    @test compare_resids(mod.equations[end], mod.equations[end-1])
+    @test compare_resids(mod.equations[end], mod.equations[end-2])
     @test_throws ArgumentError add_equation!(mod, :(@notametafunction(x[t]) = 7))
     @test_throws ArgumentError add_equation!(mod, :(x[t] = unknownsymbol))
     @test_throws ArgumentError add_equation!(mod, :(x[t] = unknownseries[t]))
@@ -244,7 +254,7 @@ end
     compare_RJ_R!_(E2.model)
 end
 
-@testset "sstate" begin
+@testset "E2.sstate" begin
     m = E2.model
     ss = m.sstate
     empty!(ss.constraints)

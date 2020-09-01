@@ -3,18 +3,24 @@
 abstract type AbstractEquation end
 
 # all equations should have `expr`,`vinds`, `vsyms` and `eval_resid`, `eval_RJ`
-for fn in (:expr, :vinds, :vsyms, :eval_resid, :eval_RJ)
+for fn in (:doc, :expr, :vinds, :vsyms, :eval_resid, :eval_RJ)
     local qnfn = QuoteNode(fn)
     quote
-        @inline $fn(eqn::AE) where AE <: AbstractEquation = getfield(eqn, $qnfn) # $qnfn ∈ fieldnames(AE) ? getfield(eqn, $qnfn) : error("Must overload `$fn(::$(AE))`")
+        @inline $fn(eqn::AbstractEquation) = getfield(eqn, $qnfn) # $qnfn ∈ fieldnames(AE) ? getfield(eqn, $qnfn) : error("Must overload `$fn(::$(AE))`")
     end |> eval
 end
 
-@inline eval_resid(eqn::AE, x) where AE <: AbstractEquation = eval_resid(eqn)(x)
-@inline eval_RJ(eqn::AE, x) where AE <: AbstractEquation = eval_RJ(eqn)(x)
+@inline eval_resid(eqn::AbstractEquation, x) = eval_resid(eqn)(x)
+@inline eval_RJ(eqn::AbstractEquation, x) = eval_RJ(eqn)(x)
 
 # 
-Base.show(io::IO, eqn::AbstractEquation) = print(io, expr(eqn))
+function Base.show(io::IO, eqn::AbstractEquation) 
+    if isempty(doc(eqn)) || get(io, :compact, false)
+        print(io, expr(eqn))
+    else
+        println(io, "\"", doc(eqn), "\"\n", expr(eqn))
+    end
+end
 
 
 abstract type AbstractModel end
