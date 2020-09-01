@@ -98,7 +98,7 @@ end
 
 @testset "meta" begin
     mod = Model()
-    @parameters mod a = 0.1, b = 1.0 - a
+    @parameters mod a = 0.1 b = 1.0 - a
     @variables mod x
     @shocks mod sx
     @equations mod begin

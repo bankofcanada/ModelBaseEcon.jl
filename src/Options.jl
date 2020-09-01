@@ -76,6 +76,13 @@ Construct an Options instance as an exact copy of an existing instance.
 Options(opts::Options) = Options(deepcopy(Dict(opts.contents)))
     
 ############
+# compare
+
+Base.:(==)(opts::Options, opts2::Options) = opts.contents == opts2.contents
+Base.:(==)(opts::Dict, opts2::Options) = opts == opts2.contents
+Base.:(==)(opts::Options, opts2::Dict) = opts.contents == opts2
+    
+############
 # merge
 
 """
@@ -111,7 +118,17 @@ Base.getproperty(opts::Options, name::Symbol) =
 ############
 # Pretty printing
 
-function Base.show(io::IO, opts::Options) 
+function Base.show(io::IO, opts::Options)
+    print(io, "Options(")
+    str = String[
+        sprint(print, on, "=", ov, context=io, sizehint=0)
+        for (on, ov) in pairs(opts)
+    ]
+    print(io, join(str, ", "))
+    print(io, ")")
+end
+
+function Base.show(io::IO, ::MIME"text/plain", opts::Options) 
     recur_io = IOContext(io, :SHOWN_SET => opts.contents,
                              :typeinfo => eltype(opts.contents),
                              :compact => get(io, :compact, true))

@@ -32,6 +32,7 @@ include("steadystate.jl")
 include("parameters.jl")
 include("metafuncs.jl")
 include("model.jl")
+include("export_model.jl")
 include("linearize.jl")
 
 """

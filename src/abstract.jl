@@ -18,7 +18,7 @@ function Base.show(io::IO, eqn::AbstractEquation)
     if isempty(doc(eqn)) || get(io, :compact, false)
         print(io, expr(eqn))
     else
-        println(io, "\"", doc(eqn), "\"\n", expr(eqn))
+        print(io, "\"", doc(eqn), "\"\n", expr(eqn))
     end
 end
 
