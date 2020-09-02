@@ -54,6 +54,11 @@ Base.deepcopy_internal(p::Parameters, stackdict::IdDict) = Parameters(Ref(p.mod[
 @forward Parameters.contents Base.iterate, Base.length
 # bracket notation read access
 @forward Parameters.contents Base.getindex
+# dict access
+Base.get(pars::Parameters, key, default) = get(pars.contents, key, default)
+# Base.get!(pars::Parameters, key, default) = get!(pars.contents, key, default)
+
+@forward Parameters.constants Base.get, Base.get!
 
 """
     getdepends(p)
@@ -76,7 +81,7 @@ end
 getdepends(p::ParamAlias) = (p.name,)    # alias depends on its target
 
 Base.show(io::IO, p::ParamAlias) = show(io, MIME"text/plain"(), p)
-Base.show(io::IO, ::MIME"text/plain", p::ParamAlias) = get(io, :compact, false) ? print(io, "Alias of: ", p.name) : print(io, p.name)
+Base.show(io::IO, ::MIME"text/plain", p::ParamAlias) = print(io, p.name)
 
 """
     struct ParamLink
@@ -95,11 +100,9 @@ ParamLink(deps::Vector{Symbol}, expr::Expr) = ParamLink(tuple(deps...), expr)
 getdepends(p::ParamLink) = p.depends   
 
 Base.show(io::IO, p::ParamLink) = show(io, MIME"text/plain"(), p)
-Base.show(io::IO, ::MIME"text/plain", p::ParamLink) = get(io, :compact, false) ? print(io, p.link) : begin
-    length(p.depends) == 0 && (print(io, "External link: ", p.link); return)
-    length(p.depends) == 1 && (print(io, "Link to ", p.depends[1], ": ", p.link); return)
-    print(io, "Link to (", join(p.depends, ", "), "): ", p.link)
-end
+Base.show(io::IO, ::MIME"text/plain", p::ParamLink) = print(io, p.link)
+
+Base.:(==)(l::ParamLink, r::ParamLink) = l.link == r.link
 
 """
     build_deps!(deps, pkeys, val)
@@ -120,35 +123,18 @@ end
 
 # bracket notation write access
 function Base.setindex!(pars::Parameters, val, key)
-    if val isa Expr
+    if val isa Expr || val in keys(pars)
         deps = build_deps!(Symbol[], keys(pars), val)
-        if isempty(deps)
-            # no dependencies on other parameters. Is it a vector, 
-            # or some other expression that evaluates to a constant?
-            try
-                val = pars.mod.eval(val)
-            catch
-                # no. keep is as an expression that will be pasted in the
-                # residual functions. hopefully at that time it will be valid, if
-                # not they'll get an error.
-                ParamLink(Symbol[], val)
+        alldeps = copy(deps)
+        while length(alldeps) > 0
+            d = pop!(alldeps)
+            ddeps = getdepends(pars[d])
+            if key ∈ ddeps
+                throw(ArgumentError("Circular dependency of $(key) and $(d) in redefinition of $(key)."))
             end
-        else
-            # recursively scan the dependencies of the dependencies
-            # we must not allow circular dependencies.
-            alldeps = copy(deps)
-            while length(alldeps) > 0
-                d = pop!(alldeps)
-                ddeps = getdepends(pars[d])
-                if key ∈ ddeps
-                    throw(ArgumentError("Circular dependency of $(key) and $(d) in redefinition of $(key)."))
-                end
-                append!(alldeps, ddeps)
-            end
-            val = ParamLink(deps, val)
+            append!(alldeps, ddeps)
         end
-    elseif val isa Symbol && val in keys(pars)
-        val = ParamAlias(val)
+        val = val isa Expr ? ParamLink(deps, val) : ParamAlias(val)
     end
     setindex!(pars.contents, val, key)
     return pars

@@ -64,7 +64,9 @@ mutable struct Model <: AbstractModel
     evaldata::AbstractModelEvaluationData
     # 
     # constructor of an empty model
-    Model(opts::Options=defaultoptions) = new(merge(defaultoptions, opts), 
+    Model(opts::Options) = new(merge(defaultoptions, opts), 
+        ModelFlags(), SteadyStateData(), [], [], [], Parameters(), Dict(), 0, 0, [], [], NoMED)
+    Model() = new(deepcopy(defaultoptions),
         ModelFlags(), SteadyStateData(), [], [], [], Parameters(), Dict(), 0, 0, [], [], NoMED)
 end
 
@@ -332,15 +334,19 @@ macro parameters(model, args::Expr...)
     if length(args) == 1 && args[1].head == :block
         args = args[1].args
     end
-    args = filter(a -> a isa Expr && a.head == :(=), [args...])
     ret = Expr(:block)
     for a in args
-        if a isa Expr && a.head == :(=)
+        if a isa LineNumberNode
+            continue
+        end
+        if Meta.isexpr(a, :(=), 2)
             key, value = a.args
             key = QuoteNode(key)
             value = Meta.quot(value)
             push!(ret.args, :(push!($(model).parameters, $(key) => $(value))))
+            continue
         end
+        throw(ArgumentError("Parameter definitions must be assignments, not\n  $a"))
     end
     return esc(ret)
 end
