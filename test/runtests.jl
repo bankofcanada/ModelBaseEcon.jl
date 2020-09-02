@@ -82,6 +82,37 @@ end
     @test_throws ModelBaseEcon.ModelErrorBase ModelBaseEcon.modelerror()
 end
 
+@testset "Parameters" begin
+    params = Parameters()
+    push!(params, :a => 1.0)
+    push!(params, :b => :(1.0-a))
+    push!(params, :c => :b)
+    push!(params, :d => :(sin(2π/3)))
+    @test length(params) == 4
+    # dot notation evaluates
+    @test params.a isa Number
+    @test params.b isa Number
+    @test params.c isa Number
+    @test params.d isa Number
+    # [] notation returns the holding structure
+    a = params[:a]
+    b = params[:b]
+    c = params[:c]
+    d = params[:d]
+    @test a isa Number
+    @test b isa ModelBaseEcon.ParamLink
+    @test c isa ModelBaseEcon.ParamAlias
+    @test d isa ModelBaseEcon.ParamLink
+    @test isempty(ModelBaseEcon.getdepends(a))
+    @test ModelBaseEcon.getdepends(b) == (:a,)
+    @test ModelBaseEcon.getdepends(c) == (:b,)
+    @test isempty(ModelBaseEcon.getdepends(d))
+    # circular dependencies not allowed
+    @test_throws ArgumentError push!(params, :a => :b)
+    # even deep ones
+    @test_throws ArgumentError push!(params, :a => :c)
+end
+
 @testset "ifelse" begin
     m = Model()
     @variables m x

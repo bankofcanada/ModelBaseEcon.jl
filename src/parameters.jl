@@ -56,7 +56,7 @@ Base.deepcopy_internal(p::Parameters, stackdict::IdDict) = Parameters(Ref(p.mod[
 @forward Parameters.contents Base.getindex
 # dict access
 Base.get(pars::Parameters, key, default) = get(pars.contents, key, default)
-Base.get!(pars::Parameters, key, default) = get!(pars.contents, key, default)
+# Base.get!(pars::Parameters, key, default) = get!(pars.contents, key, default)
 
 @forward Parameters.constants Base.get, Base.get!
 
