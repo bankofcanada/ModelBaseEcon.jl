@@ -123,7 +123,7 @@ end
 
 # bracket notation write access
 function Base.setindex!(pars::Parameters, val, key)
-    if val isa Expr
+    if val isa Expr || val in keys(pars)
         deps = build_deps!(Symbol[], keys(pars), val)
         alldeps = copy(deps)
         while length(alldeps) > 0
@@ -134,9 +134,7 @@ function Base.setindex!(pars::Parameters, val, key)
             end
             append!(alldeps, ddeps)
         end
-        val = ParamLink(deps, val)
-    elseif val isa Symbol && val in keys(pars)
-        val = ParamAlias(val)
+        val = val isa Expr ? ParamLink(deps, val) : ParamAlias(val)
     end
     setindex!(pars.contents, val, key)
     return pars

@@ -111,6 +111,9 @@ end
     @test_throws ArgumentError push!(params, :a => :b)
     # even deep ones
     @test_throws ArgumentError push!(params, :a => :c)
+    # even when it is in an expr
+    @test_throws ArgumentError push!(params, :a => :(5+b^2))
+    @test_throws ArgumentError push!(params, :a => :(3-c))
 end
 
 @testset "ifelse" begin
