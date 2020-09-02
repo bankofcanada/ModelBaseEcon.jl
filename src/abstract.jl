@@ -2,26 +2,32 @@
 
 abstract type AbstractEquation end
 
-# all equations should have `expr`,`vinds`, `vsyms` and `eval_resid`, `eval_RJ`
-for fn in (:doc, :expr, :vinds, :vsyms, :eval_resid, :eval_RJ)
+# equations must have these fields: expr, vinds, vsyms, eval_resid, eval_RJ
+for fn in (:expr, :vinds, :vsyms, :eval_resid, :eval_RJ)
     local qnfn = QuoteNode(fn)
     quote
-        @inline $fn(eqn::AbstractEquation) = getfield(eqn, $qnfn) # $qnfn ∈ fieldnames(AE) ? getfield(eqn, $qnfn) : error("Must overload `$fn(::$(AE))`")
+        @inline $fn(eqn::AbstractEquation) = getfield(eqn, $qnfn)
     end |> eval
 end
+
+# equations might have these fields. If not, we provide defaults
+@inline type(eqn::AbstractEquation) = :type in fieldnames(typeof(eqn)) ? getfield(eqn, :type) : nothing
+@inline doc(eqn::AbstractEquation) = :doc in fieldnames(typeof(eqn)) ? getfield(eqn, :doc) : ""
 
 @inline eval_resid(eqn::AbstractEquation, x) = eval_resid(eqn)(x)
 @inline eval_RJ(eqn::AbstractEquation, x) = eval_RJ(eqn)(x)
 
-# 
-function Base.show(io::IO, eqn::AbstractEquation) 
-    if isempty(doc(eqn)) || get(io, :compact, false)
-        print(io, expr(eqn))
-    else
-        print(io, "\"", doc(eqn), "\"\n", expr(eqn))
+#
+function Base.show(io::IO, eqn::AbstractEquation)
+    if get(io, :compact, false)
+        return print(io, expr(eqn))
     end
+    docstr = isempty(doc(eqn)) ? "" : "\"$(doc(eqn))\" "
+    typestr = type(eqn) === nothing ? "" : "$(type(eqn)) "
+    print(io, docstr, typestr, expr(eqn))
 end
 
+Base.:(==)(e1::AbstractEquation, e2::AbstractEquation) = type(e1) == type(e1) && expr(e1) == expr(e2)
 
 abstract type AbstractModel end
 
@@ -56,8 +62,8 @@ export sstate
 #######
 
 
-@inline moduleof(f::Function) = parentmodule(f)
-@inline moduleof(e::AE) where AE <: AbstractEquation = parentmodule(eval_resid(e))
+# @inline moduleof(f::Function) = parentmodule(f)
+@inline moduleof(e::AbstractEquation) = parentmodule(eval_resid(e))
 function moduleof(m::AbstractModel)
     eqns = equations(m)
     if isempty(eqns)

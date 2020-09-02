@@ -55,6 +55,9 @@ Base.deepcopy_internal(p::Parameters, stackdict::IdDict) = Parameters(Ref(p.mod[
 # bracket notation read access
 @forward Parameters.contents Base.getindex
 # dict access
+Base.get(pars::Parameters, key, default) = get(pars.contents, key, default)
+Base.get!(pars::Parameters, key, default) = get!(pars.contents, key, default)
+
 @forward Parameters.constants Base.get, Base.get!
 
 """
@@ -98,6 +101,8 @@ getdepends(p::ParamLink) = p.depends
 
 Base.show(io::IO, p::ParamLink) = show(io, MIME"text/plain"(), p)
 Base.show(io::IO, ::MIME"text/plain", p::ParamLink) = print(io, p.link)
+
+Base.:(==)(l::ParamLink, r::ParamLink) = l.link == r.link
 
 """
     build_deps!(deps, pkeys, val)

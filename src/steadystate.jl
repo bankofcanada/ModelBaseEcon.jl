@@ -16,15 +16,12 @@ struct SteadyStateEquation <: AbstractEquation
     eval_resid::Function
     eval_RJ::Function
     # The default constructor
-    # SteadyStateEquation(type, vinds, vsyms, expr, eval_resid, eval_RJ) = 
+    # SteadyStateEquation(type, vinds, vsyms, expr, eval_resid, eval_RJ) =
     #         new(type, vinds, vsyms, expr, eval_resid, eval_RJ)
     # # Constructor that automatically adds `eval_RJ` from `eval_resid`
-    # SteadyStateEquation(type, vinds, vsyms, expr, eval_resid) = 
+    # SteadyStateEquation(type, vinds, vsyms, expr, eval_resid) =
     #         new(type, vinds, vsyms, expr, eval_resid, make_eval_RJ(eval_resid, length(vinds)))
 end
-
-doc(::SteadyStateEquation) = ""
-
 
 ########################################################
 
@@ -54,7 +51,7 @@ export alleqns
 """
     alleqns(ssd::SteadyStateData)
 
-Return a list of all steady state equations. 
+Return a list of all steady state equations.
 
 The list contains all equations derived from the dynamic system and all explicitly added steady state constraints.
 """
@@ -130,8 +127,8 @@ struct SSVarData{DATA <: AbstractVector{Float64}}
 end
 
 Base.propertynames(::SSVarData) = (:level, :slope)
-Base.getproperty(vd::SSVarData, prop::Symbol) = prop == :level ? getfield(vd, :value)[1] : 
-                                                prop == :slope ? getfield(vd, :value)[2] : 
+Base.getproperty(vd::SSVarData, prop::Symbol) = prop == :level ? getfield(vd, :value)[1] :
+                                                prop == :slope ? getfield(vd, :value)[2] :
                                                                  getfield(vd, prop)
 Base.setproperty!(vd::SSVarData, prop::Symbol, val) = prop == :level ? setindex!(getfield(vd, :value), val, 1) :
                                                       prop == :slope ? setindex!(getfield(vd, :value), val, 2) :
@@ -172,7 +169,7 @@ function Base.getindex(sstate::SteadyStateData, var::Symbol)
 end
 
 Base.setindex!(sstate::SteadyStateData, val, var::String) = setindex!(sstate, val, Symbol(var))
-function Base.setindex!(sstate::SteadyStateData, val, var::Symbol) 
+function Base.setindex!(sstate::SteadyStateData, val, var::Symbol)
     ind = indexin([Symbol("$var#lvl")], sstate.vars)[1]
     if ind === nothing
         throw(SSMissingVariableError(v))
@@ -219,7 +216,7 @@ function Base.propertynames(ssd::SteadyStateData, private=false)
 end
 
 #########################
-# 
+#
 
 export printsstate
 
@@ -255,14 +252,14 @@ printsstate(ssd::SteadyStateData) = printsstate(Base.stdout, ssd)
 #   in the steady state equation, we assume that the variable y_ss
 #   follows a linear motion expressed as y_ss[t] = y_ss#lvl + t * y_ss#slp
 #   where y_ss#lvl and y_ss#slp are two unknowns we solve for.
-# 
+#
 #   The dynamic equation has mentions of lags and leads. We replace those
 #   with the above expression.
-# 
+#
 #   Since we have two parameters to determine, we need two steady state equations
 #   from each dynamic equation. We get this by writing the dynamic equation at
-#   two different values of `t` - 0 and another one we call `shift`. 
-# 
+#   two different values of `t` - 0 and another one we call `shift`.
+#
 #   Shift is a an option in the model object, which the user can set to any integer
 #   other than 0. The default is 10.
 
@@ -297,16 +294,15 @@ end
 
 Create a steady state equation from the given dynamic equation for the given model.
 
-!!! note
-    Internal function, do not call directly.
+Internal function, do not call directly.
 """
 function make_sseqn(model::AbstractModel, eqn::Equation; shift::Int64=0)
     local vinds = Int64[]
     local nvars = nvariables(model)
     local nshks = nshocks(model)
     # local nauxvars = nauxvars(model)
-    # ssind converts the dynamic index (t, v) into 
-    # the corresponding indexes of steady state unknowns. 
+    # ssind converts the dynamic index (t, v) into
+    # the corresponding indexes of steady state unknowns.
     # Returned value is a list of length 0, 1, or 2.
     function ssind((ti, vi), )::Array{Int64,1}
         if nvars < vi <= nvars + nshks
@@ -334,7 +330,7 @@ function make_sseqn(model::AbstractModel, eqn::Equation; shift::Int64=0)
     # The corresponding steady state symbols
     vsyms = ss.vars[vinds]
     # In the next loop we build the matrix JT which transforms
-    # from the steady state values to the dynamic point values. 
+    # from the steady state values to the dynamic point values.
     JT = zeros(length(eqn.vinds), length(vinds))
     for (i, (ti, vi)) in enumerate(eqn.vinds)
         # for each index in the dynamic equation, we have a row with all zeros,
@@ -363,8 +359,7 @@ function make_sseqn(model::AbstractModel, eqn::Equation; shift::Int64=0)
     end
     type = shift == 0 ? :tzero : :tshift
     let sseqndata = SSEqnData(shift, JT, eqn)
-        return SteadyStateEquation(type, vinds, vsyms, :($type => $(eqn.expr)), 
-            sseqn_resid_RJ(sseqndata)...)
+        return SteadyStateEquation(type, vinds, vsyms, eqn.expr, sseqn_resid_RJ(sseqndata)...)
     end
 end
 
@@ -394,15 +389,15 @@ function setss!(model::AbstractModel, expr::Expr; type::Symbol,
 
     ###############################################
     #     ssprocess(val)
-    # 
+    #
     # Process the given value to extract information about mentioned parameters and variables.
-    # This function has the side effect of populating the vectors 
+    # This function has the side effect of populating the vectors
     # `vinds`, `vsyms`, `val_params` and `source`
-    # 
+    #
     # Algorithm is recursive over the given expression. The bottom of the recursion is the
-    # processing of a `Number`, a `Symbol`, (or a `LineNumberNode`). 
-    # 
-    # we will store indices 
+    # processing of a `Number`, a `Symbol`, (or a `LineNumberNode`).
+    #
+    # we will store indices
     local vinds = Int64[]
     local vsyms = Symbol[]
     # we will store parameters mentioned in `expr` here
@@ -439,7 +434,7 @@ function setss!(model::AbstractModel, expr::Expr; type::Symbol,
             push!(vinds, makeind(Val(type), vind + nvars))
             return vsym
         end
-        # what to do with unknown symbols? 
+        # what to do with unknown symbols?
         error("unknown parameter $val")
     end
     # a sorce line information: store it and remove it from the expression
@@ -472,11 +467,11 @@ function setss!(model::AbstractModel, expr::Expr; type::Symbol,
     end
     # end of ssprocess() definition
     ###############################################
-    # 
+    #
     lhs, rhs = expr.args
     lhs = ssprocess(lhs)
     rhs = ssprocess(rhs)
-    # 
+    #
     nargs = length(vinds)
     # In case there's no source information, add a dummy one
     push!(source, LineNumberNode(0))
@@ -494,7 +489,17 @@ function setss!(model::AbstractModel, expr::Expr; type::Symbol,
         modelmodule.eval(funcs_expr)
     end
     # We have all the ingredients to create the instance of SteadyStateEquation
-    sscon = SteadyStateEquation(type, vinds, vsyms, :($(lhs) = $(rhs)), resid, RJ)
+    for i = 1:2
+        # remove blocks with line numbers from expr.args[i]
+        a = expr.args[i]
+        if Meta.isexpr(a, :block)
+            args = filter(x -> !isa(x, LineNumberNode), a.args)
+            if length(a.args) == 1
+                expr.args[i] = args[1]
+            end
+        end
+    end
+    sscon = SteadyStateEquation(type, vinds, vsyms, expr, resid, RJ)
     if nargs == 1
         # The equation involves only one variable. See if there's already an equation
         # with just that variable and, if so, remove it.

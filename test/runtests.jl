@@ -10,7 +10,7 @@ using Test
     @test getoption!(o, abstol=1e-11) == 1e-11
     @test :abstol ∈ o
     @test setoption!(o, reltol=1e-3, linear=false) isa Options
-    @test "reltol" ∈ o 
+    @test "reltol" ∈ o
     @test :linear ∈ o
     @test getoption!(o, tol=nothing, linear=true, name="Zoro") == (1e-7, false, "Zoro")
     @test "name" ∈ o && o.name == "Zoro"
@@ -24,7 +24,7 @@ end
     y2 = ModelSymbol(:y)
     y3 = ModelSymbol("y3", :y)
     y4 = ModelSymbol(quote "y4" y end)
-    @test_throws ArgumentError ModelSymbol(:(x+5))
+    @test_throws ArgumentError ModelSymbol(:(x + 5))
     @test y1 == y2
     @test y3 == y1
     @test y1 == y4
@@ -104,34 +104,34 @@ end
     @equations mod begin
         x[t - 1] = sx[t + 1]
         @lag(x[t]) = @lag(sx[t + 2])
-        # 
+        #
         x[t - 1] + a = sx[t + 1] + 3
         @lag(x[t] + a) = @lag(sx[t + 2] + 3)
-        # 
+        #
         x[t - 2] = sx[t]
         @lag(x[t], 2) = @lead(sx[t - 2], 2)
-        # 
+        #
         x[t] - x[t - 1] = x[t + 1] - x[t] + sx[t]
         @d(x[t]) = @d(x[t + 1]) + sx[t]
-        # 
+        #
         (x[t] - x[t + 1]) - (x[t - 1] - x[t]) = sx[t]
         @d(x[t] - x[t + 1]) = sx[t]
-        # 
+        #
         x[t] - x[t - 2] = sx[t]
         @d(x[t],0,2) = sx[t]
-        # 
+        #
         (x[t] - x[t - 1]) - (x[t - 1] - x[t - 2]) = sx[t]
         @d(x[t],2) = sx[t]
-        # 
+        #
         (x[t] - x[t - 2]) - (x[t - 1] - x[t - 3]) = sx[t]
         @d(x[t],1,2) = sx[t]
-        # 
+        #
         log(x[t] - x[t - 2]) - log(x[t - 1] - x[t - 3]) = sx[t]
         @dlog(@d(x[t],0,2)) = sx[t]
-        # 
+        #
         (x[t] + 0.3x[t + 2]) + (x[t - 1] + 0.3x[t + 1]) + (x[t - 2] + 0.3x[t]) = 0
         @movsum(x[t] + 0.3x[t + 2],3) = 0
-        # 
+        #
         ((x[t] + 0.3x[t + 2]) + (x[t - 1] + 0.3x[t + 1]) + (x[t - 2] + 0.3x[t])) / 3 = 0
         @movav(x[t] + 0.3x[t + 2],3) = 0
     end
@@ -140,7 +140,7 @@ end
     compare_resids(e1, e2) = (
         e1.resid.head == e2.resid.head  && (
             (length(e1.resid.args) == length(e2.resid.args) == 2 && e1.resid.args[2] == e2.resid.args[2]) ||
-            (length(e1.resid.args) == length(e2.resid.args) == 1 && e1.resid.args[1] == e2.resid.args[1]) 
+            (length(e1.resid.args) == length(e2.resid.args) == 1 && e1.resid.args[1] == e2.resid.args[1])
         )
     )
 
@@ -158,6 +158,37 @@ end
     @test_throws ArgumentError add_equation!(mod, :(x[t] = unknownsymbol))
     @test_throws ArgumentError add_equation!(mod, :(x[t] = unknownseries[t]))
     @test_throws ArgumentError add_equation!(mod, :(x[t] = let c = 5; sx[t + c]; end))
+end
+
+############################################################################
+
+@testset "export" begin
+    let m = Model()
+        m.warn.no_t = false
+        @parameters m a = 0.3 b = 1 - a c = [1,2,3] d = sin(2π / 3)
+        @variables m begin
+            "variable x" x
+        end
+        @shocks m sx
+        @equations m begin
+            "This equation is super cool"
+            a * @d(x) = b * @d(x[t + 1]) + sx
+        end
+        @initialize m
+        @steadystate m x = a + 1
+
+        export_model(m, "TestModel", "../examples/")
+
+        @test isfile("../examples/TestModel.jl")
+        @using_example TestModel
+        rm("../examples/TestModel.jl")
+
+        @test parameters(TestModel.model) == parameters(m)
+        @test variables(TestModel.model) == variables(m)
+        @test shocks(TestModel.model) == shocks(m)
+        @test equations(TestModel.model) == equations(m)
+        @test sstate(TestModel.model).constraints == sstate(m).constraints
+    end
 end
 
 ############################################################################
@@ -284,7 +315,7 @@ end
     @test length(E2.model.equations) == 3
     @test E2.model.maxlag == 1
     @test E2.model.maxlead == 1
-    test_eval_RJ(E2.model, [0.0, 0.0, 0.0], 
+    test_eval_RJ(E2.model, [0.0, 0.0, 0.0],
         [-.5      1  -.48     0    0  0    0   -.02     0  0  -1  0  0  0 0 0  0 0;
            0  -.375     0  -.75    1  0    0  -.125     0  0   0  0  0 -1 0 0  0 0;
            0      0  -.02     0  .02  0  -.5      1  -.48  0   0  0  0  0 0 0 -1 0])
@@ -307,7 +338,7 @@ end
     end
     @test length(out) == 3
     @test length(split(out[end], "=")) == 2
-    # 
+    #
     @test propertynames(ss) == tuple(variables(m)...)
     @test ss.pinf.level == ss.pinf[1]
     @test ss.pinf.slope == ss.pinf[2]
@@ -328,11 +359,11 @@ end
     @test E3.model.maxlag == 2
     @test E3.model.maxlead == 3
     compare_RJ_R!_(E3.model)
-    test_eval_RJ(E3.model, [0.0, 0.0, 0.0], 
+    test_eval_RJ(E3.model, [0.0, 0.0, 0.0],
         sparse(
             [1, 1, 2, 1, 3, 1, 1, 2, 2, 3,  3,  3,  1,  2,  3,  3,  1,  2,  3],
             [2, 3, 3, 4, 4, 5, 6, 8, 9, 9, 13, 14, 15, 15, 15, 16, 21, 27, 33],
-            [-0.5, 1.0, -0.375, -0.3, -0.02, -0.05, -0.05, -0.75, 1.0, 0.02, -0.25, 
+            [-0.5, 1.0, -0.375, -0.3, -0.02, -0.05, -0.05, -0.75, 1.0, 0.02, -0.25,
              -0.25, -0.02, -0.125, 1.0, -0.48, -1.0, -1.0, -1.0],
             3, 36,
         )
@@ -349,11 +380,11 @@ end
     @test E6.model.maxlead == 3
     compare_RJ_R!_(E6.model)
     nt = 1 + E6.model.maxlag + E6.model.maxlead
-    test_eval_RJ(E6.model, [-0.0027, -0.0025, 0.0, 0.0, 0.0, 0.0], 
+    test_eval_RJ(E6.model, [-0.0027, -0.0025, 0.0, 0.0, 0.0, 0.0],
         sparse(
             [2, 2, 2, 3, 5, 2, 2, 2, 1, 1, 3, 4, 1, 3, 6, 5, 5, 4, 4, 6, 6, 2, 1],
             [1, 2, 3, 3, 3, 4, 5, 6, 8, 9, 9, 9, 10, 15, 15, 20, 21, 26, 27, 32, 33, 39, 45],
-            [-0.1, -0.1, 1.0, -1.0, -1.0, -0.1, -0.1, -0.1, -0.2, 1.0, -1.0, -1.0, -0.2, 1.0, 
+            [-0.1, -0.1, 1.0, -1.0, -1.0, -0.1, -0.1, -0.1, -0.2, 1.0, -1.0, -1.0, -0.2, 1.0,
              -1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0, -1.0],
             6, 6 * 8,
         ))
