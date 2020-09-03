@@ -135,30 +135,28 @@ Base.setproperty!(vd::SSVarData, prop::Symbol, val) = prop == :level ? setindex!
                                                                        setfield!(vd, prop, val)
 
 Base.getindex(vd::SSVarData, i::Int) = getindex(vd.value, i)
-Base.getindex(vd::SSVarData, s::Symbol) = getproperty(vd, s)
-Base.getindex(vd::SSVarData, s::AbstractString) = getproperty(vd, Symbol(s))
+Base.getindex(vd::SSVarData, s) = getproperty(vd, Symbol(s))
 Base.setindex!(vd::SSVarData, val, i::Int) = setindex!(vd.value, val, i)
-Base.setindex!(vd::SSVarData, val, s::Symbol) = setproperty!(vd, s, val)
-Base.setindex!(vd::SSVarData, val, s::AbstractString) = setproperty!(vd, Symbol(s), val)
+Base.setindex!(vd::SSVarData, val, s) = setproperty!(vd, Symbol(s), val)
 
 
 Base.show(io::IO, ::MIME"text/plan", vd::SSVarData) = show(io, vd)
 Base.show(io::IO, vd::SSVarData) = print(io, vd.name, " : ", NamedTuple{(:level, :slope)}(vd.value))
 
-# ssvarindex() - return the index of a steady state value given its Symbol
-# If the symbol might end in #lvl or #slp, if not #lvl is assumed
-function ssvarindex(v::Symbol, vars::AbstractArray{Symbol})
-    ind = indexin([v], vars)[1]
-    if ind === nothing
-        ind = indexin([makesym(Val(:level), v)], vars)[1]
-        if ind === nothing
-            throw(SSMissingVariableError(v))
-        end
-    end
-    return ind
-end
+# # ssvarindex() - return the index of a steady state value given its Symbol
+# # The symbol might end in #lvl or #slp, if not #lvl is assumed
+# function ssvarindex(v::Symbol, vars::AbstractArray{Symbol})
+#     ind = indexin([v], vars)[1]
+#     if ind === nothing
+#         ind = indexin([makesym(Val(:level), v)], vars)[1]
+#         if ind === nothing
+#             throw(SSMissingVariableError(v))
+#         end
+#     end
+#     return ind
+# end
 
-@inline Base.getindex(sstate::SteadyStateData, var::String) = getindex(sstate, Symbol(var))
+@inline Base.getindex(sstate::SteadyStateData, var) = getindex(sstate, Symbol(var))
 function Base.getindex(sstate::SteadyStateData, var::Symbol)
     ind = indexin([Symbol("$var#lvl")], sstate.vars)[1]
     if ind === nothing
@@ -168,7 +166,7 @@ function Base.getindex(sstate::SteadyStateData, var::Symbol)
     end
 end
 
-Base.setindex!(sstate::SteadyStateData, val, var::String) = setindex!(sstate, val, Symbol(var))
+@inline Base.setindex!(sstate::SteadyStateData, val, var) = setindex!(sstate, val, Symbol(var))
 function Base.setindex!(sstate::SteadyStateData, val, var::Symbol)
     ind = indexin([Symbol("$var#lvl")], sstate.vars)[1]
     if ind === nothing

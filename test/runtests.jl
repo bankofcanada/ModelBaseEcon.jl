@@ -85,35 +85,45 @@ end
 @testset "Parameters" begin
     params = Parameters()
     push!(params, :a => 1.0)
-    push!(params, :b => :(1.0-a))
-    push!(params, :c => :b)
-    push!(params, :d => :(sin(2π/3)))
-    @test length(params) == 4
+    push!(params, :b => @link 1.0-a )
+    push!(params, :c => @alias b)
+    push!(params, :e => [1,2,3])
+    push!(params, :d => @link (sin(2π/e[3])) )
+    @test length(params) == 5
     # dot notation evaluates
     @test params.a isa Number
     @test params.b isa Number
     @test params.c isa Number
     @test params.d isa Number
+    @test params.e isa Vector{<:Number}
     # [] notation returns the holding structure
     a = params[:a]
     b = params[:b]
     c = params[:c]
     d = params[:d]
+    e = params[:e]
     @test a isa Number
     @test b isa ModelBaseEcon.ParamLink
     @test c isa ModelBaseEcon.ParamAlias
     @test d isa ModelBaseEcon.ParamLink
-    @test isempty(ModelBaseEcon.getdepends(a))
-    @test ModelBaseEcon.getdepends(b) == (:a,)
-    @test ModelBaseEcon.getdepends(c) == (:b,)
-    @test isempty(ModelBaseEcon.getdepends(d))
+    @test e isa Vector{<:Number}
+    @test isempty(ModelBaseEcon.build_deps(params, a))
+    @test ModelBaseEcon.build_deps(params, b) == Set([:a])
+    @test ModelBaseEcon.build_deps(params, c) == Set([:b])
+    @test ModelBaseEcon.build_deps(params, d) == Set([:e])
+    @test isempty(ModelBaseEcon.build_deps(params, e))
     # circular dependencies not allowed
-    @test_throws ArgumentError push!(params, :a => :b)
+    @test_throws ArgumentError push!(params, :a => @alias b)
     # even deep ones
-    @test_throws ArgumentError push!(params, :a => :c)
+    @test_throws ArgumentError push!(params, :a => @alias c)
     # even when it is in an expr
-    @test_throws ArgumentError push!(params, :a => :(5+b^2))
-    @test_throws ArgumentError push!(params, :a => :(3-c))
+    @test_throws ArgumentError push!(params, :a => @link 5+b^2)
+    @test_throws ArgumentError push!(params, :a => @link 3-c)
+
+    @test params.d ≈ √3/2.0
+    params.e[3] = 2
+    @test 1.0 + params.d ≈ 1.0
+
 end
 
 @testset "ifelse" begin
@@ -132,7 +142,7 @@ end
 
 @testset "meta" begin
     mod = Model()
-    @parameters mod a = 0.1 b = 1.0 - a
+    @parameters mod a = 0.1 b = @link(1.0 - a)
     @variables mod x
     @shocks mod sx
     @equations mod begin
@@ -199,7 +209,12 @@ end
 @testset "export" begin
     let m = Model()
         m.warn.no_t = false
-        @parameters m a = 0.3 b = 1 - a c = [1,2,3] d = sin(2π / 3)
+        @parameters m begin
+            a = 0.3
+            b = @link 1 - a 
+            d = [1,2,3] 
+            c = @link sin(2π / d[3])
+        end
         @variables m begin
             "variable x" x
         end
@@ -222,6 +237,8 @@ end
         @test shocks(TestModel.model) == shocks(m)
         @test equations(TestModel.model) == equations(m)
         @test sstate(TestModel.model).constraints == sstate(m).constraints
+
+        @test_throws ArgumentError TestModel.model.parameters.d = @alias c
     end
 end
 
@@ -298,8 +315,8 @@ end
 @testset "E1.params" begin
     let m = E1.model
         @test propertynames(m.parameters) == (:α, :β)
-        m.β = :(1.0 - α)
-        m.parameters.beta = :β
+        m.β = @link 1.0 - α
+        m.parameters.beta = @alias β
         for α = 0.0:0.1:1.0
             m.α = α
             test_eval_RJ(m, [0.0], [-α 1.0 -m.beta 0.0 -1.0 0.0;])
