@@ -181,7 +181,7 @@ julia> model.c    # uses the new value of b
 """
 macro link(arg)
     return arg isa Expr ? ParamLink(arg) :
-           arg isa Symbol ? ParamAlias(sym) :
+           arg isa Symbol ? ParamAlias(arg) :
            :( throw(ArgumentError("`@link` requires an expression.")) )
 end
 

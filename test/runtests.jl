@@ -143,6 +143,10 @@ end
     @test MetaTest.params.a ≈ 25.0
     @test MetaTest.params.b ≈ 13.0
 
+    @test @alias(c) isa ParamAlias
+    @test @link(c) isa ParamAlias
+    @test @link(c+1) isa ParamLink
+
 end
 
 @testset "ifelse" begin
