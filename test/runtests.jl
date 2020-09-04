@@ -82,6 +82,16 @@ end
     @test_throws ModelBaseEcon.ModelErrorBase ModelBaseEcon.modelerror()
 end
 
+
+module MetaTest
+    using ModelBaseEcon
+    params = @parameters
+    custom(x) = x + one(x)
+    const val = 12.0
+    params.b = custom(val)
+    params.a = @link custom(val)
+end
+
 @testset "Parameters" begin
     params = Parameters()
     push!(params, :a => 1.0)
@@ -124,6 +134,15 @@ end
     params.e[3] = 2
     @test 1.0 + params.d ≈ 1.0
 
+    @test_throws ArgumentError @alias a+5
+    @test_throws ArgumentError @link 28
+
+    @test MetaTest.params.a ≈ 13.0
+    @test MetaTest.params.b ≈ 13.0
+    MetaTest.eval(quote custom(x) = 2x+one(x) end)
+    @test MetaTest.params.a ≈ 25.0
+    @test MetaTest.params.b ≈ 13.0
+
 end
 
 @testset "ifelse" begin
@@ -140,7 +159,7 @@ end
     @test ModelBaseEcon.process_equation(m, :(x[t] = ifelse(false, 2, 0))) isa Equation
 end
 
-@testset "meta" begin
+@testset "Meta" begin
     mod = Model()
     @parameters mod a = 0.1 b = @link(1.0 - a)
     @variables mod x
@@ -202,6 +221,7 @@ end
     @test_throws ArgumentError add_equation!(mod, :(x[t] = unknownsymbol))
     @test_throws ArgumentError add_equation!(mod, :(x[t] = unknownseries[t]))
     @test_throws ArgumentError add_equation!(mod, :(x[t] = let c = 5; sx[t + c]; end))
+
 end
 
 ############################################################################

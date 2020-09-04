@@ -1,4 +1,4 @@
-# 
+#
 
 using Lazy: @forward
 
@@ -21,13 +21,14 @@ doesn't. This makes no difference for simple parameters. For special parameters,
 access by bracket notation returns its internal structure, while access by dot
 notation returns its current value depending on other parameters.
 
-Write access is the same in both dot and bracket notation. A special parameter
-is created when the value is a `Symbol` or and `Expr`. If `Symbol`, and the
-given symbol is the name of an existing parameters, the new parameter is an
-alias. If `Expr`, the new parameter is a link. Otherwise the new parameter is a
-simple parameters.
+Write access is the same in both dot and bracket notation. The new parameter
+value is assigned directly in the case of simple parameter. To create an alias
+parameter, use the [`@alias`](@ref) macro. To create a link parameter use the
+[`@link`](@ref) macro.
 
-See also: [`ParamAlias`](@ref), [`ParamLink`](@ref), [`peval`](@ref)
+
+See also: [`ParamAlias`](@ref), [`ParamLink`](@ref), [`peval`](@ref),
+[`@alias`](@ref), [`@link`](@ref)
 """
 struct Parameters <: AbstractDict{Symbol,Any}
     mod::Ref{Module}
@@ -39,11 +40,25 @@ end
 
 When creating an instance of `Parameters`, optionally one can specify the module
 in which parameter expressions will be evaluated. This only matters if there are
-any link parameters that depend on custom functions or constants. In this case,
-the `mod` argument should be the module in which these definitions exist.
+any link parameters that depend on custom functions or global
+variables/constants. In this case, the `mod` argument should be the module in
+which these definitions exist.
+
+
 
 """
 Parameters(mod::Module=@__MODULE__) = Parameters(Ref(mod), Dict{Symbol,Any}())
+
+"""
+    params = @parameters
+
+When called without any arguments, return an empty [`Parameters`](@ref)
+container, with its evaluation module set to the module in which the macro is
+being called.
+"""
+macro parameters()
+    return :( Parameters($__module__) )
+end
 
 # To deepcopy() Parameters, we make a new Ref to the same module and a deepcopy of contents.
 Base.deepcopy_internal(p::Parameters, stackdict::IdDict) = Parameters(Ref(p.mod[]), Base.deepcopy_internal(p.contents, stackdict))
@@ -55,30 +70,22 @@ Base.deepcopy_internal(p::Parameters, stackdict::IdDict) = Parameters(Ref(p.mod[
 # bracket notation read access
 @forward Parameters.contents Base.getindex
 # dict access
-Base.get(pars::Parameters, key, default) = get(pars.contents, key, default)
-# Base.get!(pars::Parameters, key, default) = get!(pars.contents, key, default)
+Base.get(params::Parameters, key, default) = get(params.contents, key, default)
+# Base.get!(params::Parameters, key, default) = get!(params.contents, key, default)
 
 @forward Parameters.constants Base.get, Base.get!
-
-# """
-#     getdepends(p)
-
-# Return a tuple of names of parameters on which the given parameter, `p`,
-# depends. 
-# """
-# getdepends(p) = tuple()   # fall-back for simple parameters. Depend on nothing
 
 """
     struct ParamAlias
 
 Represents a parameter that is an alias for another parameter.
 
-See also: [`Parameters`](@ref), [`ParamLink`](@ref), [`peval`](@ref)
+See also: [`ParamAlias`](@ref), [`ParamLink`](@ref), [`peval`](@ref),
+[`@alias`](@ref), [`@link`](@ref), [`Parameters`](@ref)
 """
 struct ParamAlias
     name::Symbol
 end
-# getdepends(p::ParamAlias) = (p.name,)    # alias depends on its target
 
 """
     @alias name
@@ -93,10 +100,7 @@ end
 ```
 """
 macro alias(arg)
-    if arg isa Expr
-        throw(ArgumentError("`@alias` requires a symbol. Use `@link` with expressions."))
-    end
-    ParamAlias(arg)
+    return arg isa Symbol ? ParamAlias(arg) : :( throw(ArgumentError("`@alias` requires a symbol. Use `@link` with expressions.")) )
 end
 
 Base.show(io::IO, p::ParamAlias) = show(io, MIME"text/plain"(), p)
@@ -108,13 +112,12 @@ Base.show(io::IO, ::MIME"text/plain", p::ParamAlias) = print(io, "@alias ", p.na
 Parameters that are expressions, possibly depending on other parameters, are
 stored in instances of this type.
 
-See also: [`Parameters`](@ref), [`ParamAlias`](@ref), [`peval`](@ref)
+See also: [`ParamAlias`](@ref), [`ParamLink`](@ref), [`peval`](@ref),
+[`@alias`](@ref), [`@link`](@ref), [`Parameters`](@ref)
 """
 struct ParamLink
     link::Expr
 end
-# ParamLink(deps::Vector, expr::Expr) = ParamLink(tuple(Symbol.(deps)...), expr)
-# getdepends(p::ParamLink) = p.depends   
 
 Base.show(io::IO, p::ParamLink) = show(io, MIME"text/plain"(), p)
 Base.show(io::IO, ::MIME"text/plain", p::ParamLink) = print(io, "@link ", p.link)
@@ -136,10 +139,10 @@ end
 ```
 
 You can declare a parameter link even if does not depend on other parameters.
-The difference between this and a simple parameter with the same expression is
-in when the expression gets evaluated. With a simple expression, it gets
-evaluated immediately and the parameter value is the value of the expression at
-the time the `@parameters` block is evaluated. With a parameter link, the
+The difference between this and a simple parameter defined with the same
+expression is when the expression gets evaluated. With a simple expression, it
+gets evaluated immediately and the parameter value is the value of the
+expression at the time the `@parameters` block is evaluated. With `@link`, the
 expression is stored as such and gets evaluated every time the parameter is
 accessed. This may have a performance penalty, but allows more flexibility. For
 example, a parameter may depend on a custom function or a global variable. If
@@ -177,20 +180,20 @@ julia> model.c    # uses the new value of b
 
 """
 macro link(arg)
-    return arg isa Expr ? ParamLink(arg) : 
-           arg isa Symbol ? ParamAlias(sym) : 
-           throw(ArgumentError("`@link` requires an expression."))
+    return arg isa Expr ? ParamLink(arg) :
+           arg isa Symbol ? ParamAlias(sym) :
+           :( throw(ArgumentError("`@link` requires an expression.")) )
 end
 
 """
-    build_deps(pars, val)
+    build_deps(params, val)
 
 Internal function.
 
-Scan the expression `val` and build a list of dependencies. Valid names are the
-keys of pars. Return value is a Vector{Symbol}.
+Scan the expression `val` and build a list of dependencies. Valid dependency names are the
+keys of params. Return value is a Vector{Symbol}.
 """
-build_deps(pars::Parameters, e) = build_deps(Set{Symbol}(), keys(pars), e)
+build_deps(params::Parameters, e) = build_deps(Set{Symbol}(), keys(params), e)
 build_deps(deps, pkeys, e) = deps
 build_deps(deps, pkeys, e::ParamAlias) = build_deps(deps, pkeys, e.name)
 build_deps(deps, pkeys, e::ParamLink) = build_deps(deps, pkeys, e.link)
@@ -203,13 +206,13 @@ function build_deps(deps, pkeys, e::Expr)
 end
 
 # bracket notation write access
-function Base.setindex!(pars::Parameters, val, key)
-    if val isa Union{ParamLink, ParamAlias}
+function Base.setindex!(params::Parameters, val, key)
+    if val isa Union{ParamLink,ParamAlias}
         val = val isa ParamLink ? val.link : val.name
-        deps = build_deps(pars, val)
+        deps = build_deps(params, val)
         while length(deps) > 0
             d = pop!(deps)
-            ddeps = build_deps(pars, pars[d])
+            ddeps = build_deps(params, params[d])
             if isempty(ddeps)
                 continue
             elseif key ∈ ddeps
@@ -218,11 +221,11 @@ function Base.setindex!(pars::Parameters, val, key)
                 push!(deps, ddeps...)
             end
         end
-        setindex!(pars.contents, val isa Expr ? ParamLink(val) : ParamAlias(val), key)
+        setindex!(params.contents, val isa Expr ? ParamLink(val) : ParamAlias(val), key)
     else
-        setindex!(pars.contents, pars.mod[].eval(val), key)
+        setindex!(params.contents, params.mod[].eval(val), key)
     end
-    return pars
+    return params
 end
 
 """
@@ -232,21 +235,21 @@ Evaluate the given expression. If the expression contains any parameter names,
 their values are evaluated and substituted as necessary. The evaluations are
 carried out in the module of params.
 
-See also: [`Parameters`](@ref), [`ParamAlias`](@ref), [`ParamLink`](@ref)
+See also: [`Parameters`](@ref), [`@alias`](@ref), [`@link`](@ref)
 """
-peval(pars::Parameters, e) = e
-peval(pars::Parameters, e::ParamAlias) = peval(pars, pars[e.name])
-peval(pars::Parameters, e::ParamLink) = peval(pars, e.link)
-peval(pars::Parameters, e::Symbol) = e ∈ keys(pars) ? peval(pars, pars[e]) : e
-function peval(pars::Parameters, e::Expr)
+peval(params::Parameters, e) = e
+peval(params::Parameters, e::ParamAlias) = peval(params, params[e.name])
+peval(params::Parameters, e::ParamLink) = peval(params, e.link)
+peval(params::Parameters, e::Symbol) = e ∈ keys(params) ? peval(params, params[e]) : e
+function peval(params::Parameters, e::Expr)
     r = Expr(e.head)
     for i in 1:length(e.args)
-        push!(r.args, peval(pars, e.args[i]))
+        push!(r.args, peval(params, e.args[i]))
     end
-    return pars.mod[].eval(r)
+    return params.mod[].eval(r)
 end
 
 # dot notation access
-Base.propertynames(pars::Parameters) = tuple(keys(pars)...)
-Base.getproperty(pars::Parameters, s::Symbol) = s ∈ fieldnames(typeof(pars)) ? getfield(pars, s) : peval(pars, s)
-Base.setproperty!(pars::Parameters, s::Symbol, val) = s ∈ fieldnames(typeof(pars)) ? setfield!(pars, s, val) : setindex!(pars, val, s)
+Base.propertynames(params::Parameters) = tuple(keys(params)...)
+Base.getproperty(params::Parameters, s::Symbol) = s ∈ fieldnames(typeof(params)) ? getfield(params, s) : peval(params, s)
+Base.setproperty!(params::Parameters, s::Symbol, val) = s ∈ fieldnames(typeof(params)) ? setfield!(params, s, val) : setindex!(params, val, s)
