@@ -31,8 +31,8 @@ parameter, use the [`@alias`](@ref) macro. To create a link parameter use the
 [`@link`](@ref) macro.
 
 
-See also: [`ParamAlias`](@ref), [`ParamLink`](@ref), [`peval`](@ref),
-[`@alias`](@ref), [`@link`](@ref)
+See also: [`ModelParam`](@ref), [`peval`](@ref), [`@alias`](@ref),
+[`@link`](@ref), [`update_links!`](@ref).
 """
 struct Parameters <: AbstractDict{Symbol,ParamAbstract}
     mod::Ref{Module}
@@ -47,9 +47,6 @@ in which parameter expressions will be evaluated. This only matters if there are
 any link parameters that depend on custom functions or global
 variables/constants. In this case, the `mod` argument should be the module in
 which these definitions exist.
-
-
-
 """
 Parameters(mod::Module=@__MODULE__) = Parameters(Ref(mod), Dict{Symbol,ParamAbstract}())
 
@@ -94,7 +91,7 @@ ModelParam(value::Union{Symbol,Expr}) = ModelParam(Set{Symbol}(), value, nothing
 
 """
     @alias name
-    
+
     Create a parameter alias. Use `@alias` in the [`@parameters`](@ref) section of your
 model definition.
 ```
@@ -127,19 +124,21 @@ When a parameter the link depends on is assigned a new value, the link that
 depends on it gets updated automatically.
 
 !!! note "Important note"
-    There are two cases in which the value of a link does not get updated automatically. 
-    If the parameter it depends on is mutable, e.g. a `Vector`, it is possible for it to get 
-    updated in place. The other case is when the link contains global variable or custom function. 
-    
+    There are two cases in which the value of a link does not get updated automatically.
+    If the parameter it depends on is mutable, e.g. a `Vector`, it is possible for it to get
+    updated in place. The other case is when the link contains global variable or custom function.
+
     In such case, it is necessary to call [`update_links!`](@ref).
 """
 macro link(arg)
     return arg isa Union{Symbol,Expr} ? ModelParam(arg) : :( throw(ArgumentError("`@link` requires an expression.")) )
 end
 
-Base.show(io::IO, p::ModelParam) = p.link === nothing ? print(io, p.value) :
-p.link isa Symbol ? print(io, "@alias ", p.link) :
-print(io, "@link ", p.link)
+Base.show(io::IO, p::ModelParam) = begin
+    p.link === nothing ? print(io, p.value) :
+    p.link isa Symbol ? print(io, "@alias ", p.link) :
+                        print(io, "@link ", p.link)
+end
 
 Base.:(==)(l::ModelParam, r::ModelParam) = l.link === nothing && l.value == r.value || l.link == r.link
 
@@ -184,7 +183,7 @@ function _check_circular(params, val, key)
         val = params[k]
     end
 end
- 
+
 function _addlink(params, val, key)
     if !isa(val, ModelParam) || val.link === nothing
         return
@@ -200,12 +199,10 @@ function _addlink(params, val, key)
     return
 end
 
-# does not update values, just runs a recursion over expression substituting parameter
-# names for their current values
 """
     peval(params, what)
 
-Evaluate the given expression in the context of the given parameters. 
+Evaluate the given expression in the context of the given parameters.
 
 If `what` is a `ModelParam`, its current value is returned. If there's a chance
 it might be out of date, call [`update_links!`](@ref).
@@ -277,6 +274,7 @@ function Base.iterate(params::Parameters, done=Set{Symbol}())
 end
 
 export update_links!
+
 """
     update_links!(model)
     update_links!(params)
@@ -316,9 +314,9 @@ end
 
 Base.propertynames(params::Parameters) = tuple(keys(params)...)
 
-function Base.setproperty!(params::Parameters, key::Symbol, val) 
-    if key ∈ fieldnames(typeof(params)) 
-        return setfield!(params, key, val) 
+function Base.setproperty!(params::Parameters, key::Symbol, val)
+    if key ∈ fieldnames(typeof(params))
+        return setfield!(params, key, val)
     else
         return setindex!(params, val, key)
     end
@@ -335,132 +333,3 @@ function Base.getproperty(params::Parameters, key::Symbol)
         return peval(params, par)
     end
 end
-
-
-# """
-#     struct ParamAlias
-
-# Represents a parameter that is an alias for another parameter.
-
-# See also: [`ParamAlias`](@ref), [`ParamLink`](@ref), [`peval`](@ref),
-# [`@alias`](@ref), [`@link`](@ref), [`Parameters`](@ref)
-# """
-# struct ParamAlias
-#     name::Symbol
-#     val
-# end
-# ParamAlias(name) = new(name, nothing)
-
-# """
-#     @alias name
-
-# Create a parameter alias. Use `@alias` in the [`@parameters`](@ref) section of your
-# model definition.
-# ```
-# @parameters model begin
-#     a = 5
-#     b = @alias a
-# end
-# ```
-# """
-# macro alias(arg)
-#     return arg isa Symbol ? ParamAlias(arg) : :( throw(ArgumentError("`@alias` requires a symbol. Use `@link` with expressions.")) )
-# end
-
-# Base.show(io::IO, p::ParamAlias) = show(io, MIME"text/plain"(), p)
-# Base.show(io::IO, ::MIME"text/plain", p::ParamAlias) = print(io, "@alias ", p.name)
-
-# """
-#     struct ParamLink
-
-# Parameters that are expressions, possibly depending on other parameters, are
-# stored in instances of this type.
-
-# See also: [`ParamAlias`](@ref), [`ParamLink`](@ref), [`peval`](@ref),
-# [`@alias`](@ref), [`@link`](@ref), [`Parameters`](@ref)
-# """
-# struct ParamLink
-#     link::Expr
-#     val
-# end
-# ParamLink(link) = ParamLink(link, nothing)
-
-# Base.show(io::IO, p::ParamLink) = show(io, MIME"text/plain"(), p)
-# Base.show(io::IO, ::MIME"text/plain", p::ParamLink) = print(io, "@link ", p.link)
-
-# Base.:(==)(l::ParamLink, r::ParamLink) = l.link == r.link
-
-# macro link(arg)
-#     return arg isa Expr ? ParamLink(arg) :
-#            arg isa Symbol ? ParamAlias(arg) :
-#            :( throw(ArgumentError("`@link` requires an expression.")) )
-# end
-
-# """
-#     build_deps(params, val)
-
-# Internal function.
-
-# Scan the expression `val` and build a list of dependencies. Valid dependency names are the
-# keys of params. Return value is a Vector{Symbol}.
-# """
-# build_deps(params::Parameters, e) = build_deps(Set{Symbol}(), keys(params), e)
-# build_deps(deps, pkeys, e) = deps
-# build_deps(deps, pkeys, e::ParamAlias) = build_deps(deps, pkeys, e.name)
-# build_deps(deps, pkeys, e::ParamLink) = build_deps(deps, pkeys, e.link)
-# build_deps(deps, pkeys, e::Symbol) = e ∈ pkeys ? push!(deps, e) : deps
-# function build_deps(deps, pkeys, e::Expr)
-#     foreach(e.args) do expr
-#         build_deps(deps, pkeys, expr)
-#     end
-#     deps
-# end
-
-# # bracket notation write access
-# function Base.setindex!(params::Parameters, val, key)
-#     if val isa Union{ParamLink,ParamAlias}
-#         val = val isa ParamLink ? val.link : val.name
-#         deps = build_deps(params, val)
-#         while length(deps) > 0
-#             d = pop!(deps)
-#             ddeps = build_deps(params, params[d])
-#             if isempty(ddeps)
-#                 continue
-#             elseif key ∈ ddeps
-#                 throw(ArgumentError("Circular dependency of $(key) and $(d) in redefinition of $(key)."))
-#             else
-#                 push!(deps, ddeps...)
-#             end
-#         end
-#         setindex!(params.contents, val isa Expr ? ParamLink(val) : ParamAlias(val), key)
-#     else
-#         setindex!(params.contents, params.mod[].eval(val), key)
-#     end
-#     return params
-# end
-
-# """
-#     peval(params, expr)
-
-# Evaluate the given expression. If the expression contains any parameter names,
-# their values are evaluated and substituted as necessary. The evaluations are
-# carried out in the module of params.
-
-# See also: [`Parameters`](@ref), [`@alias`](@ref), [`@link`](@ref)
-# """
-# peval(params::Parameters, e) = e
-# peval(params::Parameters, e::ParamAlias) = peval(params, params[e.name])
-# peval(params::Parameters, e::ParamLink) = peval(params, e.link)
-# peval(params::Parameters, e::Symbol) = e ∈ keys(params) ? peval(params, params[e]) : e
-# function peval(params::Parameters, e::Expr)
-#     r = Expr(e.head)
-#     for i in 1:length(e.args)
-#         push!(r.args, peval(params, e.args[i]))
-#     end
-#     return params.mod[].eval(r)
-# end
-
-# # dot notation access
-# Base.propertynames(params::Parameters) = tuple(keys(params)...)
-# Base.getproperty(params::Parameters, s::Symbol) = s ∈ fieldnames(typeof(params)) ? getfield(params, s) : peval(params, s)
-# Base.setproperty!(params::Parameters, s::Symbol, val) = s ∈ fieldnames(typeof(params)) ? setfield!(params, s, val) : setindex!(params, val, s)

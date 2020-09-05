@@ -135,6 +135,9 @@ end
     update_links!(params)
     @test 1.0 + params.d ≈ 1.0
 
+    params.d = @link cos(2π/e[2])
+    @test params.d ≈ -1.0
+
     @test_throws ArgumentError @alias a+5
     @test_throws ArgumentError @link 28
 
@@ -149,6 +152,8 @@ end
     @test @link(c) == ModelParam(Set(), :c, nothing)
     @test @link(c+1) == ModelParam(Set(), :(c+1), nothing)
 
+    @test_throws ArgumentError params[:contents] = 5
+    @test_throws ArgumentError params.abc
 end
 
 @testset "ifelse" begin
