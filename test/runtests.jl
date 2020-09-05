@@ -112,16 +112,16 @@ end
     c = params[:c]
     d = params[:d]
     e = params[:e]
-    @test a isa Number
-    @test b isa ModelBaseEcon.ParamLink
-    @test c isa ModelBaseEcon.ParamAlias
-    @test d isa ModelBaseEcon.ParamLink
-    @test e isa Vector{<:Number}
-    @test isempty(ModelBaseEcon.build_deps(params, a))
-    @test ModelBaseEcon.build_deps(params, b) == Set([:a])
-    @test ModelBaseEcon.build_deps(params, c) == Set([:b])
-    @test ModelBaseEcon.build_deps(params, d) == Set([:e])
-    @test isempty(ModelBaseEcon.build_deps(params, e))
+    @test a isa ModelParam
+    @test b isa ModelParam
+    @test c isa ModelParam
+    @test d isa ModelParam
+    @test e isa ModelParam
+    @test a.depends == Set([:b])
+    @test b.depends == Set([:c])
+    @test c.depends == Set([])
+    @test d.depends == Set([])
+    @test e.depends == Set([:d])
     # circular dependencies not allowed
     @test_throws ArgumentError push!(params, :a => @alias b)
     # even deep ones
@@ -132,6 +132,7 @@ end
 
     @test params.d ≈ √3/2.0
     params.e[3] = 2
+    update_links!(params)
     @test 1.0 + params.d ≈ 1.0
 
     @test_throws ArgumentError @alias a+5
@@ -140,12 +141,13 @@ end
     @test MetaTest.params.a ≈ 13.0
     @test MetaTest.params.b ≈ 13.0
     MetaTest.eval(quote custom(x) = 2x+one(x) end)
+    update_links!(MetaTest.params)
     @test MetaTest.params.a ≈ 25.0
     @test MetaTest.params.b ≈ 13.0
 
-    @test @alias(c) isa ParamAlias
-    @test @link(c) isa ParamAlias
-    @test @link(c+1) isa ParamLink
+    @test @alias(c) == ModelParam(Set(), :c, nothing)
+    @test @link(c) == ModelParam(Set(), :c, nothing)
+    @test @link(c+1) == ModelParam(Set(), :(c+1), nothing)
 
 end
 
@@ -254,15 +256,16 @@ end
 
         @test isfile("../examples/TestModel.jl")
         @using_example TestModel
-        rm("../examples/TestModel.jl")
-
+        
         @test parameters(TestModel.model) == parameters(m)
         @test variables(TestModel.model) == variables(m)
         @test shocks(TestModel.model) == shocks(m)
         @test equations(TestModel.model) == equations(m)
         @test sstate(TestModel.model).constraints == sstate(m).constraints
-
+        
         @test_throws ArgumentError TestModel.model.parameters.d = @alias c
+
+        rm("../examples/TestModel.jl")
     end
 end
 

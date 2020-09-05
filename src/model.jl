@@ -342,7 +342,7 @@ macro parameters(model, args::Expr...)
         if Meta.isexpr(a, :(=), 2)
             key, value = a.args
             key = QuoteNode(key)
-            value = Meta.quot(value)
+            # value = Meta.quot(value)
             push!(ret.args, :(push!($(model).parameters, $(key) => $(value))))
             continue
         end
@@ -515,10 +515,10 @@ function process_equation(model::Model, expr::Expr;
             #     return process(ex.args[4])
             # end
             mfunc = Symbol(replace(string(ex.args[1]), "@" => "at_"))
-            if isdefined(ModelBaseEcon, mfunc)
-                mfunc = :( ModelBaseEcon.$mfunc )
-            elseif isdefined(modelmodule, mfunc)
+            if isdefined(modelmodule, mfunc)
                 mfunc = :( $modelmodule.$mfunc )
+            elseif isdefined(ModelBaseEcon, mfunc)
+                mfunc = :( ModelBaseEcon.$mfunc)
             else
                 error_process("Unknown meta function $(ex.args[1]).", ex)
             end
@@ -745,6 +745,7 @@ function initialize!(model::Model, modelmodule::Module)
     end
     model.evaldata = ModelEvaluationData(model)
     initssdata!(model)
+    update_links!(model.parameters)
     return nothing
 end
 

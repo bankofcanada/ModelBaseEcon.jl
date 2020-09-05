@@ -57,8 +57,8 @@ function export_model(m::Model, name::AbstractString, fio::IO)
 
     if !isempty(parameters(m))
         println(fio, "@parameters model begin")
-        for pn in (sort ∘ collect ∘ keys)(m.parameters)
-            println(fio, "    ", pn, " = ", m.parameters[pn])
+        for (n, p) in m.parameters
+            println(fio, "    ", n, " = ", p)
         end
         println(fio, "end # parameters")
         println(fio)
