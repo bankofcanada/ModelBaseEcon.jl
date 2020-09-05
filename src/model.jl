@@ -193,13 +193,11 @@ function fullprint(io::IO, model::Model)
         if nprm == 0
             println(io)
         else
-            params = collect(keys(model.parameters))
-            for k in params[1:end - 1]
-                v = model.parameters[k]
+            params = collect(model.parameters)
+            for (k, v) in params[1:end - 1]
                 len = print_things(io, k, " = ", v; len=len)
             end
-            k = params[end]
-            v = model.parameters[k]
+            k, v = params[end]
             len = print_things(io, k, " = ", v; len=len, last=true)
         end
     end
