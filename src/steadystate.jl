@@ -107,6 +107,7 @@ end
 #####
 # These are used for indexing in the values vector
 
+@inline makesym(T::Val, var::AbstractString) = makesym(T, Symbol(var))
 @inline makesym(T::Val, var::ModelSymbol) = makesym(T, convert(Symbol, var))
 @inline makesym(::Val{:level}, var::Symbol) = Symbol("$(var)#lvl")
 @inline makesym(::Val{:slope}, var::Symbol) = Symbol("$(var)#slp")
@@ -149,7 +150,7 @@ function Base.getindex(sstate::SteadyStateData, var)
     if ind === nothing
         throw(SSMissingVariableError(var))
     else
-        return SSVarData(var, ind, view(sstate.values, ind:ind + 1))
+        return SSVarData(Symbol(var), ind, view(sstate.values, ind:ind + 1))
     end
 end
 
