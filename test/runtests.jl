@@ -54,6 +54,13 @@ end
     @test sprint(print, y2, context=IOContext(stdout, :compact => false)) == "y"
     @test sprint(print, y3, context=IOContext(stdout, :compact => true)) == "y"
     @test sprint(print, y3, context=IOContext(stdout, :compact => false)) == "\"y3\" y"
+
+    @test ModelBaseEcon.makesym(Val(:level), y1) == ModelBaseEcon.makesym(Val(:level), y2)
+    @test ModelBaseEcon.makesym(Val(:level), y1) == ModelBaseEcon.makesym(Val(:level), y3)
+    @test ModelBaseEcon.makesym(Val(:level), y1) == ModelBaseEcon.makesym(Val(:level), "y")
+    @test ModelBaseEcon.makesym(Val(:slope), y1) == ModelBaseEcon.makesym(Val(:slope), y2)
+    @test ModelBaseEcon.makesym(Val(:slope), y1) == ModelBaseEcon.makesym(Val(:slope), y3)
+    @test ModelBaseEcon.makesym(Val(:slope), y1) == ModelBaseEcon.makesym(Val(:slope), "y")
 end
 
 module E

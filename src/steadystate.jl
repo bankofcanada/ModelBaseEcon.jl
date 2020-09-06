@@ -107,6 +107,8 @@ end
 #####
 # These are used for indexing in the values vector
 
+@inline makesym(T::Val, var::AbstractString) = makesym(T, Symbol(var))
+@inline makesym(T::Val, var::ModelSymbol) = makesym(T, convert(Symbol, var))
 @inline makesym(::Val{:level}, var::Symbol) = Symbol("$(var)#lvl")
 @inline makesym(::Val{:slope}, var::Symbol) = Symbol("$(var)#slp")
 @inline makeind(::Val{:level}, ind::Int64) = 2 * ind - 1
@@ -143,32 +145,17 @@ Base.setindex!(vd::SSVarData, val, s) = setproperty!(vd, Symbol(s), val)
 Base.show(io::IO, ::MIME"text/plan", vd::SSVarData) = show(io, vd)
 Base.show(io::IO, vd::SSVarData) = print(io, vd.name, " : ", NamedTuple{(:level, :slope)}(vd.value))
 
-# # ssvarindex() - return the index of a steady state value given its Symbol
-# # The symbol might end in #lvl or #slp, if not #lvl is assumed
-# function ssvarindex(v::Symbol, vars::AbstractArray{Symbol})
-#     ind = indexin([v], vars)[1]
-#     if ind === nothing
-#         ind = indexin([makesym(Val(:level), v)], vars)[1]
-#         if ind === nothing
-#             throw(SSMissingVariableError(v))
-#         end
-#     end
-#     return ind
-# end
-
-@inline Base.getindex(sstate::SteadyStateData, var) = getindex(sstate, Symbol(var))
-function Base.getindex(sstate::SteadyStateData, var::Symbol)
-    ind = indexin([Symbol("$var#lvl")], sstate.vars)[1]
+function Base.getindex(sstate::SteadyStateData, var)
+    ind = indexin([makesym(Val(:level), var)], sstate.vars)[1]
     if ind === nothing
         throw(SSMissingVariableError(var))
     else
-        return SSVarData(var, ind, view(sstate.values, ind:ind + 1))
+        return SSVarData(Symbol(var), ind, view(sstate.values, ind:ind + 1))
     end
 end
 
-@inline Base.setindex!(sstate::SteadyStateData, val, var) = setindex!(sstate, val, Symbol(var))
-function Base.setindex!(sstate::SteadyStateData, val, var::Symbol)
-    ind = indexin([Symbol("$var#lvl")], sstate.vars)[1]
+function Base.setindex!(sstate::SteadyStateData, val, var)
+    ind = indexin([makesym(Val(:level), var)], sstate.vars)[1]
     if ind === nothing
         throw(SSMissingVariableError(v))
     elseif val isa Number
@@ -562,7 +549,7 @@ function initssdata!(model::AbstractModel)
         if var in shks
             continue
         end
-        push!(ss.vars, Symbol("$(var)#lvl"), Symbol("$(var)#slp"))
+        push!(ss.vars, makesym(Val(:level), var), makesym(Val(:slope), var))
         push!(ss.values, 1.0, 0.0)  # default initial guess for level and slope
         push!(ss.mask, false, false)
     end
