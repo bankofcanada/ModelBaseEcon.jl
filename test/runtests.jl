@@ -82,38 +82,78 @@ end
     @test_throws ModelBaseEcon.ModelErrorBase ModelBaseEcon.modelerror()
 end
 
+
+module MetaTest
+    using ModelBaseEcon
+    params = @parameters
+    custom(x) = x + one(x)
+    const val = 12.0
+    params.b = custom(val)
+    params.a = @link custom(val)
+end
+
 @testset "Parameters" begin
     params = Parameters()
     push!(params, :a => 1.0)
-    push!(params, :b => :(1.0-a))
-    push!(params, :c => :b)
-    push!(params, :d => :(sin(2π/3)))
-    @test length(params) == 4
+    push!(params, :b => @link 1.0-a )
+    push!(params, :c => @alias b)
+    push!(params, :e => [1,2,3])
+    push!(params, :d => @link (sin(2π/e[3])) )
+    @test length(params) == 5
     # dot notation evaluates
     @test params.a isa Number
     @test params.b isa Number
     @test params.c isa Number
     @test params.d isa Number
+    @test params.e isa Vector{<:Number}
     # [] notation returns the holding structure
     a = params[:a]
     b = params[:b]
     c = params[:c]
     d = params[:d]
-    @test a isa Number
-    @test b isa ModelBaseEcon.ParamLink
-    @test c isa ModelBaseEcon.ParamAlias
-    @test d isa ModelBaseEcon.ParamLink
-    @test isempty(ModelBaseEcon.getdepends(a))
-    @test ModelBaseEcon.getdepends(b) == (:a,)
-    @test ModelBaseEcon.getdepends(c) == (:b,)
-    @test isempty(ModelBaseEcon.getdepends(d))
+    e = params[:e]
+    @test a isa ModelParam
+    @test b isa ModelParam
+    @test c isa ModelParam
+    @test d isa ModelParam
+    @test e isa ModelParam
+    @test a.depends == Set([:b])
+    @test b.depends == Set([:c])
+    @test c.depends == Set([])
+    @test d.depends == Set([])
+    @test e.depends == Set([:d])
     # circular dependencies not allowed
-    @test_throws ArgumentError push!(params, :a => :b)
+    @test_throws ArgumentError push!(params, :a => @alias b)
     # even deep ones
-    @test_throws ArgumentError push!(params, :a => :c)
+    @test_throws ArgumentError push!(params, :a => @alias c)
     # even when it is in an expr
-    @test_throws ArgumentError push!(params, :a => :(5+b^2))
-    @test_throws ArgumentError push!(params, :a => :(3-c))
+    @test_throws ArgumentError push!(params, :a => @link 5+b^2)
+    @test_throws ArgumentError push!(params, :a => @link 3-c)
+
+    @test params.d ≈ √3/2.0
+    params.e[3] = 2
+    update_links!(params)
+    @test 1.0 + params.d ≈ 1.0
+
+    params.d = @link cos(2π/e[2])
+    @test params.d ≈ -1.0
+
+    @test_throws ArgumentError @alias a+5
+    @test_throws ArgumentError @link 28
+
+    @test MetaTest.params.a ≈ 13.0
+    @test MetaTest.params.b ≈ 13.0
+    MetaTest.eval(quote custom(x) = 2x+one(x) end)
+    update_links!(MetaTest.params)
+    @test MetaTest.params.a ≈ 25.0
+    @test MetaTest.params.b ≈ 13.0
+
+    @test @alias(c) == ModelParam(Set(), :c, nothing)
+    @test @link(c) == ModelParam(Set(), :c, nothing)
+    @test @link(c+1) == ModelParam(Set(), :(c+1), nothing)
+
+    @test_throws ArgumentError params[:contents] = 5
+    @test_throws ArgumentError params.abc
 end
 
 @testset "ifelse" begin
@@ -130,9 +170,9 @@ end
     @test ModelBaseEcon.process_equation(m, :(x[t] = ifelse(false, 2, 0))) isa Equation
 end
 
-@testset "meta" begin
+@testset "Meta" begin
     mod = Model()
-    @parameters mod a = 0.1 b = 1.0 - a
+    @parameters mod a = 0.1 b = @link(1.0 - a)
     @variables mod x
     @shocks mod sx
     @equations mod begin
@@ -192,6 +232,7 @@ end
     @test_throws ArgumentError add_equation!(mod, :(x[t] = unknownsymbol))
     @test_throws ArgumentError add_equation!(mod, :(x[t] = unknownseries[t]))
     @test_throws ArgumentError add_equation!(mod, :(x[t] = let c = 5; sx[t + c]; end))
+
 end
 
 ############################################################################
@@ -199,7 +240,12 @@ end
 @testset "export" begin
     let m = Model()
         m.warn.no_t = false
-        @parameters m a = 0.3 b = 1 - a c = [1,2,3] d = sin(2π / 3)
+        @parameters m begin
+            a = 0.3
+            b = @link 1 - a 
+            d = [1,2,3] 
+            c = @link sin(2π / d[3])
+        end
         @variables m begin
             "variable x" x
         end
@@ -215,13 +261,16 @@ end
 
         @test isfile("../examples/TestModel.jl")
         @using_example TestModel
-        rm("../examples/TestModel.jl")
-
+        
         @test parameters(TestModel.model) == parameters(m)
         @test variables(TestModel.model) == variables(m)
         @test shocks(TestModel.model) == shocks(m)
         @test equations(TestModel.model) == equations(m)
         @test sstate(TestModel.model).constraints == sstate(m).constraints
+        
+        @test_throws ArgumentError TestModel.model.parameters.d = @alias c
+
+        rm("../examples/TestModel.jl")
     end
 end
 
@@ -298,8 +347,8 @@ end
 @testset "E1.params" begin
     let m = E1.model
         @test propertynames(m.parameters) == (:α, :β)
-        m.β = :(1.0 - α)
-        m.parameters.beta = :β
+        m.β = @link 1.0 - α
+        m.parameters.beta = @alias β
         for α = 0.0:0.1:1.0
             m.α = α
             test_eval_RJ(m, [0.0], [-α 1.0 -m.beta 0.0 -1.0 0.0;])

@@ -7,6 +7,7 @@ StateSpaceEcon works with model objects defined with ModelBaseEcon.
 """
 module ModelBaseEcon
 
+using MacroTools
 using SparseArrays
 using DiffResults
 using ForwardDiff

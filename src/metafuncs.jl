@@ -7,7 +7,7 @@ normal_ref(var, lag) = Expr(:ref, var, lag == 0 ? :t : lag > 0 ? :(t + $lag) : :
 
 
 """
-    @lag(expr[, n=1])
+    at_lag(expr[, n=1])
 
 Apply the lag operator to the given expression.
 """
@@ -23,28 +23,26 @@ function at_lag(expr::Expr, n=1)
 end
 
 """
-    @lead(expr[, n=1])
+    at_lead(expr[, n=1])
 
-Apply the lead operator to the given expression. Equivalent to `@lag(expr, -n)`.
+Apply the lead operator to the given expression. Equivalent to `at_lag(expr, -n)`.
 
-See also [`@lag`](@ref).
+See also [`at_lag`](@ref).
 """
 at_lead(e::Expr, n::Int=1) = at_lag(e, -n)
 
 """
-    @d(expr)
-    @d(expr, n)
-    @d(expr, n, s)
+    at_d(expr[, n=1 [, s=0 ]])
 
 Apply the difference operator to the given expression. If `L` represents the lag
 operator, then we have the following definitions.
 ```
-@d(x[t]) = (1-L)x = x[t]-x[t-1]
-@d(x[t], n) = (1-L)^n x
-@d(x[t], n, s) = (1-L)^n (1-L^s) x
+at_d(x[t]) = (1-L)x = x[t]-x[t-1]
+at_d(x[t], n) = (1-L)^n x
+at_d(x[t], n, s) = (1-L)^n (1-L^s) x
 ```
 
-See also [`@lag`](@ref), [`@dlog`](@ref)
+See also [`at_lag`](@ref), [`at_d`](@ref).
 """
 function at_d(expr::Expr, n=1, s=0)
     if s > 0
@@ -57,41 +55,43 @@ function at_d(expr::Expr, n=1, s=0)
 end
 
 """
-    @dlog(expr)
-    @dlog(expr, n)
-    @dlog(expr, n, s)
+    at_dlog(expr[, n=1 [, s=0 ]])
 
-Apply the difference operator on the log() of the given expression. Equivalent to @d(log(expr), n, s).
+Apply the difference operator on the log() of the given expression. Equivalent to at_d(log(expr), n, s).
 
-See also [`@lag`](@ref), [`@d`](@ref)
+See also [`at_lag`](@ref), [`at_d`](@ref)
 """
 at_dlog(expr::Expr, args...) = at_d(:(log($expr)), args...)
 
 """
-    @movsum(expr, n)
+    at_movsum(expr, n)
 
 Apply moving sum with n periods backwards on the given expression.
-For example: `@movsum(x[t], 3) = x[t] + x[t-1] + x[t-2]`.
+For example: `at_movsum(x[t], 3) = x[t] + x[t-1] + x[t-2]`.
+
+See also [`at_lag`](@ref).
 """
 at_movsum(expr::Expr, n) = Expr(:call, :+, expr, (at_lag(expr, i) for i = 1:n - 1)...)
 
 """
-    @movav(expr, n)
+    at_movav(expr, n)
 
 Apply moving average with n periods backwards on the given expression.
-For example: `@movav(x[t], 3) = (x[t] + x[t-1] + x[t-2]) / 3`.
+For example: `at_movav(x[t], 3) = (x[t] + x[t-1] + x[t-2]) / 3`.
+
+See also [`at_lag`](@ref).
 """
 at_movav(expr::Expr, n) = :( $(at_movsum(expr, n)) / $n )
 
 for sym in (:lag, :lead, :d, :dlog, :movsum, :movav)
     fsym = Symbol("at_$sym")
     msym = Symbol("@$sym")
+    doc = replace(string(@doc($fsym)), "$fsym"=>"$msym")
     eval(quote
-        macro $sym(args...)
+        @doc $doc macro $sym(args...)
             return Meta.quot($fsym(args...))
         end
-        export $msym, $fsym
-        @doc (@doc $fsym) $msym
+        export $msym
     end)
 end
 

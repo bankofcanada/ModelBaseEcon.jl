@@ -2,7 +2,11 @@
 
 using Lazy: @forward
 
-export Parameters, ParamAlias, ParamLink, peval
+# export Parameters, ParamAlias, ParamLink, peval, @alias, @link
+export Parameters, ModelParam, peval, @alias, @link
+
+abstract type ParamAbstract end
+
 
 """
     struct Parameters <: AbstractDict{Symbol, Any}
@@ -21,17 +25,18 @@ doesn't. This makes no difference for simple parameters. For special parameters,
 access by bracket notation returns its internal structure, while access by dot
 notation returns its current value depending on other parameters.
 
-Write access is the same in both dot and bracket notation. A special parameter
-is created when the value is a `Symbol` or and `Expr`. If `Symbol`, and the
-given symbol is the name of an existing parameters, the new parameter is an
-alias. If `Expr`, the new parameter is a link. Otherwise the new parameter is a
-simple parameters.
+Write access is the same in both dot and bracket notation. The new parameter
+value is assigned directly in the case of simple parameter. To create an alias
+parameter, use the [`@alias`](@ref) macro. To create a link parameter use the
+[`@link`](@ref) macro.
 
-See also: [`ParamAlias`](@ref), [`ParamLink`](@ref), [`peval`](@ref)
+
+See also: [`ModelParam`](@ref), [`peval`](@ref), [`@alias`](@ref),
+[`@link`](@ref), [`update_links!`](@ref).
 """
-struct Parameters <: AbstractDict{Symbol,Any}
+struct Parameters <: AbstractDict{Symbol,ParamAbstract}
     mod::Ref{Module}
-    contents::Dict{Symbol,Any}
+    contents::Dict{Symbol,ParamAbstract}
 end
 
 """
@@ -39,11 +44,22 @@ end
 
 When creating an instance of `Parameters`, optionally one can specify the module
 in which parameter expressions will be evaluated. This only matters if there are
-any link parameters that depend on custom functions or constants. In this case,
-the `mod` argument should be the module in which these definitions exist.
+any link parameters that depend on custom functions or global
+variables/constants. In this case, the `mod` argument should be the module in
+which these definitions exist.
+"""
+Parameters(mod::Module=@__MODULE__) = Parameters(Ref(mod), Dict{Symbol,ParamAbstract}())
 
 """
-Parameters(mod::Module=@__MODULE__) = Parameters(Ref(mod), Dict{Symbol,Any}())
+    params = @parameters
+
+When called without any arguments, return an empty [`Parameters`](@ref)
+container, with its evaluation module set to the module in which the macro is
+being called.
+"""
+macro parameters()
+    return :( Parameters($__module__) )
+end
 
 # To deepcopy() Parameters, we make a new Ref to the same module and a deepcopy of contents.
 Base.deepcopy_internal(p::Parameters, stackdict::IdDict) = Parameters(Ref(p.mod[]), Base.deepcopy_internal(p.contents, stackdict))
@@ -55,113 +71,265 @@ Base.deepcopy_internal(p::Parameters, stackdict::IdDict) = Parameters(Ref(p.mod[
 # bracket notation read access
 @forward Parameters.contents Base.getindex
 # dict access
-Base.get(pars::Parameters, key, default) = get(pars.contents, key, default)
-# Base.get!(pars::Parameters, key, default) = get!(pars.contents, key, default)
-
-@forward Parameters.constants Base.get, Base.get!
+@forward Parameters.contents Base.get, Base.get!
 
 """
-    getdepends(p)
+    mutable struct ModelParam
 
-Return a tuple of names of parameters on which the given parameter, `p`,
-depends. 
+Contains a model parameter. For a simple parameter it simply stores its value.
+For a link or an alias, it stores the link information and also caches the
+current value for speed.
 """
-getdepends(p) = tuple()   # fall-back for simple parameters. Depend on nothing
-
-"""
-    struct ParamAlias
-
-Represents a parameter that is an alias for another parameter.
-
-See also: [`Parameters`](@ref), [`ParamLink`](@ref), [`peval`](@ref)
-"""
-struct ParamAlias
-    name::Symbol
+mutable struct ModelParam <: ParamAbstract
+    depends::Set{Symbol}  # stores the names of parameter that depend on this one
+    link::Union{Nothing,Symbol,Expr}
+    value
 end
-getdepends(p::ParamAlias) = (p.name,)    # alias depends on its target
-
-Base.show(io::IO, p::ParamAlias) = show(io, MIME"text/plain"(), p)
-Base.show(io::IO, ::MIME"text/plain", p::ParamAlias) = print(io, p.name)
+ModelParam() = ModelParam(Set{Symbol}(), nothing, nothing)
+ModelParam(value) = ModelParam(Set{Symbol}(), nothing, value)
+ModelParam(value::Union{Symbol,Expr}) = ModelParam(Set{Symbol}(), value, nothing)
 
 """
-    struct ParamLink
+    @alias name
 
-Parameters that are expressions, possibly depending on other parameters, are
-stored in instances of this type.
-
-See also: [`Parameters`](@ref), [`ParamAlias`](@ref), [`peval`](@ref)
-"""
-struct ParamLink{N}
-    # link builds and stores its list of dependencies
-    depends::NTuple{N,Symbol}
-    link::Expr
+    Create a parameter alias. Use `@alias` in the [`@parameters`](@ref) section of your
+model definition.
+```
+@parameters model begin
+    a = 5
+    b = @alias a
 end
-ParamLink(deps::Vector{Symbol}, expr::Expr) = ParamLink(tuple(deps...), expr)
-getdepends(p::ParamLink) = p.depends   
-
-Base.show(io::IO, p::ParamLink) = show(io, MIME"text/plain"(), p)
-Base.show(io::IO, ::MIME"text/plain", p::ParamLink) = print(io, p.link)
-
-Base.:(==)(l::ParamLink, r::ParamLink) = l.link == r.link
-
+```
 """
-    build_deps!(deps, pkeys, val)
-
-Internal function.
-
-Scan the expression `val` and build a list of dependencies. All valid names are
-provided in `pkeys`. The resulting list is updated in place in vector `deps`.
-"""
-build_deps!(deps, pkeys, e) = deps
-build_deps!(deps, pkeys, e::Symbol) = e ∈ pkeys ? unique!(push!(deps, e)) : deps
-function build_deps!(deps, pkeys, e::Expr)
-    foreach(e.args) do expr
-        build_deps!(deps, pkeys, expr)
-    end
-    deps
+macro alias(arg)
+    return arg isa Symbol ? ModelParam(arg) : :( throw(ArgumentError("`@alias` requires a symbol. Use `@link` with expressions.")) )
 end
 
-# bracket notation write access
-function Base.setindex!(pars::Parameters, val, key)
-    if val isa Expr || val in keys(pars)
-        deps = build_deps!(Symbol[], keys(pars), val)
-        alldeps = copy(deps)
-        while length(alldeps) > 0
-            d = pop!(alldeps)
-            ddeps = getdepends(pars[d])
-            if key ∈ ddeps
-                throw(ArgumentError("Circular dependency of $(key) and $(d) in redefinition of $(key)."))
-            end
-            append!(alldeps, ddeps)
+"""
+    @link expr
+
+Create a parameter link. Use `@link` in the [`@parameters`](@ref) section of
+your model definition.
+
+If your parameter depends on other parameters, then you use `@link` to declare
+that. The expression can be any valid Julia code.
+```
+@parameters model begin
+    a = 5
+    b = @link a + 1
+end
+```
+
+When a parameter the link depends on is assigned a new value, the link that
+depends on it gets updated automatically.
+
+!!! note "Important note"
+    There are two cases in which the value of a link does not get updated automatically.
+    If the parameter it depends on is mutable, e.g. a `Vector`, it is possible for it to get
+    updated in place. The other case is when the link contains global variable or custom function.
+
+    In such case, it is necessary to call [`update_links!`](@ref).
+"""
+macro link(arg)
+    return arg isa Union{Symbol,Expr} ? ModelParam(arg) : :( throw(ArgumentError("`@link` requires an expression.")) )
+end
+
+Base.show(io::IO, p::ModelParam) = begin
+    p.link === nothing ? print(io, p.value) :
+    p.link isa Symbol ? print(io, "@alias ", p.link) :
+                        print(io, "@link ", p.link)
+end
+
+Base.:(==)(l::ModelParam, r::ModelParam) = l.link === nothing && l.value == r.value || l.link == r.link
+
+
+###############################
+# setindex!
+
+_value(val) = val isa ModelParam ? val.value : val
+_link(val) = val isa ModelParam ? val.link : nothing
+
+function _rmlink(params, p, key)
+    # we have to remove `key` from the `.depends` of all parameters we depend on
+    MacroTools.postwalk(p.link) do e
+        if e isa Symbol
+            ep = get(params.contents, e, nothing)
+            ep !== nothing && delete!(ep.depends, key)
         end
-        val = val isa Expr ? ParamLink(deps, val) : ParamAlias(val)
+        return e
     end
-    setindex!(pars.contents, val, key)
-    return pars
+    return
+end
+
+function _check_circular(params, val, key)
+    # we have to check for circular dependencies
+    deps = Set{Symbol}()
+    while true
+        MacroTools.postwalk(_link(val)) do e
+            if e isa Symbol
+                if e == key
+                    throw(ArgumentError("Circular dependency of $(key) and $(e) in redefinition of $(key)."))
+                end
+                if e in keys(params.contents)
+                    push!(deps, e)
+                end
+            end
+            return e
+        end
+        if isempty(deps)
+            return
+        end
+        k = pop!(deps)
+        val = params[k]
+    end
+end
+
+function _addlink(params, val, key)
+    if !isa(val, ModelParam) || val.link === nothing
+        return
+    end
+    # we have add `key` to the `.depends` of all parameters we depend on
+    MacroTools.postwalk(val.link) do e
+        if e isa Symbol
+            ep = get(params.contents, e, nothing)
+            ep !== nothing && push!(ep.depends, key)
+        end
+        return e
+    end
+    return
 end
 
 """
-    peval(params, expr)
+    peval(params, what)
 
-Evaluate the given expression. If the expression contains any parameter names,
-their values are evaluated and substituted as necessary. The evaluations are
-carried out in the module of params.
+Evaluate the given expression in the context of the given parameters.
 
-See also: [`Parameters`](@ref), [`ParamAlias`](@ref), [`ParamLink`](@ref)
+If `what` is a `ModelParam`, its current value is returned. If there's a chance
+it might be out of date, call [`update_links!`](@ref).
+
+If `what` is a Symbol or an Expr, all mentions of parameter names are
+substituted by their values and the the expression is evaluated.
+
+If `what is any other value, it is returned unchanged.`
+
+See also: [`Parameters`](@ref), [`@alias`](@ref), [`@link`](@ref),
+[`ModelParam`](@ref), [`update_links!`](@ref).
+
 """
-peval(p::Parameters, e) = e
-peval(p::Parameters, e::ParamAlias) = peval(p, p[e.name])
-peval(p::Parameters, e::ParamLink) = peval(p, e.link)
-peval(p::Parameters, e::Symbol) = e ∈ keys(p) ? peval(p, p[e]) : e
-function peval(p::Parameters, e::Expr)
-    r = Expr(e.head)
-    for i in 1:length(e.args)
-        push!(r.args, peval(p, e.args[i]))
-    end
-    return p.mod[].eval(r)
+peval(params, val) = val
+peval(params, par::ModelParam) = par.value
+peval(params, sym::Symbol) = sym ∈ keys(params) ? peval(params, params[sym]) : sym
+function peval(params, expr::Expr)
+    ret = Expr(expr.head)
+    ret.args = [peval(params, a) for a in expr.args]
+    params.mod[].eval(ret)
 end
 
-# dot notation access
-Base.propertynames(p::Parameters) = tuple(keys(p)...)
-Base.getproperty(p::Parameters, s::Symbol) = s ∈ fieldnames(typeof(p)) ? getfield(p, s) : peval(p, s)
-Base.setproperty!(p::Parameters, s::Symbol, val) = s ∈ fieldnames(typeof(p)) ? setfield!(p, s, val) : setindex!(p, val, s)
+function _update_values(params, p, key)
+    # update my own value
+    if p.link !== nothing
+        p.value = peval(params, p.link)
+    end
+    # update values that depend on me
+    deps = copy(p.depends)
+    while !isempty(deps)
+        pk = params.contents[pop!(deps)]
+        pk.value = peval(params, pk.link)
+        if !isempty(pk.depends)
+            push!(deps, pk.depends...)
+        end
+    end
+end
+
+"""
+    iterate(params::Parameters)
+
+Iterates the given Parameters collection in the order of dependency.
+Specifically, each parameter comes up only after all parameters it depends on
+have already been visited. The order within that is alphabetical.
+"""
+function Base.iterate(params::Parameters, done=Set{Symbol}())
+    if length(done) == length(params.contents)
+        return nothing
+    end
+    for k in sort(collect(keys(params.contents)))
+        if k in done
+            continue
+        end
+        v = params.contents[k]
+        if v.link === nothing
+            return k => v, push!(done, k)
+        end
+        ready = true
+        MacroTools.postwalk(v.link) do e
+            if e ∈ keys(params) && e ∉ done
+                ready = false
+            end
+            e
+        end
+        if ready
+            return k => v, push!(done, k)
+        end
+    end
+end
+
+export update_links!
+
+"""
+    update_links!(model)
+    update_links!(params)
+
+Recompute the current values of all parameters.
+
+Typically when a new value of a parameter is assigned, all parameter links and
+aliases that depend on it are updated recursively. If a parameter mutable, e.g.
+a Vector or another collection, its value can be updated in place without
+re-assigning it, thus the automatic updated does not happen. In this case, it is
+necessary to call `update_links!`.
+"""
+update_links!(m::AbstractModel) = update_links!(parameters(m))
+function update_links!(params::Parameters)
+    for (k, v) in params
+        if v.link !== nothing
+            v.value = peval(params, v.link)
+        end
+    end
+end
+
+function Base.setindex!(params::Parameters, val, key)
+    if key in fieldnames(typeof(params))
+        throw(ArgumentError("Invalid parameter name: $key."))
+    end
+    # If param[key] is not a link, then key doesn't appear in anyone's depends
+    # Invariant: my.depends always contains the names of parameters that depend on me.
+    _check_circular(params, val, key)
+    p = get!(params.contents, key, ModelParam())
+    _rmlink(params, p, key)
+    _addlink(params, val, key)
+    p.link = _link(val)
+    p.value = _value(val)
+    _update_values(params, p, key)
+    params
+end
+
+Base.propertynames(params::Parameters) = tuple(keys(params)...)
+
+function Base.setproperty!(params::Parameters, key::Symbol, val)
+    if key ∈ fieldnames(typeof(params))
+        return setfield!(params, key, val)
+    else
+        return setindex!(params, val, key)
+    end
+end
+
+function Base.getproperty(params::Parameters, key::Symbol)
+    if key ∈ fieldnames(typeof(params))
+        return getfield(params, key)
+    end
+    par = get(params, key, nothing)
+    if par === nothing
+        throw(ArgumentError("Unknown parameter $key."))
+    else
+        return peval(params, par)
+    end
+end
