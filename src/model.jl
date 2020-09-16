@@ -386,13 +386,13 @@ macro equations(model, block::Expr)
             push!(eqn.args, expr)
             continue
         end
-        if isa(expr, Expr) && expr.head == :(=)
+        if MacroTools.isexpr(expr, :(=))
             push!(eqn.args, expr)
             push!(ret.args, :(push!($model.equations, $(Meta.quot(eqn)))))
             eqn = Expr(:block)
             continue
         end
-        if isa(expr, Expr) && expr.head == :macrocall && expr.args[1] == docvar.args[1]
+        if MacroTools.isexpr(expr, :macrocall) && expr.args[1] == doc_macro
             push!(eqn.args, expr)
             push!(ret.args, :(push!($model.equations, $(Meta.quot(eqn)))))
             eqn = Expr(:block)
@@ -501,13 +501,13 @@ function process_equation(model::Model, expr::Expr;
     end
     # Main version of process() - it's recursive
     function process(ex::Expr)
-        if ex.head == :macrocall && ex.args[1] == docvar.args[1]
+        if ex.head == :macrocall && ex.args[1] == doc_macro
             line = ex.args[2]
             doc *= ex.args[3]
             return process(ex.args[4])
         end
         if ex.head == :macrocall
-            # if ex.args[1] == docvar.args[1]
+            # if ex.args[1] == doc_macro
             #     push!(source, ex.args[2])
             #     doc = ex.args[3]
             #     return process(ex.args[4])
@@ -672,7 +672,7 @@ function add_equation!(model::Model, expr::Expr; modelmodule::Module=moduleof(mo
             mname, mline = expr.args[1:2]
             margs = expr.args[3:end]
             push!(source, mline)
-            if mname == docvar.args[1]
+            if mname == doc_macro
                 doc = margs[1]
                 return process(margs[2])
             end
