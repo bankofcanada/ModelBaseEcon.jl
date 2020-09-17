@@ -100,28 +100,32 @@ end
     @test sprint(print, lvars[8], context=IOContext(stdout, :compact => false)) == "\"ly\" @steady ly"
 
     let m = Model()
+        @variables m p q r
         @variables m begin
             x; @log y; @steady z;
         end
-        @test [v.type for v in m.allvars] == [:lin, :log, :steady]
+        @test [v.type for v in m.allvars] == [:lin, :lin, :lin, :lin, :log, :steady]
     end
     let m = Model()
+        @shocks m p q r
         @shocks m begin
             x; @log y; @steady z;
         end
-        @test [v.type for v in m.allvars] == [:shock, :shock, :shock]
+        @test [v.type for v in m.allvars] == [:shock, :shock, :shock, :shock, :shock, :shock]
     end
     let m = Model()
+        @logvariables m p q r
         @logvariables m begin
             x; @log y; @steady z;
         end
-        @test [v.type for v in m.allvars] == [:log, :log, :log]
+        @test [v.type for v in m.allvars] == [:log, :log, :log, :log, :log, :log]
     end
     let m = Model()
+        @steadyvariables m p q r
         @steadyvariables m begin
             x; @log y; @steady z;
         end
-        @test [v.type for v in m.allvars] == [:steady, :steady, :steady]
+        @test [v.type for v in m.allvars] == [:steady, :steady, :steady, :steady, :steady, :steady]
     end
 end
 
@@ -491,7 +495,7 @@ end
     @test length(out) == 3
     @test length(split(out[end], "=")) == 2
     # 
-    @test propertynames(ss) == tuple(variables(m)...)
+    @test propertynames(ss) == tuple(m.allvars...)
     @test ss.pinf.level == ss.pinf[1]
     @test ss.pinf.slope == ss.pinf[2]
     ss.pinf = (level = 2.3, slope = 0.7)
