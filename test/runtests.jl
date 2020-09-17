@@ -546,3 +546,78 @@ end
         ))
 end
 
+@testset "VarTypesSS" begin
+    let m = Model()
+        @variables m begin
+            lx
+            @log x
+        end
+        @shocks m s1 s2
+        @equations m begin
+            lx[t] = lx[t - 1] + 0.2 + s1[t]
+            log(x[t]) = lx[t] + s2[t + 1]
+        end
+        @initialize m
+        # 
+        @test nvariables(m) == 2
+        @test nshocks(m) == 2
+        @test nequations(m) == 2
+        ss = sstate(m)
+        @test neqns(ss) == 4
+        eq1, eq2, eq3, eq4 = ss.equations
+        @test length(ss.values) == 2 * length(m.allvars)
+        # 
+        # test with eq1
+        ss.lx = [1.5, 0.2]
+        ss.x = [0.0, 0.2]
+        ss.s1 = [0.0, 0.0]
+        ss.s2 = [0.0, 0.0]
+        for s1 = -2:0.1:2
+            ss.s1.level = s1
+            @test eq1.eval_resid(ss.values[eq1.vinds]) ≈ -s1
+        end
+        ss.s1.level = 0.0
+        for lxslp = -2:0.1:2
+            ss.lx.slope = lxslp
+            @test eq1.eval_resid(ss.values[eq1.vinds]) ≈ lxslp - 0.2
+        end
+        ss.lx.slope = 0.2
+        R, J = eq1.eval_RJ(ss.values[eq1.vinds])
+        TMP = fill!(similar(ss.values), 0.0)
+        TMP[eq1.vinds] .= J
+        @test R == 0
+        @test TMP[[1,2,5]] ≈ [0.0, 1.0, -1.0]
+        # test with eq4
+        ss.lx = [1.5, 0.2]
+        ss.x = [exp(1.5), 0.2]
+        ss.s1 = [0.0, 0.0]
+        ss.s2 = [0.0, 0.0]
+        for s2 = -2:0.1:2
+            ss.s2.level = s2
+            @test eq4.eval_resid(ss.values[eq4.vinds]) ≈ -s2
+        end
+        ss.s2.level = 0.0
+        for lxslp = -2:0.1:2
+            ss.lx.slope = lxslp
+            @test eq4.eval_resid(ss.values[eq4.vinds]) ≈ m.shift * (0.2 - lxslp)
+        end
+        ss.lx.slope = 0.2
+        for xslp = -2:0.1:2
+            ss.x.slope = xslp
+            @test eq4.eval_resid(ss.values[eq4.vinds]) ≈ m.shift * (xslp - 0.2)
+        end
+        ss.x.slope = 0.2
+        R, J = eq4.eval_RJ(ss.values[eq4.vinds])
+        TMP = fill!(similar(ss.values), 0.0)
+        TMP[eq4.vinds] .= J
+        @test R ≈ 0.0
+        @test TMP[[1,2,3,4,7]] ≈ [-1.0, -m.shift, 1.0/ss.x.level, m.shift, -1.0]
+        for xlvl = 0.1:0.1:2
+            ss.x.level = xlvl
+            R, J = eq4.eval_RJ(ss.values[eq4.vinds])
+            @test R ≈ log(xlvl) - 1.5
+            TMP[eq4.vinds] .= J
+            @test TMP[[1,2,3,4,7]] ≈ [-1.0, -m.shift, 1.0/xlvl, m.shift, -1.0]
+        end
+    end
+end
