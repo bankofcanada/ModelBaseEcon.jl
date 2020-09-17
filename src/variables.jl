@@ -1,6 +1,11 @@
 
 export ModelSymbol
 
+const doc_macro = MacroTools.unblock(quote
+    "hello"
+    world
+end).args[1]
+
 struct ModelSymbol
     doc::String
     name::Symbol
@@ -11,16 +16,9 @@ struct ModelSymbol
                     new(d, n, t)
 end
 
-
-
 ModelSymbol(s::Symbol) = ModelSymbol("", s, :lin)
 ModelSymbol(d::String, s::Symbol) = ModelSymbol(d, s, :lin)
 ModelSymbol(s::Symbol, t::Symbol) = ModelSymbol("", s, t)
-
-const doc_macro = MacroTools.unblock(quote
-    "hello"
-    world
-end).args[1]
 
 function ModelSymbol(s::Expr)
     s = MacroTools.unblock(s)
@@ -41,6 +39,15 @@ function ModelSymbol(doc::String, s::Expr)
     end
 end
 
+for sym ∈ (:shock, :log, :lin, :steady)
+    to_sym = Symbol("to_$sym")
+    eval(quote
+        $(to_sym)(s::ModelSymbol) = ModelSymbol(s.doc, s.name, $(QuoteNode(sym)))
+        $(to_sym)(any) = $(to_sym)(convert(ModelSymbol, any))
+        export $(to_sym)
+    end)
+end
+
 Base.convert(::Type{Symbol}, v::ModelSymbol) = v.name
 Base.convert(::Type{ModelSymbol}, v::Symbol) = ModelSymbol(v)
 Base.convert(::Type{ModelSymbol}, v::Expr) = ModelSymbol(v)
@@ -57,7 +64,7 @@ function Base.show(io::IO, v::ModelSymbol)
         print(io, v.name)
     else
         doc = isempty(v.doc) ? "" : "\"$(v.doc)\" "
-        type = v.type == :lin ? "" : "@$(v.type) "
+        type = v.type ∈ (:lin, :shock) ? "" : "@$(v.type) "
         print(io, doc, type, v.name)
     end
 end

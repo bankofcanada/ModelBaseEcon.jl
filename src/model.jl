@@ -247,7 +247,7 @@ end
 # Note: These macros simply store the information into the corresponding 
 # arrays within the model instance. The actual processing is done in @initialize
 
-export @variables, @shocks, @parameters, @equations #= , @autoshocks =#, @autoexogenize
+export @variables, @logvariables, @steadyvariables, @shocks, @parameters, @equations #= , @autoshocks =#, @autoexogenize
 
 """
     @variables model names...
@@ -276,6 +276,22 @@ macro variables(model, vars::Symbol...)
     return esc(:( unique!(append!($(model).variables, $vars)); nothing ))
 end
 
+macro logvariables(model, block::Expr)
+    vars = filter(a -> !isa(a, LineNumberNode), block.args)
+    return esc(:(unique!(append!($(model).variables, to_log.($vars))); nothing ))
+end
+macro logvariables(model, vars::Symbol...)
+    return esc(:( unique!(append!($(model).variables, to_log.($vars))); nothing ))
+end
+
+macro steadyvariables(model, block::Expr)
+    vars = filter(a -> !isa(a, LineNumberNode), block.args)
+    return esc(:(unique!(append!($(model).variables, to_steady.($vars))); nothing ))
+end
+macro steadyvariables(model, vars::Symbol...)
+    return esc(:( unique!(append!($(model).variables, to_steady.($vars))); nothing ))
+end
+
 """
     @shocks model names...
     @shocks model begin
@@ -297,10 +313,10 @@ end
 """
 macro shocks(model, block::Expr)
     shks = filter(a -> !isa(a, LineNumberNode), block.args)
-    return esc(:( unique!(append!($(model).shocks, $shks)); nothing ))
+    return esc(:( unique!(append!($(model).shocks, to_shock.($shks))); nothing ))
 end
 macro shocks(model, shks::Symbol...)
-    return esc(:( unique!(append!($(model).shocks, $shks)); nothing ))
+    return esc(:( unique!(append!($(model).shocks, to_shock.($shks))); nothing ))
 end
 
 # """

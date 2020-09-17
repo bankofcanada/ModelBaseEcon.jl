@@ -74,7 +74,7 @@ end
     push!(lvars, quote @steady ly end)
     push!(lvars, quote "ly" @steady ly end)
     for i = 1:length(lvars)
-        for j = i+1:length(lvars)
+        for j = i + 1:length(lvars)
             @test lvars[i] == lvars[j]
         end
         @test lvars[i] == :ly
@@ -98,6 +98,31 @@ end
     @test sprint(print, lvars[6], context=IOContext(stdout, :compact => false)) == "\"ly\" ly"
     @test sprint(print, lvars[7], context=IOContext(stdout, :compact => false)) == "@steady ly"
     @test sprint(print, lvars[8], context=IOContext(stdout, :compact => false)) == "\"ly\" @steady ly"
+
+    let m = Model()
+        @variables m begin
+            x; @log y; @steady z;
+        end
+        @test [v.type for v in m.allvars] == [:lin, :log, :steady]
+    end
+    let m = Model()
+        @shocks m begin
+            x; @log y; @steady z;
+        end
+        @test [v.type for v in m.allvars] == [:shock, :shock, :shock]
+    end
+    let m = Model()
+        @logvariables m begin
+            x; @log y; @steady z;
+        end
+        @test [v.type for v in m.allvars] == [:log, :log, :log]
+    end
+    let m = Model()
+        @steadyvariables m begin
+            x; @log y; @steady z;
+        end
+        @test [v.type for v in m.allvars] == [:steady, :steady, :steady]
+    end
 end
 
 module E
@@ -128,7 +153,7 @@ end
 
 
 module MetaTest
-    using ModelBaseEcon
+using ModelBaseEcon
     params = @parameters
     custom(x) = x + one(x)
     const val = 12.0
@@ -178,7 +203,7 @@ end
     params.e[3] = 2
     update_links!(params)
     @test 1.0 + params.d ≈ 1.0
-
+    
     params.d = @link cos(2π / e[2])
     @test params.d ≈ -1.0
 
@@ -220,7 +245,7 @@ end
     @variables mod x
     @shocks mod sx
     @equations mod begin
-        x[t - 1] = sx[t + 1]
+    x[t - 1] = sx[t + 1]
         @lag(x[t]) = @lag(sx[t + 2])
         # 
         x[t - 1] + a = sx[t + 1] + 3
@@ -419,7 +444,7 @@ end
 end
 @testset "AUX" begin
     let m = AUX.model
-        @test m.nvars == 2
+    @test m.nvars == 2
         @test m.nshks == 0
         @test m.nauxs == 2
         @test length(m.auxeqns) == 2
