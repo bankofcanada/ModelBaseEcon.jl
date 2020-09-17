@@ -63,6 +63,43 @@ end
     @test ModelBaseEcon.makesym(Val(:slope), y1) == ModelBaseEcon.makesym(Val(:slope), "y")
 end
 
+@testset "VarTypes" begin
+    lvars = ModelSymbol[]
+    push!(lvars, :ly)
+    push!(lvars, quote "ly" ly end)
+    push!(lvars, quote @log ly end)
+    push!(lvars, quote "ly" @log ly end)
+    push!(lvars, quote @lin ly end)
+    push!(lvars, quote "ly" @lin ly end)
+    push!(lvars, quote @steady ly end)
+    push!(lvars, quote "ly" @steady ly end)
+    for i = 1:length(lvars)
+        for j = i+1:length(lvars)
+            @test lvars[i] == lvars[j]
+        end
+        @test lvars[i] == :ly
+    end
+    @test lvars[1].type == :lin
+    @test lvars[2].type == :lin
+    @test lvars[3].type == :log
+    @test lvars[4].type == :log
+    @test lvars[5].type == :lin
+    @test lvars[6].type == :lin
+    @test lvars[7].type == :steady
+    @test lvars[8].type == :steady
+    for i = 1:length(lvars)
+        @test sprint(print, lvars[i], context=IOContext(stdout, :compact => true)) == "ly"
+    end
+    @test sprint(print, lvars[1], context=IOContext(stdout, :compact => false)) == "ly"
+    @test sprint(print, lvars[2], context=IOContext(stdout, :compact => false)) == "\"ly\" ly"
+    @test sprint(print, lvars[3], context=IOContext(stdout, :compact => false)) == "@log ly"
+    @test sprint(print, lvars[4], context=IOContext(stdout, :compact => false)) == "\"ly\" @log ly"
+    @test sprint(print, lvars[5], context=IOContext(stdout, :compact => false)) == "ly"
+    @test sprint(print, lvars[6], context=IOContext(stdout, :compact => false)) == "\"ly\" ly"
+    @test sprint(print, lvars[7], context=IOContext(stdout, :compact => false)) == "@steady ly"
+    @test sprint(print, lvars[8], context=IOContext(stdout, :compact => false)) == "\"ly\" @steady ly"
+end
+
 module E
     using ModelBaseEcon
 end
@@ -102,10 +139,10 @@ end
 @testset "Parameters" begin
     params = Parameters()
     push!(params, :a => 1.0)
-    push!(params, :b => @link 1.0-a )
+    push!(params, :b => @link 1.0 - a)
     push!(params, :c => @alias b)
     push!(params, :e => [1,2,3])
-    push!(params, :d => @link (sin(2π/e[3])) )
+    push!(params, :d => @link (sin(2π / e[3])))
     @test length(params) == 5
     # dot notation evaluates
     @test params.a isa Number
@@ -134,30 +171,30 @@ end
     # even deep ones
     @test_throws ArgumentError push!(params, :a => @alias c)
     # even when it is in an expr
-    @test_throws ArgumentError push!(params, :a => @link 5+b^2)
-    @test_throws ArgumentError push!(params, :a => @link 3-c)
+    @test_throws ArgumentError push!(params, :a => @link 5 + b^2)
+    @test_throws ArgumentError push!(params, :a => @link 3 - c)
 
-    @test params.d ≈ √3/2.0
+    @test params.d ≈ √3 / 2.0
     params.e[3] = 2
     update_links!(params)
     @test 1.0 + params.d ≈ 1.0
 
-    params.d = @link cos(2π/e[2])
+    params.d = @link cos(2π / e[2])
     @test params.d ≈ -1.0
 
-    @test_throws ArgumentError @alias a+5
+    @test_throws ArgumentError @alias a + 5
     @test_throws ArgumentError @link 28
 
     @test MetaTest.params.a ≈ 13.0
     @test MetaTest.params.b ≈ 13.0
-    MetaTest.eval(quote custom(x) = 2x+one(x) end)
+    MetaTest.eval(quote custom(x) = 2x + one(x) end)
     update_links!(MetaTest.params)
     @test MetaTest.params.a ≈ 25.0
     @test MetaTest.params.b ≈ 13.0
 
     @test @alias(c) == ModelParam(Set(), :c, nothing)
     @test @link(c) == ModelParam(Set(), :c, nothing)
-    @test @link(c+1) == ModelParam(Set(), :(c+1), nothing)
+    @test @link(c + 1) == ModelParam(Set(), :(c + 1), nothing)
 
     @test_throws ArgumentError params[:contents] = 5
     @test_throws ArgumentError params.abc
@@ -185,34 +222,34 @@ end
     @equations mod begin
         x[t - 1] = sx[t + 1]
         @lag(x[t]) = @lag(sx[t + 2])
-        #
+        # 
         x[t - 1] + a = sx[t + 1] + 3
         @lag(x[t] + a) = @lag(sx[t + 2] + 3)
-        #
+        # 
         x[t - 2] = sx[t]
         @lag(x[t], 2) = @lead(sx[t - 2], 2)
-        #
+        # 
         x[t] - x[t - 1] = x[t + 1] - x[t] + sx[t]
         @d(x[t]) = @d(x[t + 1]) + sx[t]
-        #
+        # 
         (x[t] - x[t + 1]) - (x[t - 1] - x[t]) = sx[t]
         @d(x[t] - x[t + 1]) = sx[t]
-        #
+        # 
         x[t] - x[t - 2] = sx[t]
         @d(x[t],0,2) = sx[t]
-        #
+        # 
         (x[t] - x[t - 1]) - (x[t - 1] - x[t - 2]) = sx[t]
         @d(x[t],2) = sx[t]
-        #
+        # 
         (x[t] - x[t - 2]) - (x[t - 1] - x[t - 3]) = sx[t]
         @d(x[t],1,2) = sx[t]
-        #
+        # 
         log(x[t] - x[t - 2]) - log(x[t - 1] - x[t - 3]) = sx[t]
         @dlog(@d(x[t],0,2)) = sx[t]
-        #
+        # 
         (x[t] + 0.3x[t + 2]) + (x[t - 1] + 0.3x[t + 1]) + (x[t - 2] + 0.3x[t]) = 0
         @movsum(x[t] + 0.3x[t + 2],3) = 0
-        #
+        # 
         ((x[t] + 0.3x[t + 2]) + (x[t - 1] + 0.3x[t + 1]) + (x[t - 2] + 0.3x[t])) / 3 = 0
         @movav(x[t] + 0.3x[t + 2],3) = 0
     end
@@ -281,7 +318,7 @@ end
     end
 end
 
-############################################################################
+    ############################################################################
 
 function test_eval_RJ(m::Model, known_R, known_J)
     nrows = 1 + m.maxlag + m.maxlead
@@ -428,7 +465,7 @@ end
     end
     @test length(out) == 3
     @test length(split(out[end], "=")) == 2
-    #
+    # 
     @test propertynames(ss) == tuple(variables(m)...)
     @test ss.pinf.level == ss.pinf[1]
     @test ss.pinf.slope == ss.pinf[2]
