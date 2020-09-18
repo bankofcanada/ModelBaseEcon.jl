@@ -24,6 +24,10 @@ end
     y2 = ModelSymbol(:y)
     y3 = ModelSymbol("y3", :y)
     y4 = ModelSymbol(quote "y4" y end)
+    @test hash(y1) == hash(:y)
+    @test hash(y2) == hash(:y)
+    @test hash(y3) == hash(:y)
+    @test hash(y4) == hash(:y)
     @test_throws ArgumentError ModelSymbol(:(x + 5))
     @test y1 == y2
     @test y3 == y1
@@ -73,6 +77,7 @@ end
     push!(lvars, quote "ly" @lin ly end)
     push!(lvars, quote @steady ly end)
     push!(lvars, quote "ly" @steady ly end)
+    push!(lvars, ModelSymbol(:ly, :lin))
     for i = 1:length(lvars)
         for j = i + 1:length(lvars)
             @test lvars[i] == lvars[j]
@@ -87,6 +92,7 @@ end
     @test lvars[6].type == :lin
     @test lvars[7].type == :steady
     @test lvars[8].type == :steady
+    @test lvars[9].type == :lin
     for i = 1:length(lvars)
         @test sprint(print, lvars[i], context=IOContext(stdout, :compact => true)) == "ly"
     end
@@ -554,7 +560,9 @@ end
         end
         @shocks m s1 s2
         @equations m begin
+            "linear growth with slope 0.2"
             lx[t] = lx[t - 1] + 0.2 + s1[t]
+            "exponential with the same rate as the slope of lx"
             log(x[t]) = lx[t] + s2[t + 1]
         end
         @initialize m
