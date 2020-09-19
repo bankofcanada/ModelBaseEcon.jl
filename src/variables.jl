@@ -1,34 +1,51 @@
 
 export ModelSymbol
 
+const doc_macro = MacroTools.unblock(quote
+    "hello"
+    world
+end).args[1]
+
 struct ModelSymbol
     doc::String
     name::Symbol
+    type::Symbol
+    ModelSymbol(d::String, n::Symbol, t::Symbol) =
+                t ∉ (:steady, :lin, :log, :shock) ?
+                    throw(ArgumentError("Invalid symbol type $t.")) :
+                    new(d, n, t)
 end
 
-# A symbol is a ModelSymbol with no description
-ModelSymbol(sym::Symbol) = ModelSymbol("", sym)
+ModelSymbol(s::Symbol) = ModelSymbol("", s, :lin)
+ModelSymbol(d::String, s::Symbol) = ModelSymbol(d, s, :lin)
+ModelSymbol(s::Symbol, t::Symbol) = ModelSymbol("", s, t)
 
-# An attempt to make the parsing of docstring expression future proof.
-find_macrocalls(any) = []
-find_macrocalls(expr::Expr) = expr.head == :macrocall ? [expr] : vcat([], [find_macrocalls(a) for a in expr.args]...)
-const docvar = find_macrocalls(quote
-    "docstring"
-    varname
-end)[1]
+function ModelSymbol(s::Expr)
+    s = MacroTools.unblock(s)
+    if MacroTools.isexpr(s, :macrocall) && s.args[1] == doc_macro
+        return ModelSymbol(s.args[3], s.args[4])
+    else
+        return ModelSymbol("", s)
+    end
+end
 
-# An expression is a ModelSymbol only if it is a docstring for a symbol.
-function ModelSymbol(expr::Expr)
-    if expr.head == :macrocall && expr.args[1] == docvar.args[1]
-        return ModelSymbol(expr.args[3], expr.args[4])
+function ModelSymbol(doc::String, s::Expr)
+    s = MacroTools.unblock(s)
+    if MacroTools.isexpr(s, :macrocall)
+        t = Symbol(String(s.args[1])[2:end])
+        return ModelSymbol(doc, s.args[3], t)
+    else
+        throw(ArgumentError("Invalid variable or shock expression $s."))
     end
-    if expr.head == :block
-        args = filter(a -> !isa(a, LineNumberNode), expr.args)
-        if length(args) == 1
-            return ModelSymbol(args[1])
-        end
-    end
-    throw(ArgumentError("Invalid variable declaration $(expr)."))
+end
+
+for sym ∈ (:shock, :log, :lin, :steady)
+    to_sym = Symbol("to_$sym")
+    eval(quote
+        $(to_sym)(s::ModelSymbol) = ModelSymbol(s.doc, s.name, $(QuoteNode(sym)))
+        $(to_sym)(any) = $(to_sym)(convert(ModelSymbol, any))
+        export $(to_sym)
+    end)
 end
 
 Base.convert(::Type{Symbol}, v::ModelSymbol) = v.name
@@ -37,14 +54,18 @@ Base.convert(::Type{ModelSymbol}, v::Expr) = ModelSymbol(v)
 Base.:(==)(a::ModelSymbol, b::ModelSymbol) = a.name == b.name
 Base.:(==)(a::ModelSymbol, b::Symbol) = a.name == b
 Base.:(==)(a::Symbol, b::ModelSymbol) = a == b.name
+
+# The hash must be the same as the hash of the symbol, so that we can use
+# ModelSymbol as index in a Dict with Symbol keys
 Base.hash(v::ModelSymbol, h::UInt) = hash(v.name, h)
 
-
-function Base.show(io::IO, v::ModelSymbol) 
-    if isempty(v.doc) || get(io, :compact, false)
+function Base.show(io::IO, v::ModelSymbol)
+    if get(io, :compact, false)
         print(io, v.name)
     else
-        print(io, "\"", v.doc, "\" ", v.name)
+        doc = isempty(v.doc) ? "" : "\"$(v.doc)\" "
+        type = v.type ∈ (:lin, :shock) ? "" : "@$(v.type) "
+        print(io, doc, type, v.name)
     end
 end
 

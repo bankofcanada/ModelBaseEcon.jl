@@ -15,12 +15,6 @@ struct SteadyStateEquation <: AbstractEquation
     expr::ExtExpr
     eval_resid::Function
     eval_RJ::Function
-    # The default constructor
-    # SteadyStateEquation(type, vinds, vsyms, expr, eval_resid, eval_RJ) =
-    #         new(type, vinds, vsyms, expr, eval_resid, eval_RJ)
-    # # Constructor that automatically adds `eval_RJ` from `eval_resid`
-    # SteadyStateEquation(type, vinds, vsyms, expr, eval_resid) =
-    #         new(type, vinds, vsyms, expr, eval_resid, make_eval_RJ(eval_resid, length(vinds)))
 end
 
 ########################################################
@@ -41,9 +35,9 @@ struct SteadyStateData
     mask::Vector{Bool}
     "Steady state equations derived from the dynamic system."
     equations::Vector{SteadyStateEquation}
-    "Steady state equations explicitly added separately from the dynamic system."
+    "Steady state equations explicitly added with @steadystate."
     constraints::Vector{SteadyStateEquation}
-    # constructor
+    # default constructor
     SteadyStateData() = new([], [], [], [], [])
 end
 
@@ -129,8 +123,8 @@ struct SSVarData{DATA <: AbstractVector{Float64}}
 end
 
 Base.propertynames(::SSVarData) = (:level, :slope)
-Base.getproperty(vd::SSVarData, prop::Symbol) = prop == :level ? getfield(vd, :value)[1] :
-                                                prop == :slope ? getfield(vd, :value)[2] :
+Base.getproperty(vd::SSVarData, prop::Symbol) = prop == :level ? getindex(getfield(vd, :value), 1) :
+                                                prop == :slope ? getindex(getfield(vd, :value), 2) :
                                                                  getfield(vd, prop)
 Base.setproperty!(vd::SSVarData, prop::Symbol, val) = prop == :level ? setindex!(getfield(vd, :value), val, 1) :
                                                       prop == :slope ? setindex!(getfield(vd, :value), val, 2) :
@@ -171,6 +165,7 @@ function Base.setindex!(sstate::SteadyStateData, val, var)
         sstate.values[ind] = val[1]
         sstate.values[ind + 1] = val[2]
     end
+    return val
 end
 
 ########
@@ -256,20 +251,60 @@ derived from a dynamic equation.
 """
 struct SSEqnData
     "Value of `shift` for the current steady state equation"
-    shift::Int64
-    "A matrix which translates the values of the steady state into the lagged(lead) values for the dynamic equation"
-    JT::Array{Float64,2}
+    shift::Int
+    "Information needed to compute the Jacobian matrix of the transformation between steady state and dynamic unknowns"
+    JT::Vector
     "The dynamic equation instance"
     eqn::Equation
 end
 
 function sseqn_resid_RJ(s::SSEqnData)
-    function _resid(pt::AbstractArray{Float64,1})
-        return s.eqn.eval_resid(s.JT * pt)
+    buffer = Vector{Float64}(undef, length(s.JT))
+    function to_dyn_pt(pt::AbstractVector{Float64})
+        # This function applies the transformation from steady
+        # state equation unknowns to dynamic equation unknowns
+        fill!(buffer, 0.0)
+        for (i, jt) in enumerate(s.JT)
+            if length(jt.ssinds) == 1
+                buffer[i] += pt[jt.ssinds[1]]
+            elseif jt.type == :lin
+                buffer[i] += pt[jt.ssinds[1]] + jt.tlag * pt[jt.ssinds[2]]
+            elseif jt.type == :log
+                buffer[i] += pt[jt.ssinds[1]] * exp(jt.tlag * pt[jt.ssinds[2]])
+            else
+                error("Steady or shock variable with slope!?")
+            end
+        end
+        return buffer
     end
-    function _RJ(pt::AbstractArray{Float64,1})
-        R, jj = s.eqn.eval_RJ(s.JT * pt)
-        return R, vec(jj' * s.JT)
+    function to_ssgrad(pt::AbstractVector{Float64}, jj::AbstractVector{Float64})
+        # This function inverts the transformation. jj is the gradient of the
+        # dynamic equation residual with respect to the dynamic equation unknowns.
+        # Here we compute the Jacobian of the transformation and use it to compute
+        ss = zeros(size(pt))
+        for (i, jt) in enumerate(s.JT)
+            if length(jt.ssinds) == 1
+                ss[jt.ssinds[1]] += jj[i]
+            elseif jt.type == :lin
+                # transformation is dyn = ss#lvl + tlag * ss#slp
+                ss[jt.ssinds[1]] += jj[i]
+                ss[jt.ssinds[2]] += jj[i] * jt.tlag
+            elseif jt.type == :log
+                # transformation is dyn = ss#lvl * exp(tlag * ss#slp)
+                A = pt[jt.ssinds[1]]
+                B = exp(jt.tlag * pt[jt.ssinds[2]])
+                ss[jt.ssinds[1]] += jj[i] * B
+                ss[jt.ssinds[2]] += jj[i] * A * B * jt.tlag
+            end
+        end
+        return ss
+    end
+    function _resid(pt::AbstractVector{Float64})
+        return s.eqn.eval_resid(to_dyn_pt(pt))
+    end
+    function _RJ(pt::AbstractVector{Float64})
+        R, jj = s.eqn.eval_RJ(to_dyn_pt(pt))
+        return R, to_ssgrad(pt, jj)
     end
     return _resid, _RJ
 end
@@ -282,31 +317,25 @@ Create a steady state equation from the given dynamic equation for the given mod
 Internal function, do not call directly.
 """
 function make_sseqn(model::AbstractModel, eqn::Equation; shift::Int64=0)
-    local vinds = Int64[]
-    local nvars = nvariables(model)
-    local nshks = nshocks(model)
+    local mvars::Vector{ModelSymbol} = allvars(model)
+    # local vinds = Int64[]
+    # local nvars = nvariables(model)
+    # local nshks = nshocks(model)
     # local nauxvars = nauxvars(model)
     # ssind converts the dynamic index (t, v) into
     # the corresponding indexes of steady state unknowns.
     # Returned value is a list of length 0, 1, or 2.
     function ssind((ti, vi), )::Array{Int64,1}
-        if nvars < vi <= nvars + nshks
-            # The mentioned variable is a shock. No steady state unknown for it.
-            return []
+        vi_type = mvars[vi].type
+        # The level unknown has index 2*vi-1.
+        # The slope unknown has index 2*vi. However:
+        #  * :steady and :shock variables don't have slopes
+        #  * :lin and :log variables the slope is in the equation
+        #    only if the slope coefficient is not 0.
+        if vi_type ∈ (:steady, :shock) || ti + shift == 0
+            return [2vi - 1]
         else
-            # In the dynamic equation the indexing goes - variables, shocks, auxvars
-            # In the steady state equation the indexing goes - variables, auxvars
-            # So, if the dynamic variable is an auxvar, we have to subtract nshks.
-            if vi > nvars
-                vi -= nshks
-            end
-            # The level unknown has index 2*vi-1.
-            # The slope unknown has index 2*vi, but it in the equation only if its coefficient is not 0.
-            if ti + shift == 0
-                return [2vi - 1]
-            else
-                return [2vi - 1, 2vi]
-            end
+            return [2vi - 1, 2vi]
         end
     end
     local ss = sstate(model)
@@ -316,31 +345,10 @@ function make_sseqn(model::AbstractModel, eqn::Equation; shift::Int64=0)
     vsyms = ss.vars[vinds]
     # In the next loop we build the matrix JT which transforms
     # from the steady state values to the dynamic point values.
-    JT = zeros(length(eqn.vinds), length(vinds))
+    JT = []
     for (i, (ti, vi)) in enumerate(eqn.vinds)
-        # for each index in the dynamic equation, we have a row with all zeros,
-        # except at the columns of the level and slope for the variable.
-        # The coefficient for the level is 1.0 and for the slope is ti+shift.
-        # Note that the level is always an unknown, but the slope may not be,
-        # depending on whether ti+shift is 0.
-        if nvars < vi <= nvars + nshks
-            # It's a shock, skip it
-            continue
-        else
-            if vi > nvars
-                # It's an aux variable
-                vi -= nshks
-            end
-            vi_lvl = indexin([2vi - 1,], vinds)[1]
-            vi_slp = indexin([2vi,], vinds)[1]
-            JT[i,vi_lvl] = 1.0
-            if vi_slp === nothing && ti + shift != 0
-                error("Slope of $(eqn.vsyms[i]) not found in steady state indexes.")
-            end
-            if vi_slp !== nothing
-                JT[i,vi_slp] = ti + shift
-            end
-        end
+        val = (ssinds = indexin(ssind((ti, vi)), vinds), tlag = ti + shift, type = mvars[vi].type)
+        push!(JT, val)
     end
     type = shift == 0 ? :tzero : :tshift
     let sseqndata = SSEqnData(shift, JT, eqn)
@@ -527,7 +535,6 @@ end
 
 macro steadystate(model, equation::Expr)
     thismodule = @__MODULE__
-
     return esc(:($(thismodule).setss!($(model), $(Meta.quot(equation)); type=:level))) # , modelmodule=$(modelmodule))))
 end
 
@@ -546,11 +553,13 @@ function initssdata!(model::AbstractModel)
     empty!(ss.mask)
     shks = Set(shocks(model))
     for var in allvars(model)
-        if var in shks
-            continue
-        end
         push!(ss.vars, makesym(Val(:level), var), makesym(Val(:slope), var))
-        push!(ss.values, 1.0, 0.0)  # default initial guess for level and slope
+        # default initial guess for level and slope
+        if var in shks || (var isa ModelSymbol && var.type == :shock)
+            push!(ss.values, 0.0, 0.0)
+        else
+            push!(ss.values, 1.0, 0.0)
+        end
         push!(ss.mask, false, false)
     end
     empty!(ss.equations)
