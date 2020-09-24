@@ -196,7 +196,7 @@ function Base.propertynames(ssd::SteadyStateData, private=false)
 end
 
 #########################
-#
+# 
 
 export printsstate
 
@@ -232,14 +232,14 @@ printsstate(ssd::SteadyStateData) = printsstate(Base.stdout, ssd)
 #   in the steady state equation, we assume that the variable y_ss
 #   follows a linear motion expressed as y_ss[t] = y_ss#lvl + t * y_ss#slp
 #   where y_ss#lvl and y_ss#slp are two unknowns we solve for.
-#
+# 
 #   The dynamic equation has mentions of lags and leads. We replace those
 #   with the above expression.
-#
+# 
 #   Since we have two parameters to determine, we need two steady state equations
 #   from each dynamic equation. We get this by writing the dynamic equation at
 #   two different values of `t` - 0 and another one we call `shift`.
-#
+# 
 #   Shift is a an option in the model object, which the user can set to any integer
 #   other than 0. The default is 10.
 
@@ -270,7 +270,7 @@ function sseqn_resid_RJ(s::SSEqnData)
             elseif jt.type == :lin
                 buffer[i] += pt[jt.ssinds[1]] + jt.tlag * pt[jt.ssinds[2]]
             elseif jt.type == :log
-                buffer[i] += pt[jt.ssinds[1]] * exp(jt.tlag * pt[jt.ssinds[2]])
+                buffer[i] += exp(pt[jt.ssinds[1]] + jt.tlag * pt[jt.ssinds[2]])
             else
                 error("Steady or shock variable with slope!?")
             end
@@ -290,10 +290,10 @@ function sseqn_resid_RJ(s::SSEqnData)
                 ss[jt.ssinds[1]] += jj[i]
                 ss[jt.ssinds[2]] += jj[i] * jt.tlag
             elseif jt.type == :log
-                # transformation is dyn = ss#lvl * exp(tlag * ss#slp)
-                A = pt[jt.ssinds[1]]
+                # transformation is dyn = exp(ss#lvl) * exp(tlag * ss#slp)
+                A = exp(pt[jt.ssinds[1]])
                 B = exp(jt.tlag * pt[jt.ssinds[2]])
-                ss[jt.ssinds[1]] += jj[i] * B
+                ss[jt.ssinds[1]] += jj[i] * A * B
                 ss[jt.ssinds[2]] += jj[i] * A * B * jt.tlag
             end
         end
@@ -382,14 +382,14 @@ function setss!(model::AbstractModel, expr::Expr; type::Symbol,
 
     ###############################################
     #     ssprocess(val)
-    #
+    # 
     # Process the given value to extract information about mentioned parameters and variables.
     # This function has the side effect of populating the vectors
     # `vinds`, `vsyms`, `val_params` and `source`
-    #
+    # 
     # Algorithm is recursive over the given expression. The bottom of the recursion is the
     # processing of a `Number`, a `Symbol`, (or a `LineNumberNode`).
-    #
+    # 
     # we will store indices
     local vinds = Int64[]
     local vsyms = Symbol[]
@@ -460,11 +460,11 @@ function setss!(model::AbstractModel, expr::Expr; type::Symbol,
     end
     # end of ssprocess() definition
     ###############################################
-    #
+    # 
     lhs, rhs = expr.args
     lhs = ssprocess(lhs)
     rhs = ssprocess(rhs)
-    #
+    # 
     nargs = length(vinds)
     # In case there's no source information, add a dummy one
     push!(source, LineNumberNode(0))
@@ -543,8 +543,8 @@ end
 
 Initialize the steady state data structure of the given model.
 
-!!! note
-    Do not call directly. This is an internal function, called during [`@initialize`](@ref)
+Do not call directly. This is an internal function, called during
+[`@initialize`](@ref)
 """
 function initssdata!(model::AbstractModel)
     ss = sstate(model)

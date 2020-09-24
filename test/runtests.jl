@@ -353,7 +353,7 @@ end
     end
 end
 
-    ############################################################################
+############################################################################
 
 function test_eval_RJ(m::Model, known_R, known_J)
     nrows = 1 + m.maxlag + m.maxlead
@@ -597,7 +597,7 @@ end
         @test TMP[[1,2,5]] ≈ [0.0, 1.0, -1.0]
         # test with eq4
         ss.lx = [1.5, 0.2]
-        ss.x = [exp(1.5), 0.2]
+        ss.x = [1.5, 0.2]
         ss.s1 = [0.0, 0.0]
         ss.s2 = [0.0, 0.0]
         for s2 = -2:0.1:2
@@ -619,13 +619,13 @@ end
         TMP = fill!(similar(ss.values), 0.0)
         TMP[eq4.vinds] .= J
         @test R ≈ 0.0
-        @test TMP[[1,2,3,4,7]] ≈ [-1.0, -m.shift, 1.0/ss.x.level, m.shift, -1.0]
+        @test TMP[[1,2,3,4,7]] ≈ [-1.0, -m.shift, 1.0, m.shift, -1.0]
         for xlvl = 0.1:0.1:2
             ss.x.level = xlvl
             R, J = eq4.eval_RJ(ss.values[eq4.vinds])
-            @test R ≈ log(xlvl) - 1.5
+            @test R ≈ xlvl - 1.5
             TMP[eq4.vinds] .= J
-            @test TMP[[1,2,3,4,7]] ≈ [-1.0, -m.shift, 1.0/xlvl, m.shift, -1.0]
+            @test TMP[[1,2,3,4,7]] ≈ [-1.0, -m.shift, 1.0, m.shift, -1.0]
         end
     end
 end
