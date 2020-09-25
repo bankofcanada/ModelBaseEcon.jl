@@ -554,6 +554,50 @@ end
 
 @testset "VarTypesSS" begin
     let m = Model()
+        
+        m.verbose = !true
+        
+        @variables m begin
+            p
+            @log q
+        end
+        @equations m begin
+            2p[t] = p[t + 1] + 0.1
+            q[t] = p[t] + 1
+        end
+        @initialize m
+        
+        # clear_sstate!(m)
+        # ret = sssolve!(m)
+        # @test ret ≈ [0.1, 0.0, log(1.1), 0.0]
+        
+        eq1, eq2, eq3, eq4 = m.sstate.equations
+        x = rand(Float64, (4,))
+        R, J = eq1.eval_RJ(x[eq1.vinds])
+        @test R ≈ x[1] - x[2] - 0.1
+        @test J ≈ [1.0, -1.0, 0, 0][eq1.vinds]
+
+        for sh = 1:5
+            m.shift = sh
+            R, J = eq3.eval_RJ(x[eq3.vinds])
+            @test R ≈ x[1] + (sh - 1) * x[2] - 0.1
+            @test J ≈ [1.0, sh - 1.0, 0, 0][eq3.vinds]
+        end
+
+        R, J = eq2.eval_RJ(x[eq2.vinds])
+        @test R ≈ exp(x[3]) - x[1] - 1
+        @test J ≈ [-1, 0.0, exp(x[3]), 0.0][eq2.vinds]
+
+        for sh = 1:5
+            m.shift = sh
+            R, J = eq4.eval_RJ(x[eq4.vinds])
+            @test R ≈ exp(x[3] + sh * x[4]) - x[1] - sh * x[2] - 1
+            @test J ≈ [-1.0, -sh, exp(x[3] + sh * x[4]), exp(x[3] + sh * x[4]) * sh][eq4.vinds]
+        end
+
+    end
+    
+    let m = Model()
         @variables m begin
             lx
             @log x

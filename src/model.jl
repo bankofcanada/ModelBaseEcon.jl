@@ -124,7 +124,19 @@ function Base.getproperty(model::Model, name::Symbol)
     elseif name ∈ fieldnames(ModelFlags)
         return getfield(getfield(model, :flags), name)
     else
-        error("type Model has no property $name")
+        ind = indexin([name], getfield(model, :variables))[1]
+        if ind !== nothing
+            return getindex(getfield(model, :variables), ind)
+        end
+        ind = indexin([name], getfield(model, :shocks))[1]
+        if ind !== nothing
+            return getindex(getfield(model, :shocks), ind)
+        end
+        ind = indexin([name], getfield(model, :auxvars))[1]
+        if ind !== nothing
+            return getindex(getfield(model, :auxvars), ind)
+        end
+        error("This Model doesn't have property $name")
     end
 end
 
@@ -781,8 +793,8 @@ end
 
 eval_RJ(x::AbstractMatrix{Float64}, m::Model) = eval_RJ(x, m.evaldata)
 eval_R!(r::AbstractVector{Float64}, x::AbstractMatrix{Float64}, m::Model) = eval_R!(r, x, m.evaldata)
-@inline printsstate(io::IO, m::Model) = printsstate(io, m.sstate)
-@inline printsstate(m::Model) = printsstate(m.sstate)
+# @inline printsstate(io::IO, m::Model) = printsstate(io, m.sstate)
+# @inline printsstate(m::Model) = printsstate(m.sstate)
 @inline issssolved(m::Model) = issssolved(m.sstate)
 
 ##########################
