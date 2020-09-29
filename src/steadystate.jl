@@ -135,6 +135,7 @@ Base.getindex(vd::SSVarData, s) = getproperty(vd, Symbol(s))
 Base.setindex!(vd::SSVarData, val, i::Int) = setindex!(vd.value, val, i)
 Base.setindex!(vd::SSVarData, val, s) = setproperty!(vd, Symbol(s), val)
 
+Base.iterate(vd::SSVarData, args...) = Base.iterate(vd.value, args...)
 
 Base.show(io::IO, ::MIME"text/plan", vd::SSVarData) = show(io, vd)
 Base.show(io::IO, vd::SSVarData) = print(io, vd.name, " : ", NamedTuple{(:level, :slope)}(vd.value))
