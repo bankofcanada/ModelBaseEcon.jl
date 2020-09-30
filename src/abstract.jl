@@ -10,8 +10,10 @@ for fn in (:expr, :vinds, :vsyms, :eval_resid, :eval_RJ)
     end |> eval
 end
 
+const default_eqn_type = :any
+
 # equations might have these fields. If not, we provide defaults
-@inline type(eqn::AbstractEquation) = :type in fieldnames(typeof(eqn)) ? getfield(eqn, :type) : nothing
+@inline type(eqn::AbstractEquation) = :type in fieldnames(typeof(eqn)) ? getfield(eqn, :type) : default_eqn_type
 @inline doc(eqn::AbstractEquation) = :doc in fieldnames(typeof(eqn)) ? getfield(eqn, :doc) : ""
 
 @inline eval_resid(eqn::AbstractEquation, x) = eval_resid(eqn)(x)
@@ -23,7 +25,7 @@ function Base.show(io::IO, eqn::AbstractEquation)
         return print(io, expr(eqn))
     end
     docstr = isempty(doc(eqn)) ? "" : "\"$(doc(eqn))\" "
-    typestr = type(eqn) === nothing ? "" : "$(type(eqn)) "
+    typestr = type(eqn) === default_eqn_type ? "" : "$(type(eqn)) "
     print(io, docstr, typestr, expr(eqn))
 end
 

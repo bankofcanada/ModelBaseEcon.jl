@@ -159,6 +159,22 @@ end
         @test isempty(sline) || length(split(sline, "=")) == 2
     end
     @test_throws ModelBaseEcon.ModelErrorBase ModelBaseEcon.modelerror()
+    @variables m x y z
+    @logvariables m k l m
+    @steadyvariables m p q r
+    @shocks m a b c
+    for s in (:a, :b, :c)
+        @test m.:($s) isa ModelSymbol && isshock(m.:($s))
+    end
+    for s in (:x, :y, :z)
+        @test m.:($s) isa ModelSymbol && islin(m.:($s))
+    end
+    for s in (:k, :l, :m)
+        @test m.:($s) isa ModelSymbol && islog(m.:($s))
+    end
+    for s in (:p, :q, :r)
+        @test m.:($s) isa ModelSymbol && issteady(m.:($s))
+    end
 end
 
 
@@ -321,8 +337,8 @@ end
         m.warn.no_t = false
         @parameters m begin
             a = 0.3
-            b = @link 1 - a 
-            d = [1,2,3] 
+            b = @link 1 - a
+            d = [1,2,3]
             c = @link sin(2π / d[3])
         end
         @variables m begin
@@ -340,20 +356,33 @@ end
 
         @test isfile("../examples/TestModel.jl")
         @using_example TestModel
-        
+
         @test parameters(TestModel.model) == parameters(m)
         @test variables(TestModel.model) == variables(m)
         @test shocks(TestModel.model) == shocks(m)
         @test equations(TestModel.model) == equations(m)
         @test sstate(TestModel.model).constraints == sstate(m).constraints
-        
+
         @test_throws ArgumentError TestModel.model.parameters.d = @alias c
 
         rm("../examples/TestModel.jl")
     end
 end
 
-    ############################################################################
+@testset "@log eqn" begin
+    let m = Model()
+        @parameters m rho = 0.1
+        @variables m X
+        @shocks m EX
+        @equations m begin
+            @log X[t] = rho * X[t-1] + EX[t]
+        end
+        @initialize m
+        @test length(m.equations) == 1 && islog(m.equations[1])
+    end
+end
+
+############################################################################
 
 function test_eval_RJ(m::Model, known_R, known_J)
     nrows = 1 + m.maxlag + m.maxlead
@@ -394,17 +423,21 @@ end
 end
 
 @testset "E1.sstate" begin
-    let m = E1.model
+    let io = IOBuffer(), m = E1.model
         @test issssolved(m) == false
         E1.model.sstate.mask .= true
         @test issssolved(m) == true
         @test neqns(m.sstate) == 2
         @steadystate m y = 5
+        @test_throws ErrorException @steadystate m sin(y + 7)
         @test length(m.sstate.constraints) == 1
         @test neqns(m.sstate) == 3
         @test length(alleqns(m.sstate)) == 3
+        printsstate(io, m)
+        lines = split(String(take!(io)), '\n')
+        @test length(lines) == 2 + length(m.allvars)
     end
-    end
+end
 
 @testset "E1.lin" begin
     m = deepcopy(E1.model)
@@ -554,6 +587,50 @@ end
 
 @testset "VarTypesSS" begin
     let m = Model()
+
+    m.verbose = !true
+
+        @variables m begin
+            p
+            @log q
+        end
+        @equations m begin
+            2p[t] = p[t + 1] + 0.1
+            q[t] = p[t] + 1
+        end
+        @initialize m
+
+        # clear_sstate!(m)
+        # ret = sssolve!(m)
+        # @test ret ≈ [0.1, 0.0, log(1.1), 0.0]
+
+        eq1, eq2, eq3, eq4 = m.sstate.equations
+        x = rand(Float64, (4,))
+        R, J = eq1.eval_RJ(x[eq1.vinds])
+        @test R ≈ x[1] - x[2] - 0.1
+        @test J ≈ [1.0, -1.0, 0, 0][eq1.vinds]
+
+        for sh = 1:5
+            m.shift = sh
+            R, J = eq3.eval_RJ(x[eq3.vinds])
+            @test R ≈ x[1] + (sh - 1) * x[2] - 0.1
+            @test J ≈ [1.0, sh - 1.0, 0, 0][eq3.vinds]
+        end
+
+        R, J = eq2.eval_RJ(x[eq2.vinds])
+        @test R ≈ exp(x[3]) - x[1] - 1
+        @test J ≈ [-1, 0.0, exp(x[3]), 0.0][eq2.vinds]
+
+        for sh = 1:5
+            m.shift = sh
+            R, J = eq4.eval_RJ(x[eq4.vinds])
+            @test R ≈ exp(x[3] + sh * x[4]) - x[1] - sh * x[2] - 1
+            @test J ≈ [-1.0, -sh, exp(x[3] + sh * x[4]), exp(x[3] + sh * x[4]) * sh][eq4.vinds]
+        end
+
+    end
+
+    let m = Model()
         @variables m begin
             lx
             @log x
@@ -597,7 +674,7 @@ end
         @test TMP[[1,2,5]] ≈ [0.0, 1.0, -1.0]
         # test with eq4
         ss.lx = [1.5, 0.2]
-        ss.x = [exp(1.5), 0.2]
+        ss.x = [1.5, 0.2]
         ss.s1 = [0.0, 0.0]
         ss.s2 = [0.0, 0.0]
         for s2 = -2:0.1:2
@@ -619,13 +696,13 @@ end
         TMP = fill!(similar(ss.values), 0.0)
         TMP[eq4.vinds] .= J
         @test R ≈ 0.0
-        @test TMP[[1,2,3,4,7]] ≈ [-1.0, -m.shift, 1.0/ss.x.level, m.shift, -1.0]
+        @test TMP[[1,2,3,4,7]] ≈ [-1.0, -m.shift, 1.0, m.shift, -1.0]
         for xlvl = 0.1:0.1:2
             ss.x.level = xlvl
             R, J = eq4.eval_RJ(ss.values[eq4.vinds])
-            @test R ≈ log(xlvl) - 1.5
+            @test R ≈ xlvl - 1.5
             TMP[eq4.vinds] .= J
-            @test TMP[[1,2,3,4,7]] ≈ [-1.0, -m.shift, 1.0/xlvl, m.shift, -1.0]
+            @test TMP[[1,2,3,4,7]] ≈ [-1.0, -m.shift, 1.0, m.shift, -1.0]
         end
     end
 end

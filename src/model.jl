@@ -124,7 +124,19 @@ function Base.getproperty(model::Model, name::Symbol)
     elseif name ∈ fieldnames(ModelFlags)
         return getfield(getfield(model, :flags), name)
     else
-        error("type Model has no property $name")
+        ind = indexin([name], getfield(model, :variables))[1]
+        if ind !== nothing
+            return getindex(getfield(model, :variables), ind)
+        end
+        ind = indexin([name], getfield(model, :shocks))[1]
+        if ind !== nothing
+            return getindex(getfield(model, :shocks), ind)
+        end
+        ind = indexin([name], getfield(model, :auxvars))[1]
+        if ind !== nothing
+            return getindex(getfield(model, :auxvars), ind)
+        end
+        error("This Model doesn't have property $name")
     end
 end
 
@@ -400,21 +412,11 @@ macro equations(model, block::Expr)
     for expr in block.args
         if isa(expr, LineNumberNode)
             push!(eqn.args, expr)
-            continue
-        end
-        if MacroTools.isexpr(expr, :(=))
+        else
             push!(eqn.args, expr)
             push!(ret.args, :(push!($model.equations, $(Meta.quot(eqn)))))
             eqn = Expr(:block)
-            continue
         end
-        if MacroTools.isexpr(expr, :macrocall) && expr.args[1] == doc_macro
-            push!(eqn.args, expr)
-            push!(ret.args, :(push!($model.equations, $(Meta.quot(eqn)))))
-            eqn = Expr(:block)
-            continue
-        end
-        eqn = Expr(:block)
     end
     return esc(ret)
 end
@@ -422,6 +424,10 @@ end
 ################################################################
 # The processing of equations during model initialization.
 
+const log_eqn_type = Symbol("@", :log)
+
+export islog
+@inline islog(eq::AbstractEquation) = eq.type === log_eqn_type
 
 error_process(msg, expr) = begin
     throw(ArgumentError("$msg\n  During processing of\n  $(expr)"))
@@ -451,6 +457,7 @@ process_equation(model::Model, expr::String; kwargs...) = process_equation(model
 function process_equation(model::Model, expr::Expr; 
     modelmodule::Module=moduleof(model), 
     line=LineNumberNode(0),
+    type=default_eqn_type,
     doc="")
 
     # a list of all known time series 
@@ -518,17 +525,17 @@ function process_equation(model::Model, expr::Expr;
     # Main version of process() - it's recursive
     function process(ex::Expr)
         if ex.head == :macrocall && ex.args[1] == doc_macro
-            line = ex.args[2]
+            push!(source, ex.args[2])
             doc *= ex.args[3]
             return process(ex.args[4])
         end
         if ex.head == :macrocall
-            # if ex.args[1] == doc_macro
-            #     push!(source, ex.args[2])
-            #     doc = ex.args[3]
-            #     return process(ex.args[4])
-            # end
-            mfunc = Symbol(replace(string(ex.args[1]), "@" => "at_"))
+            push!(source, ex.args[2])
+            if length(ex.args) == 3 && MacroTools.isexpr(ex.args[3], :(=))
+                type = ex.args[1]
+                return process(ex.args[3])
+            end
+            mfunc = Symbol("at_", string(ex.args[1])[2:end]) # replace leading @ with at_
             if isdefined(modelmodule, mfunc)
                 mfunc = :( $modelmodule.$mfunc )
             elseif isdefined(ModelBaseEcon, mfunc)
@@ -620,13 +627,19 @@ function process_equation(model::Model, expr::Expr;
                 return references[(tind, vind)]
             end
         elseif ex.head == :(=)
-            return Expr(:call, :-, map(make_residual_expression, ex.args)...)
+            if type == log_eqn_type
+                return Expr(:call, :log, Expr(:call, :/, map(make_residual_expression, ex.args)...))
+            else
+                return Expr(:call, :-, map(make_residual_expression, ex.args)...)
+            end
         end
         return Expr(ex.head, map(make_residual_expression, ex.args)...)
     end
 
     # call process() to gather information
     new_expr = process(expr)
+    MacroTools.isexpr(new_expr, :(=)) || error_process("Expected equation.", expr)
+    type ∈ (log_eqn_type, default_eqn_type) || error_process("Unknown equation type $(type).", expr)
     # if source information missing, set from argument
     push!(source, line)
     # collect the indices and dummy symbols of the mentioned variables
@@ -647,7 +660,7 @@ function process_equation(model::Model, expr::Expr;
         funcs_expr = makefuncs(residual, vsyms, param_assigments; mod=modelmodule)
         modelmodule.eval(funcs_expr)
     end
-    return Equation(doc, expr, residual, vinds, vsyms, resid, RJ)
+    return Equation(doc, type, expr, residual, vinds, vsyms, resid, RJ)
 end
 
 
@@ -664,6 +677,7 @@ the Equation() instance for it and add it to the model instance.
 function add_equation!(model::Model, expr::Expr; modelmodule::Module=moduleof(model))
     source = LineNumberNode[]
     auxeqns = Expr[]
+    type = default_eqn_type
     doc = ""
 
     ##################################
@@ -692,6 +706,10 @@ function add_equation!(model::Model, expr::Expr; modelmodule::Module=moduleof(mo
                 doc = margs[1]
                 return process(margs[2])
             end
+            if mname == log_eqn_type && length(margs) == 1
+                type = mname
+                return process(margs[1])
+            end
             return Expr(:macrocall, mname, nothing, process.(margs)...)
         end
         # recursively process all arguments
@@ -702,7 +720,7 @@ function add_equation!(model::Model, expr::Expr; modelmodule::Module=moduleof(mo
         if getoption!(model; substitutions=true)
             if expr.head == :call && args[1] == :log && isa(args[2], Expr)
                 # log(something)
-                aux_expr = process_equation(model, args[2]; modelmodule=modelmodule)
+                aux_expr = process_equation(model, Expr(:(=), args[2], 0); modelmodule=modelmodule)
                 if length(aux_expr.vinds) == 0
                     # something doesn't contain any variables, no need for substitution
                     return Expr(:call, :log, args[2])
@@ -722,7 +740,7 @@ function add_equation!(model::Model, expr::Expr; modelmodule::Module=moduleof(mo
     if isempty(source)
         push!(source, LineNumberNode(0))
     end
-    eqn = process_equation(model, new_expr; modelmodule=modelmodule, line=source[1], doc=doc)
+    eqn = process_equation(model, new_expr; modelmodule=modelmodule, line=source[1], type=type, doc=doc)
     push!(model.equations, eqn)
     model.maxlag = max(model.maxlag, eqn.maxlag)
     model.maxlead = max(model.maxlead, eqn.maxlead)
@@ -781,8 +799,8 @@ end
 
 eval_RJ(x::AbstractMatrix{Float64}, m::Model) = eval_RJ(x, m.evaldata)
 eval_R!(r::AbstractVector{Float64}, x::AbstractMatrix{Float64}, m::Model) = eval_R!(r, x, m.evaldata)
-@inline printsstate(io::IO, m::Model) = printsstate(io, m.sstate)
-@inline printsstate(m::Model) = printsstate(m.sstate)
+# @inline printsstate(io::IO, m::Model) = printsstate(io, m.sstate)
+# @inline printsstate(m::Model) = printsstate(m.sstate)
 @inline issssolved(m::Model) = issssolved(m.sstate)
 
 ##########################

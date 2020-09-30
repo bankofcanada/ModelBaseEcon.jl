@@ -40,11 +40,15 @@ function ModelSymbol(doc::String, s::Expr)
 end
 
 for sym ∈ (:shock, :log, :lin, :steady)
-    to_sym = Symbol("to_$sym")
+    to_sym = Symbol("to_", sym)
+    issym = Symbol("is", sym)
     eval(quote
-        $(to_sym)(s::ModelSymbol) = ModelSymbol(s.doc, s.name, $(QuoteNode(sym)))
-        $(to_sym)(any) = $(to_sym)(convert(ModelSymbol, any))
+        @inline $(to_sym)(s::ModelSymbol) = ModelSymbol(s.doc, s.name, $(QuoteNode(sym)))
+        @inline $(to_sym)(any) = $(to_sym)(convert(ModelSymbol, any))
         export $(to_sym)
+        @inline $(issym)(any) = false
+        @inline $(issym)(s::ModelSymbol) = s.type == $(QuoteNode(sym))
+        export $(issym)
     end)
 end
 
