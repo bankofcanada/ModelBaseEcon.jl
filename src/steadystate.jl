@@ -230,14 +230,14 @@ function printsstate(io::IO, model::AbstractModel)
             if al > 0
                 sval = repeat(" ", al) * sval
             end
-            if length(sval) > al + ar
-                sval = sval[1:al + 1] * '…' * sval[end-ar+3:end]
-                # Notes on the indexing
-                # length(1:al+1) == al+1  (last - first + 1)
-                # length(end-ar+3:end) == ar-2  (end - (end-ar+3) + 1 = ar-2)
-                # length('…') == 1
-                # So, total length is (al + 1) + 1 + (ar - 2) = al + ar
-            end
+            # if length(sval) > al + ar
+            #     sval = sval[1:al + 1] * '…' * sval[end-ar+3:end]
+            #     # Notes on the indexing
+            #     # length(1:al+1) == al+1  (last - first + 1)
+            #     # length(end-ar+3:end) == ar-2  (end - (end-ar+3) + 1 = ar-2)
+            #     # length('…') == 1
+            #     # So, total length is (al + 1) + 1 + (ar - 2) = al + ar
+            # end
             if al > 0
                 print(io, sval, repeat(" ", ar+al-length(sval)))
             else

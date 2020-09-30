@@ -40,6 +40,7 @@ is first read.
 """
 struct Equation <: AbstractEquation
     doc::String
+    type::Symbol
     "The original expression entered by the user"
     expr::ExtExpr      # original expression
     """
@@ -69,14 +70,14 @@ end
 
 # 
 # dummy constructor - just stores the expresstion without any processing
-Equation(expr::ExtExpr) = Equation("", expr, Expr(:block), [], [], 0, 0, eqnnotready, eqnnotready)
+Equation(expr::ExtExpr) = Equation("", default_eqn_type, expr, Expr(:block), [], [], 0, 0, eqnnotready, eqnnotready)
 
 # constructor that computes maxlag and maxlead on the fly
-function Equation(doc, expr, resid, vinds, vsyms, eval_resid, eval_RJ) 
+function Equation(doc, type, expr, resid, vinds, vsyms, eval_resid, eval_RJ) 
     # compute `maxlag` and `maxlead`
     maxlag, maxlead = (isempty(vinds) ? (0, 0) : extrema(v[1] for v in vinds) .* (-1, 1))
     # call the default constructor
-    return Equation(doc, expr, resid, vinds, vsyms, maxlag, maxlead, eval_resid, eval_RJ)
+    return Equation(doc, type, expr, resid, vinds, vsyms, maxlag, maxlead, eval_resid, eval_RJ)
 end
 
 # Allows us to pass a Number of a Symbol or a raw Expr to calls where Equation is expected.
