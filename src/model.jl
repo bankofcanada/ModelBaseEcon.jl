@@ -426,6 +426,9 @@ end
 
 const log_eqn_type = Symbol("@", :log)
 
+export islog
+@inline islog(eq::AbstractEquation) = eq.type === log_eqn_type
+
 error_process(msg, expr) = begin
     throw(ArgumentError("$msg\n  During processing of\n  $(expr)"))
 end
@@ -635,12 +638,8 @@ function process_equation(model::Model, expr::Expr;
 
     # call process() to gather information
     new_expr = process(expr)
-    if !MacroTools.isexpr(new_expr, :(=))
-        error_process("Expected equation.", expr)
-    end
-    if type ∉ (log_eqn_type, default_eqn_type)
-        error_process("Unknown equation type $(type).", expr)
-    end
+    MacroTools.isexpr(new_expr, :(=)) || error_process("Expected equation.", expr)
+    type ∈ (log_eqn_type, default_eqn_type) || error_process("Unknown equation type $(type).", expr)
     # if source information missing, set from argument
     push!(source, line)
     # collect the indices and dummy symbols of the mentioned variables

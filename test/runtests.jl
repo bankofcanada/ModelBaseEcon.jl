@@ -159,6 +159,22 @@ end
         @test isempty(sline) || length(split(sline, "=")) == 2
     end
     @test_throws ModelBaseEcon.ModelErrorBase ModelBaseEcon.modelerror()
+    @variables m x y z
+    @logvariables m k l m
+    @steadyvariables m p q r
+    @shocks m a b c
+    for s in (:a, :b, :c)
+        @test m.:($s) isa ModelSymbol && isshock(m.:($s))
+    end
+    for s in (:x, :y, :z)
+        @test m.:($s) isa ModelSymbol && islin(m.:($s))
+    end
+    for s in (:k, :l, :m)
+        @test m.:($s) isa ModelSymbol && islog(m.:($s))
+    end
+    for s in (:p, :q, :r)
+        @test m.:($s) isa ModelSymbol && issteady(m.:($s))
+    end
 end
 
 
@@ -321,8 +337,8 @@ end
         m.warn.no_t = false
         @parameters m begin
             a = 0.3
-            b = @link 1 - a 
-            d = [1,2,3] 
+            b = @link 1 - a
+            d = [1,2,3]
             c = @link sin(2π / d[3])
         end
         @variables m begin
@@ -340,16 +356,29 @@ end
 
         @test isfile("../examples/TestModel.jl")
         @using_example TestModel
-        
+
         @test parameters(TestModel.model) == parameters(m)
         @test variables(TestModel.model) == variables(m)
         @test shocks(TestModel.model) == shocks(m)
         @test equations(TestModel.model) == equations(m)
         @test sstate(TestModel.model).constraints == sstate(m).constraints
-        
+
         @test_throws ArgumentError TestModel.model.parameters.d = @alias c
 
         rm("../examples/TestModel.jl")
+    end
+end
+
+@testset "@log eqn" begin
+    let m = Model()
+        @parameters m rho = 0.1
+        @variables m X
+        @shocks m EX
+        @equations m begin
+            @log X[t] = rho * X[t-1] + EX[t]
+        end
+        @initialize m
+        @test length(m.equations) == 1 && islog(m.equations[1])
     end
 end
 
@@ -394,17 +423,21 @@ end
 end
 
 @testset "E1.sstate" begin
-    let m = E1.model
+    let io = IOBuffer(), m = E1.model
         @test issssolved(m) == false
         E1.model.sstate.mask .= true
         @test issssolved(m) == true
         @test neqns(m.sstate) == 2
         @steadystate m y = 5
+        @test_throws ErrorException @steadystate m sin(y + 7)
         @test length(m.sstate.constraints) == 1
         @test neqns(m.sstate) == 3
         @test length(alleqns(m.sstate)) == 3
+        printsstate(io, m)
+        lines = split(String(take!(io)), '\n')
+        @test length(lines) == 2 + length(m.allvars)
     end
-    end
+end
 
 @testset "E1.lin" begin
     m = deepcopy(E1.model)
@@ -554,9 +587,9 @@ end
 
 @testset "VarTypesSS" begin
     let m = Model()
-        
-        m.verbose = !true
-        
+
+    m.verbose = !true
+
         @variables m begin
             p
             @log q
@@ -566,11 +599,11 @@ end
             q[t] = p[t] + 1
         end
         @initialize m
-        
+
         # clear_sstate!(m)
         # ret = sssolve!(m)
         # @test ret ≈ [0.1, 0.0, log(1.1), 0.0]
-        
+
         eq1, eq2, eq3, eq4 = m.sstate.equations
         x = rand(Float64, (4,))
         R, J = eq1.eval_RJ(x[eq1.vinds])
@@ -596,7 +629,7 @@ end
         end
 
     end
-    
+
     let m = Model()
         @variables m begin
             lx
