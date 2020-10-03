@@ -52,6 +52,7 @@ for sym ∈ (:shock, :log, :lin, :steady)
     end)
 end
 
+Symbol(s::ModelSymbol) = s.name
 Base.convert(::Type{Symbol}, v::ModelSymbol) = v.name
 Base.convert(::Type{ModelSymbol}, v::Symbol) = ModelSymbol(v)
 Base.convert(::Type{ModelSymbol}, v::Expr) = ModelSymbol(v)

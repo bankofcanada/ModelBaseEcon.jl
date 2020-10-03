@@ -175,6 +175,12 @@ end
     for s in (:p, :q, :r)
         @test m.:($s) isa ModelSymbol && issteady(m.:($s))
     end
+    @equations m begin
+        p[t] = 0
+    end
+    @initialize m
+    @test Symbol(m.variables[1]) == m.variables[1]
+    @test begin (l, s) = m.sstate.x; l == m.sstate.x.level && s == m.sstate.x.slope end
 end
 
 
@@ -375,7 +381,7 @@ end
         @variables m X
         @shocks m EX
         @equations m begin
-            @log X[t] = rho * X[t-1] + EX[t]
+            @log X[t] = rho * X[t - 1] + EX[t]
         end
         @initialize m
         @test length(m.equations) == 1 && islog(m.equations[1])
