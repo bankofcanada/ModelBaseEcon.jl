@@ -843,7 +843,12 @@ function update_auxvars(data::AbstractArray{Float64,2}, model::Model;
     if nt < mintimes
         error("Insufficient time periods $nt. Expected $mintimes or more.")
     end
-    result = [data[:,1:nvarshk] zeros(nt, length(model.auxvars))]
+    if nv > nvarshk
+        result = copy(data)
+        result[:, nvarshk + 1:end] .= 0.0
+    else
+        result = [data[:,1:nvarshk] zeros(nt, nauxs)]
+    end
     for (i, eqn) in enumerate(model.auxeqns)
         for t in (model.maxlag + 1):(nt - model.maxlead)
             idx = [CartesianIndex((t + ti, vi)) for (ti, vi) in eqn.vinds]

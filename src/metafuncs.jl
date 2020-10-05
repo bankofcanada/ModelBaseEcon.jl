@@ -86,9 +86,9 @@ at_movav(expr::Expr, n) = :( $(at_movsum(expr, n)) / $n )
 for sym in (:lag, :lead, :d, :dlog, :movsum, :movav)
     fsym = Symbol("at_$sym")
     msym = Symbol("@$sym")
-    doc = replace(string(@doc($fsym)), "$fsym"=>"$msym")
+    doc_str = replace(string(@doc($fsym)), "$fsym"=>"$msym")
     eval(quote
-        @doc $doc macro $sym(args...)
+        @doc $(doc_str) macro $sym(args...)
             return Meta.quot($fsym(args...))
         end
         export $msym
