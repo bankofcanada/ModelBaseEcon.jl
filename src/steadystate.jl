@@ -110,7 +110,7 @@ function alignment5(io::IO, vars::AbstractVector{SteadyStateVariable})
 end
 
 function show_aligned5(io::IO, v::SteadyStateVariable, a=alignment5(io, v);
-            mask=trues(2), sep1=" = ", sep2=islog(v) ? " * " : " + ", sep3=islog(v) ? " ^t" : " *t")
+            mask=trues(2), sep1=" = ", sep2=islog(v) ? " * " : " + ", sep3=islog(v) ? "^t" : "*t")
     name = sprint(print, string(v.name.name), context=io, sizehint=0)
     if mask[1]
         lvl_a = Base.alignment(io, v.level)
@@ -126,8 +126,6 @@ function show_aligned5(io::IO, v::SteadyStateVariable, a=alignment5(io, v);
         slp_a = (0, 1)
         slp = "?"
     end
-    op1 = islog(v) ? " * " : " - "
-    op2 = islog(v) ? "^t" : "*t"
     print(io, "  ", repeat(' ', a[1] - length(name)), name, 
             sep1, repeat(' ', a[2] - lvl_a[1]), lvl, repeat(' ', a[3] - lvl_a[2]))
     if islin(v) || islog(v)
@@ -258,6 +256,8 @@ function Base.getproperty(ssd::SteadyStateData, sym::Symbol)
     end
 end
 
+@inline ss_symbol(ssd::SteadyStateData, vi::Int) = Symbol("#", ssd.vars[(1+vi) ÷ 2].name.name, "#", (vi % 2 == 1) ? :lvl : :slp, "#")
+
 #########################
 # 
 
@@ -382,13 +382,13 @@ Internal function, do not call directly.
 
 """
 function make_sseqn(model::AbstractModel, eqn::Equation, shift::Bool)
-    local mvars::Vector{ModelSymbol} = allvars(model)
+    local allvars = model.allvars
     @inline tvalue(t) = ifelse(shift, t + model.shift, t)
     # ssind converts the dynamic index (t, v) into
     # the corresponding indexes of steady state unknowns.
     # Returned value is a list of length 0, 1, or 2.
     function ssind((ti, vi), )::Array{Int64,1}
-        vi_type = mvars[vi].type
+        vi_type = allvars[vi].type
         # The level unknown has index 2*vi-1.
         # The slope unknown has index 2*vi. However:
         #  * :steady and :shock variables don't have slopes
@@ -400,11 +400,11 @@ function make_sseqn(model::AbstractModel, eqn::Equation, shift::Bool)
             return [2vi - 1, 2vi]
         end
     end
-    local ss = sstate(model)
+    local ss = model.sstate
     # The steady state indexes.
     vinds = unique(vcat(map(ssind, eqn.vinds)...))
     # The corresponding steady state symbols
-    vsyms = [Symbol("#", (vi % 2 == 1) ? :level : :slope, "#", ss.vars[(1+vi) ÷ 2].name.name, "#") for vi in vinds]
+    vsyms = Symbol[ss_symbol(ss, vi) for vi in vinds]
     # In the next loop we build the matrix JT which transforms
     # from the steady state values to the dynamic point values.
     JT = []
