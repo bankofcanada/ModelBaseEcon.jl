@@ -75,9 +75,6 @@ function Base.getindex(v::SteadyStateVariable, t; ref=1)
     if islog(v)
         ret = exp.(ret)
     end
-    if eltype(t) <: MIT
-        ret = TSeries(t, ret)
-    end
     return ret
 end
 
