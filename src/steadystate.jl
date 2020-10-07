@@ -298,7 +298,7 @@ end
 
 function sseqn_resid_RJ(s::SSEqnData)
     buffer = Vector{Float64}(undef, length(s.JT))
-    @inline lag1(jt) = ifelse(s.shift, jt.tlag + s.model[].shift, jt.tlag)
+    @inline lag(jt) = ifelse(s.shift, jt.tlag + s.model[].shift, jt.tlag)
     function to_dyn_pt(pt::AbstractVector{Float64})
         # This function applies the transformation from steady
         # state equation unknowns to dynamic equation unknowns
@@ -307,12 +307,9 @@ function sseqn_resid_RJ(s::SSEqnData)
             if length(jt.ssinds) == 1
                 pti = pt[jt.ssinds[1]]
             else
-                local lag = lag1(jt)
-                pti = pt[jt.ssinds[1]] + lag * pt[jt.ssinds[2]]
-                # a couple of sanity checks. probably can be removed eventually
-                jt.type ∈ (:shock, :steady) && error("Steady or shock variable with slope!?")
+                pti = pt[jt.ssinds[1]] + lag(jt) * pt[jt.ssinds[2]]
             end
-            buffer[i] += ifelse(jt.type == :log, exp(pti), pti)
+            buffer[i] += pti
         end
         return buffer
     end
@@ -324,20 +321,19 @@ function sseqn_resid_RJ(s::SSEqnData)
         for (i, jt) in enumerate(s.JT)
             if length(jt.ssinds) == 1
                 pti = pt[jt.ssinds[1]]
-                ss[jt.ssinds[1]] += jj[i] * ifelse(jt.type == :log, exp(pti), 1.0)
+                ss[jt.ssinds[1]] += jj[i]
             else
-                local lag = lag1(jt)
-                pti = pt[jt.ssinds[1]] + lag * pt[jt.ssinds[2]]
-                ss[jt.ssinds[1]] += jj[i] * ifelse(jt.type == :log, exp(pti), 1.0)
-                ss[jt.ssinds[2]] += jj[i] * ifelse(jt.type == :log, exp(pti), 1.0) * lag
+                local lag_jt = lag(jt)
+                pti = pt[jt.ssinds[1]] + lag_jt * pt[jt.ssinds[2]]
+                ss[jt.ssinds[1]] += jj[i]
+                ss[jt.ssinds[2]] += jj[i] * lag_jt
             end
         end
         # NOTE regarding the above: The dynamic equation is F(x_t) = 0
         # Here we're solving F(u(l+t*s)) = 0
         # The derivative is dF/dl = F' * u' and dF/ds = F' * u' * t
         # F' is in jj[i]
-        # In the case of :lin variables, u(x) = x, so u'(x) = 1
-        # In the case of :log variables, u(x) = exp(x), so u'(x) = exp(x)
+        # u(x) = x, so u'(x) = 1
         return ss
     end
     function _resid(pt::AbstractVector{Float64})
@@ -370,7 +366,7 @@ function make_sseqn(model::AbstractModel, eqn::Equation, shift::Bool)
         # The slope unknown has index 2*vi. However:
         #  * :steady and :shock variables don't have slopes
         #  * :lin and :log variables the slope is in the equation
-        #    only if the slope coefficient is not 0.
+        #    only if the effective t-index is not 0.
         if vi_type ∈ (:steady, :shock) || (!shift && ti == 0)
             return [makeind(Val(:level), vi)]
         else
@@ -386,10 +382,10 @@ function make_sseqn(model::AbstractModel, eqn::Equation, shift::Bool)
     # from the steady state values to the dynamic point values.
     JT = []
     for (i, (ti, vi)) in enumerate(eqn.vinds)
-        val = (ssinds = indexin(ssind((ti, vi)), vinds), tlag = ti, type = mvars[vi].type)
+        val = (ssinds = indexin(ssind((ti, vi)), vinds), tlag = ti)
         push!(JT, val)
     end
-    type = shift == 0 ? :tzero : :tshift
+    type = ifelse(shift == 0, :tzero, :tshift)
     let sseqndata = SSEqnData(shift, Ref(model), JT, eqn)
         return SteadyStateEquation(type, vinds, vsyms, eqn.expr, sseqn_resid_RJ(sseqndata)...)
     end
@@ -452,11 +448,8 @@ function setss!(model::AbstractModel, expr::Expr; type::Symbol,
             vsym = makesym(Val(type), val)
             push!(vsyms, vsym)
             push!(vinds, makeind(Val(type), vind))
-            v = allvars[vind]
-            if v.type == :log && type == :level
+            if islog(allvars[vind])
                 return Expr(:call, :exp, vsym)
-            elseif v.type == :log && type == :slope
-                throw(NotImplementedError("Unable to handle slope of log variable"))
             else
                 return vsym
             end
@@ -592,12 +585,11 @@ function initssdata!(model::AbstractModel)
     for var in allvars(model)
         push!(ss.vars, makesym(Val(:level), var), makesym(Val(:slope), var))
         # default initial guess for level and slope
-        if var in shks || (var isa ModelSymbol && var.type == :shock)
-            push!(ss.values, 0.0, 0.0)
-        else
-            push!(ss.values, 1.0, 0.0)
-        end
+        push!(ss.values, 0.0, 0.0)
         push!(ss.mask, false, false)
+        if isshock(var) || issteady(var)
+            ss.mask[end] = true
+        end
     end
     empty!(ss.equations)
     for eqn in alleqns(model)
