@@ -59,12 +59,6 @@ end
     @test sprint(print, y3, context=IOContext(stdout, :compact => true)) == "y"
     @test sprint(print, y3, context=IOContext(stdout, :compact => false)) == "\"y3\" y"
 
-    @test ModelBaseEcon.makesym(Val(:level), y1) == ModelBaseEcon.makesym(Val(:level), y2)
-    @test ModelBaseEcon.makesym(Val(:level), y1) == ModelBaseEcon.makesym(Val(:level), y3)
-    @test ModelBaseEcon.makesym(Val(:level), y1) == ModelBaseEcon.makesym(Val(:level), "y")
-    @test ModelBaseEcon.makesym(Val(:slope), y1) == ModelBaseEcon.makesym(Val(:slope), y2)
-    @test ModelBaseEcon.makesym(Val(:slope), y1) == ModelBaseEcon.makesym(Val(:slope), y3)
-    @test ModelBaseEcon.makesym(Val(:slope), y1) == ModelBaseEcon.makesym(Val(:slope), "y")
 end
 
 @testset "VarTypes" begin
@@ -180,7 +174,9 @@ end
     end
     @initialize m
     @test Symbol(m.variables[1]) == m.variables[1]
-    @test begin (l, s) = m.sstate.x; l == m.sstate.x.level && s == m.sstate.x.slope end
+    m.sstate.values .= rand(length(m.sstate.values))
+    @test begin (l, s) = m.sstate.x.data; l == m.sstate.x.level && s == m.sstate.x.slope end
+    @test begin (l, s) = m.sstate.k.data; exp(l) == m.sstate.k.level && exp(s) == m.sstate.k.slope end
 end
 
 
@@ -541,14 +537,14 @@ end
     @test length(split(out[end], "=")) == 2
     # 
     @test propertynames(ss) == tuple(m.allvars...)
-    @test ss.pinf.level == ss.pinf[1]
-    @test ss.pinf.slope == ss.pinf[2]
-    ss.pinf = (level = 2.3, slope = 0.7)
+    @test ss.pinf.level == ss.pinf.data[1]
+    @test ss.pinf.slope == ss.pinf.data[2]
+    ss.pinf.data .= [2.3, 0.7]
     @test ss.values[1:2] == [2.3, 0.7]
-    @test ss[:rate] == ss["rate"]
-    ss["rate"].level = 21
-    ss[:rate].slope = 0.21
-    @test ss[:rate].level == 21 && ss["rate"].slope == 0.21
+    ss.rate.level = 21
+    ss.rate.slope = 0.21
+    @test ss.rate.level == 21 && ss.rate.slope == 0.21
+    @test ss.rate.data == [21, 0.21]
 end
 
 @using_example E3
@@ -594,7 +590,7 @@ end
 @testset "VarTypesSS" begin
     let m = Model()
 
-    m.verbose = !true
+        m.verbose = !true
 
         @variables m begin
             p
@@ -659,10 +655,10 @@ end
         @test length(ss.values) == 2 * length(m.allvars)
         # 
         # test with eq1
-        ss.lx = [1.5, 0.2]
-        ss.x = [0.0, 0.2]
-        ss.s1 = [0.0, 0.0]
-        ss.s2 = [0.0, 0.0]
+        ss.lx.data .= [1.5, 0.2]
+        ss.x.data .= [0.0, 0.2]
+        ss.s1.data .= [0.0, 0.0]
+        ss.s2.data .= [0.0, 0.0]
         for s1 = -2:0.1:2
             ss.s1.level = s1
             @test eq1.eval_resid(ss.values[eq1.vinds]) ≈ -s1
@@ -679,10 +675,10 @@ end
         @test R == 0
         @test TMP[[1,2,5]] ≈ [0.0, 1.0, -1.0]
         # test with eq4
-        ss.lx = [1.5, 0.2]
-        ss.x = [1.5, 0.2]
-        ss.s1 = [0.0, 0.0]
-        ss.s2 = [0.0, 0.0]
+        ss.lx.data .= [1.5, 0.2]
+        ss.x.data .= [1.5, 0.2]
+        ss.s1.data .= [0.0, 0.0]
+        ss.s2.data .= [0.0, 0.0]
         for s2 = -2:0.1:2
             ss.s2.level = s2
             @test eq4.eval_resid(ss.values[eq4.vinds]) ≈ -s2
@@ -694,17 +690,17 @@ end
         end
         ss.lx.slope = 0.2
         for xslp = -2:0.1:2
-            ss.x.slope = xslp
+            ss.x.data[2] = xslp
             @test eq4.eval_resid(ss.values[eq4.vinds]) ≈ m.shift * (xslp - 0.2)
         end
-        ss.x.slope = 0.2
+        ss.x.slope = exp(0.2)
         R, J = eq4.eval_RJ(ss.values[eq4.vinds])
         TMP = fill!(similar(ss.values), 0.0)
         TMP[eq4.vinds] .= J
-        @test R ≈ 0.0
+        @test R+1.0 ≈ 0.0+1.0
         @test TMP[[1,2,3,4,7]] ≈ [-1.0, -m.shift, 1.0, m.shift, -1.0]
         for xlvl = 0.1:0.1:2
-            ss.x.level = xlvl
+            ss.x.level = exp(xlvl)
             R, J = eq4.eval_RJ(ss.values[eq4.vinds])
             @test R ≈ xlvl - 1.5
             TMP[eq4.vinds] .= J
