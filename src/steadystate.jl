@@ -385,13 +385,13 @@ function make_sseqn(model::AbstractModel, eqn::Equation, shift::Bool)
     # the corresponding indexes of steady state unknowns.
     # Returned value is a list of length 0, 1, or 2.
     function ssind((ti, vi), )::Array{Int64,1}
-        vi_type = allvars[vi].type
+        no_slope = isshock(allvars[vi]) || issteady(allvars[vi])
         # The level unknown has index 2*vi-1.
         # The slope unknown has index 2*vi. However:
         #  * :steady and :shock variables don't have slopes
         #  * :lin and :log variables the slope is in the equation
         #    only if the effective t-index is not 0.
-        if vi_type ∈ (:steady, :shock) || (!shift && ti == 0)
+        if no_slope || (!shift && ti == 0)
             return [2vi - 1]
         else
             return [2vi - 1, 2vi]
