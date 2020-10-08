@@ -443,10 +443,7 @@ end
 Process the given expression in the context of the given model and create 
 an Equation() instance for it.
 
-!!! note
-    Internal function. There should be no need to call directly.
-
-### Implementation (for developers)
+Internal function. There should be no need to call directly.
 
 """
 function process_equation end
@@ -473,7 +470,11 @@ function process_equation(model::Model, expr::Expr;
 
     add_reference(sym, tind) = add_reference(sym, tind, indexin([sym], allvars)[1])
     add_reference(sym::Symbol, tind::Int, vind::Int) = begin
-        vsym = Symbol("$sym#$tind#")           # replace with a dummy symbol
+        if islog(allvars[vind])
+            vsym = Symbol("#log", sym, "#", tind, "#")
+        else
+            vsym = Symbol("#", sym, "#", tind, "#")
+        end
         push!(references, (tind, vind) => vsym) # keep track of indexes and dummy symbol
     end
 
@@ -624,7 +625,11 @@ function process_equation(model::Model, expr::Expr;
                 else
                     error_process("Unrecognized t-reference expression $index.", expr)
                 end
-                return references[(tind, vind)]
+                if islog(allvars[vind])
+                    return Expr(:call, :exp, references[(tind, vind)])
+                else
+                    return references[(tind, vind)]
+                end
             end
         elseif ex.head == :(=)
             if type == log_eqn_type
