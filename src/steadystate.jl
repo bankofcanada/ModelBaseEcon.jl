@@ -125,7 +125,7 @@ function show_aligned5(io::IO, v::SteadyStateVariable, a=alignment5(io, v);
     end
     print(io, "  ", repeat(' ', a[1] - length(name)), name, 
             sep1, repeat(' ', a[2] - lvl_a[1]), lvl, repeat(' ', a[3] - lvl_a[2]))
-    if islin(v) || islog(v)
+    if (islin(v) || islog(v)) && !(v.slope + 1.0 ≈ 1.0)
         print(io, sep2, repeat(' ', a[4] - slp_a[1]), slp, repeat(' ', a[5] - slp_a[2]), sep3)
     end
 end
@@ -219,10 +219,11 @@ Base.show(io::IO, ssd::SteadyStateData) = begin
     else
         println(io, "Steady state not solved.")
     end
-    if isempty(ssd.constraints)
+    len = length(ssd.constraints)
+    if len == 0
         println(io, "No additional constraints.")
     else
-        println(io, length(ssd.constraints), " additional constraints.")
+        println(io, len, " additional constraint", ifelse(len > 1, "s.", "."))
         for c in ssd.constraints
             println(io, "    ", c)
         end
@@ -230,7 +231,7 @@ Base.show(io::IO, ssd::SteadyStateData) = begin
 end
 
 #########
-# Implement access to steady state values using index notation ([])
+# Implement access to steady state values using dot notation and index notation
 
 function Base.propertynames(ssd::SteadyStateData, private=false)
     if private
@@ -252,6 +253,11 @@ function Base.getproperty(ssd::SteadyStateData, sym::Symbol)
         throw(ArgumentError("Unknown variable $sym."))
     end
 end
+
+Base.getindex(ssd::SteadyStateData, ind::Int) = ssd.vars[ind]
+Base.getindex(ssd::SteadyStateData, sym::ModelSymbol) = getproperty(ssd, sym.name)
+Base.getindex(ssd::SteadyStateData, sym::Symbol) = getproperty(ssd, sym)
+Base.getindex(ssd::SteadyStateData, sym::AbstractString) = getproperty(ssd, Symbol(sym))
 
 @inline ss_symbol(ssd::SteadyStateData, vi::Int) = Symbol("#", ssd.vars[(1+vi) ÷ 2].name.name, "#", (vi % 2 == 1) ? :lvl : :slp, "#")
 
@@ -425,8 +431,7 @@ end
 Add a steady state equation to the model. Equations added by `setss!` are in
 addition to the equations generated automatically from the dynamic system.
 
-!!! note
-    Internal function, do not call directly. Use [`@steadystate`](@ref) instead.
+Internal function, do not call directly. Use [`@steadystate`](@ref) instead.
 
 """
 function setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Module=moduleof(model))
@@ -435,9 +440,7 @@ function setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Mod
         error("Expected an equation, not $(expr.head)")
     end
 
-    if type ∉ (:level, :slope)
-        throw(ArgumentError("Unknown steady state equation type $type. Expected either `level` or `slope`."))
-    end
+    @assert type ∈ (:level, :slope) "Unknown steady state equation type $type. Expected either `level` or `slope`."
 
     local ss = sstate(model)
 

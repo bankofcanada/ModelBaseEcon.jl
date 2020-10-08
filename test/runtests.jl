@@ -177,6 +177,63 @@ end
     m.sstate.values .= rand(length(m.sstate.values))
     @test begin (l, s) = m.sstate.x.data; l == m.sstate.x.level && s == m.sstate.x.slope end
     @test begin (l, s) = m.sstate.k.data; exp(l) == m.sstate.k.level && exp(s) == m.sstate.k.slope end
+
+    xdata = m.sstate.x[1:8, ref=3]
+    @test xdata[3] ≈ m.sstate.x.level
+    @test xdata ≈ m.sstate.x.level .+ ((1:8) .- 3) .* m.sstate.x.slope
+    kdata = m.sstate.k[1:8, ref=3]
+    @test kdata[3] ≈ m.sstate.k.level
+    @test kdata ≈ m.sstate.k.level .* m.sstate.k.slope .^ ((1:8) .- 3)
+
+    @test_throws Exception m.sstate.x.data = [1,2]
+    @test_throws ArgumentError m.sstate.nosuchvariable
+
+    @steadystate m m = l
+    @steadystate m slope m = l
+    @test length(m.sstate.constraints) == 2
+
+    let io = IOBuffer()
+        show(io, m.sstate.x)
+        lines = split(String(take!(io)), '\n')
+        @test length(lines) == 1 && occursin('+', lines[1]) 
+
+        show(io, m.sstate.k)
+        lines = split(String(take!(io)), '\n')
+        @test length(lines) == 1 && !occursin('+', lines[1]) && occursin('*', lines[1])
+
+        m.sstate.y.slope = 0
+        show(io, m.sstate.y)
+        lines = split(String(take!(io)), '\n')
+        @test length(lines) == 1 && !occursin('+', lines[1]) && !occursin('*', lines[1])
+        
+        m.sstate.l.slope = 0
+        show(io, m.sstate.l)
+        lines = split(String(take!(io)), '\n')
+        @test length(lines) == 1 && !occursin('+', lines[1]) && !occursin('*', lines[1])
+        
+        show(io, m.sstate.p)
+        lines = split(String(take!(io)), '\n')
+        @test length(lines) == 1 && !occursin('+', lines[1]) && !occursin('*', lines[1])
+
+        ModelBaseEcon.show_aligned5(io, m.sstate.x, mask=[true, false])
+        lines = split(String(take!(io)), '\n')
+        @test length(lines) == 1 && length(split(lines[1], '?')) == 2
+
+        ModelBaseEcon.show_aligned5(io, m.sstate.k, mask=[false, false])
+        lines = split(String(take!(io)), '\n')
+        @test length(lines) == 1 && length(split(lines[1], '?')) == 3
+
+        ModelBaseEcon.show_aligned5(io, m.sstate.l, mask=[false, false])
+        println(io)
+        ModelBaseEcon.show_aligned5(io, m.sstate.y, mask=[false, false])
+        println(io)
+        ModelBaseEcon.show_aligned5(io, m.sstate.p, mask=[false, true])
+        lines = split(String(take!(io)), '\n')
+        @test length(lines) == 3 
+        for line in lines
+            @test length(split(line, '?')) == 2
+        end
+    end
 end
 
 
