@@ -125,7 +125,7 @@ function show_aligned5(io::IO, v::SteadyStateVariable, a=alignment5(io, v);
     end
     print(io, "  ", repeat(' ', a[1] - length(name)), name, 
             sep1, repeat(' ', a[2] - lvl_a[1]), lvl, repeat(' ', a[3] - lvl_a[2]))
-    if (islin(v) || islog(v)) && !(v.slope + 1.0 ≈ 1.0)
+    if (islin(v) || islog(v)) && !(v.data[2] + 1.0 ≈ 1.0)
         print(io, sep2, repeat(' ', a[4] - slp_a[1]), slp, repeat(' ', a[5] - slp_a[2]), sep3)
     end
 end
