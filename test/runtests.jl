@@ -206,7 +206,7 @@ end
         lines = split(String(take!(io)), '\n')
         @test length(lines) == 1 && !occursin('+', lines[1]) && !occursin('*', lines[1])
         
-        m.sstate.l.slope = 0
+        m.sstate.l.slope = 1
         show(io, m.sstate.l)
         lines = split(String(take!(io)), '\n')
         @test length(lines) == 1 && !occursin('+', lines[1]) && !occursin('*', lines[1])
