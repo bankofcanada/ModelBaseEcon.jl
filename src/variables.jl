@@ -106,6 +106,12 @@ end
 
 export transform, inverse_transform
 
+@inline transformation(::ModelVariable{T}) where {T <: Transformation} = transformation(T)
+@inline inverse_transformation(::ModelVariable{T}) where {T <: Transformation} = inverse_transformation(T)
+
 # redirect to the stored transform
-transform(x, ::ModelVariable{T}) where {T <: Transformation} = broadcast(transformation(T), x)
-inverse_transform(x, ::ModelVariable{T}) where {T <: Transformation} = broadcast(inverse_transformation(T), x)
+transform(x, m::ModelVariable) = broadcast(transformation(m), x)
+inverse_transform(x, m::ModelVariable) = broadcast(inverse_transformation(m), x)
+
+need_transform(a) = need_transform(convert(ModelVariable, a))
+need_transform(::ModelVariable{T}) where {T <: Transformation} = T != NoTransform

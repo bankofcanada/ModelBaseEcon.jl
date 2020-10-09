@@ -641,8 +641,10 @@ function process_equation(model::Model, expr::Expr;
                 else
                     error_process("Unrecognized t-reference expression $index.", expr)
                 end
-                if islog(allvars[vind])
-                    return Expr(:call, :exp, references[(tind, vind)])
+                if need_transform(allvars[vind])
+                    func = inverse_transformation(allvars[vind])
+                    arg = references[(tind, vind)]
+                    return :($func($arg))
                 else
                     return references[(tind, vind)]
                 end
