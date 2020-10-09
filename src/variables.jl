@@ -31,11 +31,15 @@ struct ModelVariable
     fc_type::FinalCondition
 end
 
-ModelVariable(d, s, t) = ModelVariable(d, s, t, -1, NoTransform(), FCGiven())
+function ModelVariable(d, s, t)
+    transf = ifelse(t == :log, LogTransform(), NoTransform())
+    return ModelVariable(d, s, t, -1, transf, FCGiven())
+end
 
+# for compatibility with old code. will be removed soon.
 const ModelSymbol = ModelVariable
 
-# cannot update name
+# !!! must not update v.name.
 @inline update(v::ModelVariable;
     doc=v.doc,
     var_type=v.var_type,
@@ -46,14 +50,7 @@ const ModelSymbol = ModelVariable
 
 @inline ModelVariable(s::Symbol) = ModelVariable("", s, :lin)
 @inline ModelVariable(d::String, s::Symbol) = ModelVariable(d, s, :lin)
-function ModelVariable(s::Symbol, t::Symbol) 
-    var = ModelVariable("", s, t)
-    if t == :log
-        return update(var, transformation=LogTransform())
-    else
-        return var
-    end
-end
+@inline ModelVariable(s::Symbol, t::Symbol) = ModelVariable("", s, t)
 
 function ModelVariable(s::Expr)
     s = MacroTools.unblock(s)
