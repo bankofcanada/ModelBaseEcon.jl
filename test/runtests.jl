@@ -78,15 +78,15 @@ end
         end
         @test lvars[i] == :ly
     end
-    @test lvars[1].type == :lin
-    @test lvars[2].type == :lin
-    @test lvars[3].type == :log
-    @test lvars[4].type == :log
-    @test lvars[5].type == :lin
-    @test lvars[6].type == :lin
-    @test lvars[7].type == :steady
-    @test lvars[8].type == :steady
-    @test lvars[9].type == :lin
+    @test lvars[1].var_type == :lin
+    @test lvars[2].var_type == :lin
+    @test lvars[3].var_type == :log
+    @test lvars[4].var_type == :log
+    @test lvars[5].var_type == :lin
+    @test lvars[6].var_type == :lin
+    @test lvars[7].var_type == :steady
+    @test lvars[8].var_type == :steady
+    @test lvars[9].var_type == :lin
     for i = 1:length(lvars)
         @test sprint(print, lvars[i], context=IOContext(stdout, :compact => true)) == "ly"
     end
@@ -104,28 +104,28 @@ end
         @variables m begin
             x; @log y; @steady z;
         end
-        @test [v.type for v in m.allvars] == [:lin, :lin, :lin, :lin, :log, :steady]
+        @test [v.var_type for v in m.allvars] == [:lin, :lin, :lin, :lin, :log, :steady]
     end
     let m = Model()
         @shocks m p q r
         @shocks m begin
             x; @log y; @steady z;
         end
-        @test [v.type for v in m.allvars] == [:shock, :shock, :shock, :shock, :shock, :shock]
+        @test [v.var_type for v in m.allvars] == [:shock, :shock, :shock, :shock, :shock, :shock]
     end
     let m = Model()
         @logvariables m p q r
         @logvariables m begin
             x; @log y; @steady z;
         end
-        @test [v.type for v in m.allvars] == [:log, :log, :log, :log, :log, :log]
+        @test [v.var_type for v in m.allvars] == [:log, :log, :log, :log, :log, :log]
     end
     let m = Model()
         @steadyvariables m p q r
         @steadyvariables m begin
             x; @log y; @steady z;
         end
-        @test [v.type for v in m.allvars] == [:steady, :steady, :steady, :steady, :steady, :steady]
+        @test [v.var_type for v in m.allvars] == [:steady, :steady, :steady, :steady, :steady, :steady]
     end
 end
 
