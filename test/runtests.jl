@@ -2,6 +2,24 @@ using ModelBaseEcon
 using SparseArrays
 using Test
 
+@testset "Tranformations" begin
+    let m = Model()
+        @variables m begin x; @log lx; @neglog lmx; end
+        @test length(m.variables) == 3
+        @test m.x isa ModelVariable{NoTransform}
+        @test m.lx isa ModelVariable{LogTransform}
+        @test m.lmx isa ModelVariable{NegLogTransform}
+        data = rand(20)
+        @test transform(data, m.x) ≈ data
+        @test inverse_transform(data, m.x) ≈ data
+        @test transform(data, m.lx) ≈ log.(data)
+        @test inverse_transform(log.(data), m.lx) ≈ data
+        mdata = -data
+        @test transform(mdata, m.lmx) ≈ log.(data)
+        @test inverse_transform(log.(data), m.lmx) ≈ mdata
+    end
+end 
+
 @testset "Options" begin
     o = Options(tol=1e-7, maxiter=25)
     @test getoption(o, tol=1e7) == 1e-7

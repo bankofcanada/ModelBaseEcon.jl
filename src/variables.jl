@@ -7,11 +7,6 @@ const doc_macro = MacroTools.unblock(quote
     world
 end).args[1]
 
-abstract type Transformation end
-struct NoTransform <: Transformation end
-struct LogTransform <: Transformation end
-struct NegativeLogTransform <: Transformation end
-
 abstract type FinalCondition end
 struct FCGiven <: FinalCondition end
 struct FCMatchSSLevel <: FinalCondition end
@@ -22,31 +17,30 @@ struct FCConstRate{T} <: FinalCondition end
 const FCConstChangeRate = FCConstRate{:lin}
 const FCConstGrowthRate = FCConstRate{:log}
 
-struct ModelVariable
+struct ModelVariable{T <: Transformation}
     doc::String
     name::Symbol
     var_type::Symbol
     index::Int
-    transformation::Transformation
     fc_type::FinalCondition
 end
 
 function ModelVariable(d, s, t)
-    transf = ifelse(t == :log, LogTransform(), NoTransform())
-    return ModelVariable(d, s, t, -1, transf, FCGiven())
+    T = ifelse(t == :log, LogTransform, ifelse(t == :neglog, NegLogTransform, NoTransform))
+    return ModelVariable{T}(d, s, t, -1, FCGiven())
 end
 
 # for compatibility with old code. will be removed soon.
 const ModelSymbol = ModelVariable
 
 # !!! must not update v.name.
-@inline update(v::ModelVariable;
+@inline update(v::ModelVariable{T};
     doc=v.doc,
     var_type=v.var_type,
     index=v.index,
-    transformation::Transformation=v.transformation,
+    transformation::Type{<:Transformation}=T,
     fc_type::FinalCondition=v.fc_type
-) = ModelVariable(string(doc), v.name, Symbol(var_type), Int(index), transformation, fc_type)
+) where {T <: Transformation} = ModelVariable{transformation}(string(doc), v.name, Symbol(var_type), Int(index), fc_type)
 
 @inline ModelVariable(s::Symbol) = ModelVariable("", s, :lin)
 @inline ModelVariable(d::String, s::Symbol) = ModelVariable(d, s, :lin)
@@ -106,3 +100,12 @@ function Base.show(io::IO, v::ModelVariable)
         print(io, doc, type, v.name)
     end
 end
+
+#############################################################################
+# Transformations stuff
+
+export transform, inverse_transform
+
+# redirect to the stored transform
+transform(x, ::ModelVariable{T}) where {T <: Transformation} = broadcast(transformation(T), x)
+inverse_transform(x, ::ModelVariable{T}) where {T <: Transformation} = broadcast(inverse_transformation(T), x)
