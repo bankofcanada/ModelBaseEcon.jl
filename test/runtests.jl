@@ -17,6 +17,11 @@ using Test
         mdata = -data
         @test transform(mdata, m.lmx) ≈ log.(data)
         @test inverse_transform(log.(data), m.lmx) ≈ mdata
+        @neglogvariables m ly
+        @test_throws ArgumentError m.ly = 25
+        @test_throws ArgumentError m.ly = ModelVariable(:lmy)
+        m.ly = update(m.ly, transformation=LogTransform)
+        @test m.ly isa ModelVariable{LogTransform}
     end
 end 
 

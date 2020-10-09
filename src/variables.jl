@@ -65,7 +65,7 @@ function ModelVariable(doc::String, s::Expr)
     end
 end
 
-for sym ∈ (:shock, :log, :lin, :steady)
+for sym ∈ (:shock, :log, :lin, :steady, :neglog)
     to_sym = Symbol("to_", sym)
     issym = Symbol("is", sym)
     eval(quote

@@ -155,7 +155,14 @@ function Base.setproperty!(model::Model, name::Symbol, val::Any)
     elseif name ∈ fieldnames(ModelFlags)
         return setfield!(getfield(model, :flags), name, val)
     else
-        error("type Model cannot set property $name")
+        ind = indexin([name], getfield(model, :variables))[1]
+        if ind !== nothing
+            if getindex(getfield(model, :variables), ind) != val
+                throw(ArgumentError("Cannot replace variable with a different name. Use `m.var = update(m.var, ...)` to update variable."))
+            end
+            return setindex!(getfield(model, :variables), val, ind)
+        end
+        setfield!(model, name, val)  # will throw an error since Model is immutable
     end
 end
 
@@ -259,7 +266,8 @@ end
 # Note: These macros simply store the information into the corresponding 
 # arrays within the model instance. The actual processing is done in @initialize
 
-export @variables, @logvariables, @steadyvariables, @shocks, @parameters, @equations #= , @autoshocks =#, @autoexogenize
+export @variables, @logvariables, @neglogvariables, @steadyvariables, @shocks
+export @parameters, @equations #= , @autoshocks =#, @autoexogenize
 
 """
     @variables model names...
@@ -294,6 +302,14 @@ macro logvariables(model, block::Expr)
 end
 macro logvariables(model, vars::Symbol...)
     return esc(:( unique!(append!($(model).variables, to_log.($vars))); nothing ))
+end
+
+macro neglogvariables(model, block::Expr)
+    vars = filter(a -> !isa(a, LineNumberNode), block.args)
+    return esc(:(unique!(append!($(model).variables, to_neglog.($vars))); nothing ))
+end
+macro neglogvariables(model, vars::Symbol...)
+    return esc(:( unique!(append!($(model).variables, to_neglog.($vars))); nothing ))
 end
 
 macro steadyvariables(model, block::Expr)
