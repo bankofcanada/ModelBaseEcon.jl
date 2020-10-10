@@ -63,5 +63,9 @@ The `log(-x)`, with the inverse being `-exp(x)`. Use this when the variable is
 negative with exponential behaviour (toward -∞).
 """
 struct NegLogTransform <: Transformation end
-transformation(::Type{NegLogTransform}) = ∘(log, -)
-inverse_transformation(::Type{NegLogTransform}) = ∘(-, exp)
+"logm(x) = log(-x)" @inline logm(x) = log(-x)
+"mexp(x) = -exp(x)" @inline mexp(x) = -exp(x)
+transformation(::Type{NegLogTransform}) = logm
+inverse_transformation(::Type{NegLogTransform}) = mexp
+
+export logm, mexp

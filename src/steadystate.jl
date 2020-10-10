@@ -26,7 +26,7 @@ Holds the steady state solution for one variable.
 """
 struct SteadyStateVariable{DATA <: AbstractVector{Float64},MASK <: AbstractVector{Bool}}
     # The corresponding entry in m.allvars. Needed for its type
-    name::ModelSymbol
+    name::ModelVariable
     # Its index in the m.allvars array
     index::Int
     # A view in the SteadyStateData.values location for this variable
@@ -39,7 +39,14 @@ islin(v::SteadyStateVariable) = islin(v.name)
 islog(v::SteadyStateVariable) = islog(v.name)
 isshock(v::SteadyStateVariable) = isshock(v.name)
 issteady(v::SteadyStateVariable) = issteady(v.name)
+isneglog(v::SteadyStateVariable) = isneglog(v.name)
 
+@inline transformation(v::SteadyStateVariable) = transformation(v.name)
+@inline inverse_transformation(v::SteadyStateVariable) = inverse_transformation(v.name)
+@inline transform(x, v::SteadyStateVariable) = transform(x, v.name)
+@inline inverse_transform(x, v::SteadyStateVariable) = inverse_transform(x, v.name)
+
+#############################################################################
 # Access to .level and .slope
 
 Base.getproperty(v::SteadyStateVariable, name::Symbol) = begin
@@ -47,19 +54,21 @@ Base.getproperty(v::SteadyStateVariable, name::Symbol) = begin
         return getfield(v, name)
     end
     data = getfield(v, :data)
-    transform = ifelse(islog(v), exp, identity)
-    return name == :level ? transform(data[1]) :
-            name == :slope ? transform(data[2]) :
+    # we store transformed data, must invert to give back to user
+    inv_trans = inverse_transformation(v)
+    return name == :level ? inv_trans(data[1]) :
+            name == :slope ? inv_trans(data[2]) :
                 getfield(v, name)
 end
 
 Base.setproperty!(v::SteadyStateVariable, name::Symbol, val) = begin
     data = getfield(v, :data)
-    transform = ifelse(islog(v), log, identity)
+    # we store transformed data, must transform user input
+    trans = transformation(v)
     if name == :level
-        data[1] = transform(val)
+        data[1] = trans(val)
     elseif name == :slope
-        data[2] = transform(val)
+        data[2] = trans(val)
     else
         setfield!(v, name, val)  # this will error (immutable)
     end
@@ -71,11 +80,8 @@ function Base.getindex(v::SteadyStateVariable, t; ref=1)
     if eltype(t) != eltype(ref)
         throw(ArgumentError("Must provide reference time of the same type as the time index"))
     end
-    ret = v.data[1] .+ v.data[2] .* (t .- ref)
-    if islog(v)
-        ret = exp.(ret)
-    end
-    return ret
+    # we must inverse transform internal data before returning to user
+    return inverse_transform(v.data[1] .+ v.data[2] .* (t .- ref), v)
 end
 
 # pretty printing 
@@ -478,8 +484,9 @@ function setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Mod
             vsym = Symbol("#", type, "#", val, "#")
             push!(vsyms, vsym)
             push!(vinds, type == :level ? 2vind -1 : 2vind)
-            if islog(allvars[vind])
-                return Expr(:call, :exp, vsym)
+            if need_transform(allvars[vind])
+                func = inverse_transformation(allvars[vind])
+                return :($func($vsym))
             else
                 return vsym
             end
