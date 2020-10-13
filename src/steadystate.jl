@@ -57,7 +57,8 @@ Base.getproperty(v::SteadyStateVariable, name::Symbol) = begin
     # we store transformed data, must invert to give back to user
     inv_trans = inverse_transformation(v)
     return name == :level ? inv_trans(data[1]) :
-            name == :slope ? inv_trans(data[2]) :
+            name == :slope ? 
+                (islog(v) || isneglog(v) ? exp(data[2]) : data[2]) :
                 getfield(v, name)
 end
 
@@ -68,7 +69,7 @@ Base.setproperty!(v::SteadyStateVariable, name::Symbol, val) = begin
     if name == :level
         data[1] = trans(val)
     elseif name == :slope
-        data[2] = trans(val)
+        data[2] = (islog(v) || isneglog(v) ? log(val) : val) 
     else
         setfield!(v, name, val)  # this will error (immutable)
     end
@@ -113,7 +114,9 @@ function alignment5(io::IO, vars::AbstractVector{SteadyStateVariable})
 end
 
 function show_aligned5(io::IO, v::SteadyStateVariable, a=alignment5(io, v);
-            mask=trues(2), sep1=" = ", sep2=islog(v) ? " * " : " + ", sep3=islog(v) ? "^t" : "*t")
+            mask=trues(2), sep1=" = ", 
+            sep2=islog(v) || isneglog(v) ? " * " : " + ", 
+            sep3=islog(v) || isneglog(v) ? "^t" : "*t")
     name = sprint(print, string(v.name.name), context=io, sizehint=0)
     if mask[1]
         lvl_a = Base.alignment(io, v.level)
@@ -131,7 +134,7 @@ function show_aligned5(io::IO, v::SteadyStateVariable, a=alignment5(io, v);
     end
     print(io, "  ", repeat(' ', a[1] - length(name)), name, 
             sep1, repeat(' ', a[2] - lvl_a[1]), lvl, repeat(' ', a[3] - lvl_a[2]))
-    if (islin(v) || islog(v)) && !(v.data[2] + 1.0 ≈ 1.0)
+    if (islin(v) || islog(v) || isneglog(v)) && !(v.data[2] + 1.0 ≈ 1.0)
         print(io, sep2, repeat(' ', a[4] - slp_a[1]), slp, repeat(' ', a[5] - slp_a[2]), sep3)
     end
 end
