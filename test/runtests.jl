@@ -1,3 +1,10 @@
+##################################################################################
+# This file is part of ModelBaseEcon.jl
+# BSD 3-Clause License
+# Copyright (c) 2020, Bank of Canada
+# All rights reserved.
+##################################################################################
+
 using ModelBaseEcon
 using SparseArrays
 using Test
@@ -199,6 +206,12 @@ end
     end
     @initialize m
     @test Symbol(m.variables[1]) == m.variables[1]
+
+    for (i,v) = enumerate(m.varshks)
+        s = convert(Symbol, v)
+        @test m.sstate[i] == m.sstate[v] == m.sstate[s] == m.sstate["$s"]   
+    end
+
     m.sstate.values .= rand(length(m.sstate.values))
     @test begin (l, s) = m.sstate.x.data; l == m.sstate.x.level && s == m.sstate.x.slope end
     @test begin (l, s) = m.sstate.k.data; exp(l) == m.sstate.k.level && exp(s) == m.sstate.k.slope end
@@ -514,6 +527,10 @@ end
         @test neqns(m.sstate) == 2
         @steadystate m y = 5
         @test_throws ErrorException @steadystate m sin(y + 7)
+        @test length(m.sstate.constraints) == 1
+        @test neqns(m.sstate) == 3
+        @test length(alleqns(m.sstate)) == 3
+        @steadystate m y = 3
         @test length(m.sstate.constraints) == 1
         @test neqns(m.sstate) == 3
         @test length(alleqns(m.sstate)) == 3
