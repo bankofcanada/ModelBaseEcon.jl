@@ -3,6 +3,8 @@ using SparseArrays
 using Test
 
 @testset "Tranformations" begin
+    @test_throws ErrorException transformation(Transformation)
+    @test_throws ErrorException inverse_transformation(Transformation)
     let m = Model()
         @variables m begin x; @log lx; @neglog lmx; end
         @test length(m.variables) == 3

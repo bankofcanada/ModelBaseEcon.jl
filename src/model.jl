@@ -488,6 +488,8 @@ function process_equation(model::Model, expr::Expr;
     add_reference(sym::Symbol, tind::Int, vind::Int) = begin
         if islog(allvars[vind])
             vsym = Symbol("#log", sym, "#", tind, "#")
+        elseif isneglog(allvars[vind])
+            vsym = Symbol("#logm", sym, "#", tind, "#")
         else
             vsym = Symbol("#", sym, "#", tind, "#")
         end

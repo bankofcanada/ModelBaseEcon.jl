@@ -34,8 +34,8 @@ function inverse_transformation end
 The base class for all variable transformations.
 """
 abstract type Transformation end
-transformation(::Type{<:Transformation}) = error("Transformation of type $T is not defined.")
-inverse_transformation(::Type{<:Transformation}) = error("Inverse transformation of type $T is not defined.")
+transformation(T::Type{<:Transformation}) = error("Transformation of type $T is not defined.")
+inverse_transformation(T::Type{<:Transformation}) = error("Inverse transformation of type $T is not defined.")
 
 """
     NoTransform <: Transformation

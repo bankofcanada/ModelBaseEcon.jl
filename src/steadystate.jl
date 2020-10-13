@@ -55,8 +55,7 @@ Base.getproperty(v::SteadyStateVariable, name::Symbol) = begin
     end
     data = getfield(v, :data)
     # we store transformed data, must invert to give back to user
-    inv_trans = inverse_transformation(v)
-    return name == :level ? inv_trans(data[1]) :
+    return name == :level ? inverse_transform(data[1], v) :
             name == :slope ? 
                 (islog(v) || isneglog(v) ? exp(data[2]) : data[2]) :
                 getfield(v, name)
@@ -65,9 +64,8 @@ end
 Base.setproperty!(v::SteadyStateVariable, name::Symbol, val) = begin
     data = getfield(v, :data)
     # we store transformed data, must transform user input
-    trans = transformation(v)
     if name == :level
-        data[1] = trans(val)
+        data[1] = transform(val, v)
     elseif name == :slope
         data[2] = (islog(v) || isneglog(v) ? log(val) : val) 
     else
