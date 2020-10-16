@@ -1,4 +1,9 @@
-
+##################################################################################
+# This file is part of ModelBaseEcon.jl
+# BSD 3-Clause License
+# Copyright (c) 2020, Bank of Canada
+# All rights reserved.
+##################################################################################
 
 export export_model
 
@@ -66,11 +71,26 @@ function export_model(m::Model, name::AbstractString, fio::IO)
 
     if !isempty(variables(m))
         println(fio, "@variables model begin")
+        has_exog = false
         for v in variables(m)
-            println(fio, "    ", v)
+            if isexog(v)
+                has_exog = true
+            else
+                println(fio, "    ", v)
+            end
         end
         println(fio, "end # variables")
         println(fio)
+        if has_exog
+            println(fio, "@exogenous model begin")
+            for v in variables(m)
+                if isexog(v)
+                    println(fio, "    ", v)
+                end
+            end
+            println(fio, "end # exogenous")
+            println(fio)
+        end
     end
 
     if !isempty(shocks(m))

@@ -1,3 +1,9 @@
+##################################################################################
+# This file is part of ModelBaseEcon.jl
+# BSD 3-Clause License
+# Copyright (c) 2020, Bank of Canada
+# All rights reserved.
+##################################################################################
 
 export ModelVariable, ModelSymbol
 export update
@@ -65,7 +71,7 @@ function ModelVariable(doc::String, s::Expr)
     end
 end
 
-for sym ∈ (:shock, :log, :lin, :steady, :neglog)
+for sym ∈ (:shock, :log, :neglog, :lin, :steady, :exog)
     to_sym = Symbol("to_", sym)
     issym = Symbol("is", sym)
     eval(quote

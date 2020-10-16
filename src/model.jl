@@ -1,3 +1,9 @@
+##################################################################################
+# This file is part of ModelBaseEcon.jl
+# BSD 3-Clause License
+# Copyright (c) 2020, Bank of Canada
+# All rights reserved.
+##################################################################################
 
 export Model
 
@@ -266,7 +272,7 @@ end
 # Note: These macros simply store the information into the corresponding 
 # arrays within the model instance. The actual processing is done in @initialize
 
-export @variables, @logvariables, @neglogvariables, @steadyvariables, @shocks
+export @variables, @logvariables, @neglogvariables, @steadyvariables, @exogenous, @shocks
 export @parameters, @equations #= , @autoshocks =#, @autoexogenize
 
 """
@@ -318,6 +324,14 @@ macro steadyvariables(model, block::Expr)
 end
 macro steadyvariables(model, vars::Symbol...)
     return esc(:( unique!(append!($(model).variables, to_steady.($vars))); nothing ))
+end
+
+macro exogenous(model, block::Expr)
+    vars = filter(a -> !isa(a, LineNumberNode), block.args)
+    return esc(:(unique!(append!($(model).variables, to_exog.($vars))); nothing ))
+end
+macro exogenous(model, vars::Symbol...)
+    return esc(:( unique!(append!($(model).variables, to_exog.($vars))); nothing ))
 end
 
 """

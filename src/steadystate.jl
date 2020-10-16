@@ -1,5 +1,9 @@
-
-
+##################################################################################
+# This file is part of ModelBaseEcon.jl
+# BSD 3-Clause License
+# Copyright (c) 2020, Bank of Canada
+# All rights reserved.
+##################################################################################
 
 export SteadyStateEquation
 
@@ -35,11 +39,10 @@ struct SteadyStateVariable{DATA <: AbstractVector{Float64},MASK <: AbstractVecto
     mask::MASK
 end
 
-islin(v::SteadyStateVariable) = islin(v.name)
-islog(v::SteadyStateVariable) = islog(v.name)
-isshock(v::SteadyStateVariable) = isshock(v.name)
-issteady(v::SteadyStateVariable) = issteady(v.name)
-isneglog(v::SteadyStateVariable) = isneglog(v.name)
+for sym = (:lin, :log, :neglog, :steady, :exog, :shock)
+    issym = Symbol("is", sym)
+    eval(quote @inline $(issym)(s::SteadyStateVariable) = $(issym)(s.name) end)
+end
 
 @inline transformation(v::SteadyStateVariable) = transformation(v.name)
 @inline inverse_transformation(v::SteadyStateVariable) = inverse_transformation(v.name)
@@ -132,7 +135,7 @@ function show_aligned5(io::IO, v::SteadyStateVariable, a=alignment5(io, v);
     end
     print(io, "  ", repeat(' ', a[1] - length(name)), name, 
             sep1, repeat(' ', a[2] - lvl_a[1]), lvl, repeat(' ', a[3] - lvl_a[2]))
-    if (islin(v) || islog(v) || isneglog(v)) && !(v.data[2] + 1.0 ≈ 1.0)
+    if (!issteady(v) && !isshock(v)) && !(v.data[2] + 1.0 ≈ 1.0)
         print(io, sep2, repeat(' ', a[4] - slp_a[1]), slp, repeat(' ', a[5] - slp_a[2]), sep3)
     end
 end
@@ -171,8 +174,8 @@ function Base.push!(ssd::SteadyStateData, var::ModelSymbol)
             return v
         end
     end
-    push!(getfield(ssd, :values), 0.1, 0.0)
-    push!(getfield(ssd, :mask), false, isshock(var) || issteady(var))
+    push!(getfield(ssd, :values), isexog(var) || isshock(var) ? 0.0 : 0.1, 0.0)
+    push!(getfield(ssd, :mask), isexog(var) || isshock(var), isexog(var) || isshock(var) || issteady(var))
     ind = length(getfield(ssd, :vars)) + 1
     v = SteadyStateVariable(var, ind, @view(getfield(ssd, :values)[2ind .+ (-1:0)]), @view(getfield(ssd, :mask)[2ind .+ (-1:0)]))
     push!(getfield(ssd, :vars), v)
