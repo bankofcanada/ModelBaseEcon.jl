@@ -50,9 +50,9 @@ mutable struct Model <: AbstractModel
     sstate::SteadyStateData
     #### Inputs from user
     # transition variables
-    variables::Vector{ModelSymbol}
+    variables::Vector{ModelVariable}
     # shock variables
-    shocks::Vector{ModelSymbol}
+    shocks::Vector{ModelVariable}
     # transition equations
     equations::Vector{Equation}
     # parameters 
@@ -63,7 +63,7 @@ mutable struct Model <: AbstractModel
     maxlag::Int64
     maxlead::Int64
     # auxiliary variables
-    auxvars::Vector{Symbol}
+    auxvars::Vector{ModelVariable}
     # auxiliary equations
     auxeqns::Vector{Equation}
     # ssdata::SteadyStateData
@@ -167,6 +167,20 @@ function Base.setproperty!(model::Model, name::Symbol, val::Any)
                 throw(ArgumentError("Cannot replace variable with a different name. Use `m.var = update(m.var, ...)` to update variable."))
             end
             return setindex!(getfield(model, :variables), val, ind)
+        end
+        ind = indexin([name], getfield(model, :shocks))[1]
+        if ind !== nothing
+            if getindex(getfield(model, :shocks), ind) != val
+                throw(ArgumentError("Cannot replace shock with a different name. Use `m.shk = update(m.shk, ...)` to update shock."))
+            end
+            return setindex!(getfield(model, :shocks), val, ind)
+        end
+        ind = indexin([name], getfield(model, :auxvars))[1]
+        if ind !== nothing
+            if getindex(getfield(model, :auxvars), ind) != val
+                throw(ArgumentError("Cannot replace aux variable with a different name. Use `m.aux = update(m.aux, ...)` to update aux variable."))
+            end
+            return setindex!(getfield(model, :auxvars), val, ind)
         end
         setfield!(model, name, val)  # will throw an error since Model is immutable
     end
@@ -811,8 +825,12 @@ function initialize!(model::Model, modelmodule::Module)
     empty!(model.equations)
     empty!(model.auxvars)
     empty!(model.auxeqns)
+    empty!(model.auxvars)
     for e in eqns
         add_equation!(model, e; modelmodule=modelmodule)
+    end
+    for (i, v) in enumerate(model.allvars)
+        model.:($(v.name)) = update(v, index=i)
     end
     model.evaldata = ModelEvaluationData(model)
     initssdata!(model)

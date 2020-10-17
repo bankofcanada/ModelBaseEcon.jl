@@ -13,27 +13,17 @@ const doc_macro = MacroTools.unblock(quote
     world
 end).args[1]
 
-abstract type FinalCondition end
-struct FCGiven <: FinalCondition end
-struct FCMatchSSLevel <: FinalCondition end
-struct FCMatchSSRate{T} <: FinalCondition end
-const FCMatchSSChangeRate = FCMatchSSRate{:lin}
-const FCMatchSSGrowthRate = FCMatchSSRate{:log}
-struct FCConstRate{T} <: FinalCondition end
-const FCConstChangeRate = FCConstRate{:lin}
-const FCConstGrowthRate = FCConstRate{:log}
 
 struct ModelVariable{T <: Transformation}
     doc::String
     name::Symbol
     var_type::Symbol
     index::Int
-    fc_type::FinalCondition
 end
 
 function ModelVariable(d, s, t)
     T = ifelse(t == :log, LogTransform, ifelse(t == :neglog, NegLogTransform, NoTransform))
-    return ModelVariable{T}(d, s, t, -1, FCGiven())
+    return ModelVariable{T}(d, s, t, -1)
 end
 
 # for compatibility with old code. will be removed soon.
@@ -45,8 +35,7 @@ const ModelSymbol = ModelVariable
     var_type=v.var_type,
     index=v.index,
     transformation::Type{<:Transformation}=T,
-    fc_type::FinalCondition=v.fc_type
-) where {T <: Transformation} = ModelVariable{transformation}(string(doc), v.name, Symbol(var_type), Int(index), fc_type)
+) where {T <: Transformation} = ModelVariable{transformation}(string(doc), v.name, Symbol(var_type), Int(index))
 
 @inline ModelVariable(s::Symbol) = ModelVariable("", s, :lin)
 @inline ModelVariable(d::String, s::Symbol) = ModelVariable(d, s, :lin)
