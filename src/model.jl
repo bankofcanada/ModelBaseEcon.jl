@@ -148,7 +148,11 @@ end
 
 function Base.propertynames(model::Model, private=false)
     return (fieldnames(Model)..., :nvars, :nshks, :nauxs, :allvars, :varshks, :alleqns, 
-    keys(getfield(model, :options))..., fieldnames(ModelFlags)...,)
+    keys(getfield(model, :options))..., fieldnames(ModelFlags)...,
+    Symbol[getfield(model, :variables)...]...,
+    Symbol[getfield(model, :shocks)...]...,
+    keys(getfield(model, :parameters))...,
+    )
 end
 
 function Base.setproperty!(model::Model, name::Symbol, val::Any)
