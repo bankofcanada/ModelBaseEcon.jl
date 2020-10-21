@@ -290,7 +290,7 @@ end
 # arrays within the model instance. The actual processing is done in @initialize
 
 export @variables, @logvariables, @neglogvariables, @steadyvariables, @exogenous, @shocks
-export @parameters, @equations #= , @autoshocks =#, @autoexogenize
+export @parameters, @equations, @autoshocks, @autoexogenize
 
 """
     @variables model names...
@@ -378,18 +378,23 @@ macro shocks(model, shks::Symbol...)
     return esc(:( unique!(append!($(model).shocks, to_shock.($shks))); nothing ))
 end
 
-# """
-#     @autoshocks model
+"""
+    @autoshocks model
 
-# Create a list of shocks that matches the list of variables.  Each shock name is
-# created from a variable name by appending "_shk".
-# """
-# macro autoshocks(model)
-#     esc(:(
-#         $(model).shocks = map(x -> Meta.parse("$(x)_shk"), $(model).variables);
-#         nothing
-#     ))
-# end
+Create a list of shocks that matches the list of variables.  Each shock name is
+created from a variable name by appending "_shk".
+"""
+macro autoshocks(model, suf="_shk")
+    esc( quote 
+        $(model).shocks = ModelVariable[
+            to_shock(Symbol(v.name, $(QuoteNode(suf)))) for v in $(model).variables if !isexog(v) && !isshock(v)
+        ]
+        push!($(model).autoexogenize, (
+            v.name => Symbol(v.name, $(QuoteNode(suf))) for v in $(model).variables if !isexog(v)
+        )...)
+        nothing
+    end)
+end
 
 """
     @parameters model begin
@@ -796,8 +801,8 @@ function add_equation!(model::Model, expr::Expr; modelmodule::Module=moduleof(mo
                     end
                 else
                     # is it log(x[t]/x[t-1]) ?
-                    matched2 = @capture(arg, var1_[ind1_] / var2_[ind2_])
-                    if matched2 && has_t(ind1) && has_t(ind2) && islog(model.:($var1)) && islog(model.:($var2))
+                    matched2 = @capture(arg, op_(var1_[ind1_], var2_[ind2_]))
+                    if matched2 && op ∈ (:/, :+, :*) && has_t(ind1) && has_t(ind2) && islog(model.:($var1)) && islog(model.:($var2))
                         @goto skip_substitution
                     end
                 end
