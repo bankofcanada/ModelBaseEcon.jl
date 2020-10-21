@@ -207,7 +207,7 @@ end
     @initialize m
     @test Symbol(m.variables[1]) == m.variables[1]
 
-    for (i,v) = enumerate(m.varshks)
+    for (i, v) = enumerate(m.varshks)
         s = convert(Symbol, v)
         @test m.sstate[i] == m.sstate[v] == m.sstate[s] == m.sstate["$s"]   
     end
@@ -221,7 +221,7 @@ end
     @test xdata ≈ m.sstate.x.level .+ ((1:8) .- 3) .* m.sstate.x.slope
     kdata = m.sstate.k[1:8, ref=3]
     @test kdata[3] ≈ m.sstate.k.level
-    @test kdata ≈ m.sstate.k.level .* m.sstate.k.slope .^ ((1:8) .- 3)
+    @test kdata ≈ m.sstate.k.level .* m.sstate.k.slope.^((1:8) .- 3)
 
     @test_throws Exception m.sstate.x.data = [1,2]
     @test_throws ArgumentError m.sstate.nosuchvariable
@@ -597,10 +597,10 @@ end
         x = 2 .* ones(4, 2)
         ax = ModelBaseEcon.update_auxvars(x, m; default=0.1)
         @test size(ax) == (4, 4)
-        @test x == ax[:, 1:2]
-        @test ax[:, 3:4] == [0.0 0.0; 0.1 log(2.0); 0.1 log(2.0); 0.0 0.0]
+        @test x == ax[:, 1:2]  # exactly equal
+        @test ax[:, 3:4] ≈ [0.0 0.0; 0.1 log(2.0); 0.1 log(2.0); 0.1 log(2.0)] # computed values, so ≈ equal
     end
-    end
+end
 
 
 @using_example E2
@@ -688,7 +688,6 @@ end
 
 @testset "VarTypesSS" begin
     let m = Model()
-
         m.verbose = !true
 
         @variables m begin
@@ -796,7 +795,7 @@ end
         R, J = eq4.eval_RJ(ss.values[eq4.vinds])
         TMP = fill!(similar(ss.values), 0.0)
         TMP[eq4.vinds] .= J
-        @test R+1.0 ≈ 0.0+1.0
+        @test R + 1.0 ≈ 0.0 + 1.0
         @test TMP[[1,2,3,4,7]] ≈ [-1.0, -m.shift, 1.0, m.shift, -1.0]
         for xlvl = 0.1:0.1:2
             ss.x.level = exp(xlvl)

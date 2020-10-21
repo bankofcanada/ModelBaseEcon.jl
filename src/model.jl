@@ -151,8 +151,7 @@ function Base.propertynames(model::Model, private=false)
     keys(getfield(model, :options))..., fieldnames(ModelFlags)...,
     Symbol[getfield(model, :variables)...]...,
     Symbol[getfield(model, :shocks)...]...,
-    keys(getfield(model, :parameters))...,
-    )
+    keys(getfield(model, :parameters))...,)
 end
 
 function Base.setproperty!(model::Model, name::Symbol, val::Any)
@@ -770,27 +769,53 @@ function add_equation!(model::Model, expr::Expr; modelmodule::Module=moduleof(mo
             return Expr(:macrocall, mname, nothing, process.(margs)...)
         end
         # recursively process all arguments
-        args = []
+        ret = Expr(expr.head)
         for i in eachindex(expr.args)
-            push!(args, process(expr.args[i]))
+            push!(ret.args, process(expr.args[i]))
         end
         if getoption!(model; substitutions=true)
-            if expr.head == :call && args[1] == :log && isa(args[2], Expr)
-                # log(something)
-                aux_expr = process_equation(model, Expr(:(=), args[2], 0); modelmodule=modelmodule)
+            local arg
+            matched = @capture(ret, log(arg_))
+            # is it log(arg) 
+            if matched && isa(arg, Expr)
+                local var1, var2, ind1, ind2
+                # is it log(x[t]) ? 
+                matched = @capture(arg, var1_[ind1_])
+                if matched
+                    mv = model.:($var1)
+                    if islog(mv)
+                        # log variable is always positive, no need for substitution
+                        @goto skip_substitution
+                    elseif isshock(mv) || isexog(mv)
+                        if model.verbose
+                            @info "Found log($var1), which is a shock or exogenous variable. Make sure $var1 data is positive."
+                        end
+                        @goto skip_substitution
+                    elseif islin(mv) && model.verbose
+                        @info "Found log($var1). Consider making $var1 a log variable."
+                    end
+                else
+                    # is it log(x[t]/x[t-1]) ?
+                    matched2 = @capture(arg, var1_[ind1_] / var2_[ind2_])
+                    if matched2 && has_t(ind1) && has_t(ind2) && islog(model.:($var1)) && islog(model.:($var2))
+                        @goto skip_substitution
+                    end
+                end
+                aux_expr = process_equation(model, Expr(:(=), arg, 0); modelmodule=modelmodule)
                 if length(aux_expr.vinds) == 0
-                    # something doesn't contain any variables, no need for substitution
-                    return Expr(:call, :log, args[2])
+                    # arg doesn't contain any variables, no need for substitution
+                    @goto skip_substitution
                 end
                 # substitute log(something) with auxN and add equation exp(auxN) = something
-                naux = 1 + length(model.auxvars)
-                auxs = Symbol("aux$(naux)")
-                push!(model.auxvars, auxs)
-                push!(auxeqns, Expr(:(=), Expr(:call, :exp, Expr(:ref, auxs, :t)), args[2]))
+                push!(model.auxvars, :new)
+                model.auxvars[end] = auxs = Symbol("aux", model.nauxs)
+                push!(auxeqns, Expr(:(=), Expr(:call, :exp, Expr(:ref, auxs, :t)), arg))
                 return Expr(:ref, auxs, :t)
+                @label skip_substitution
+                nothing
             end
         end
-        return Expr(expr.head, args...)
+        return ret
     end
 
     new_expr = process(expr)
@@ -906,7 +931,7 @@ function update_auxvars(data::AbstractArray{Float64,2}, model::Model;
     end
     result = [data[:,1:nvarshk] zeros(nt, nauxs)]
     for (i, eqn) in enumerate(model.auxeqns)
-        for t in (model.maxlag + 1):(nt - model.maxlead)
+        for t in (eqn.maxlag + 1):(nt - eqn.maxlead)
             idx = [CartesianIndex((t + ti, vi)) for (ti, vi) in eqn.vinds]
             res = eqn.eval_resid(result[idx])
             if res < 1.0
