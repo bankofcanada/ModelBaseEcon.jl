@@ -9,6 +9,10 @@ using ModelBaseEcon
 using SparseArrays
 using Test
 
+
+
+
+
 @testset "Tranformations" begin
     @test_throws ErrorException transformation(Transformation)
     @test_throws ErrorException inverse_transformation(Transformation)
@@ -806,3 +810,5 @@ end
         end
     end
 end
+
+include("auxsubs.jl")

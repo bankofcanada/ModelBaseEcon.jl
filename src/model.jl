@@ -185,7 +185,7 @@ function Base.setproperty!(model::Model, name::Symbol, val::Any)
             end
             return setindex!(getfield(model, :auxvars), val, ind)
         end
-        setfield!(model, name, val)  # will throw an error since Model is immutable
+        setfield!(model, name, val)  # will throw an error since Model doesn't have field `$name`
     end
 end
 
@@ -855,11 +855,13 @@ function initialize!(model::Model, modelmodule::Module)
     end
     initfuncs(modelmodule)
     model.parameters.mod[] = modelmodule
+    varshks = model.varshks
+    model.variables = varshks[.!isshock.(varshks)]
+    model.shocks = varshks[isshock.(varshks)]
+    empty!(model.auxvars)
     eqns = [e.expr for e in model.equations]
     empty!(model.equations)
-    empty!(model.auxvars)
     empty!(model.auxeqns)
-    empty!(model.auxvars)
     for e in eqns
         add_equation!(model, e; modelmodule=modelmodule)
     end
