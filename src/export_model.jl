@@ -1,4 +1,9 @@
-
+##################################################################################
+# This file is part of ModelBaseEcon.jl
+# BSD 3-Clause License
+# Copyright (c) 2020, Bank of Canada
+# All rights reserved.
+##################################################################################
 
 export export_model
 
@@ -64,22 +69,43 @@ function export_model(m::Model, name::AbstractString, fio::IO)
         println(fio)
     end
 
-    if !isempty(variables(m))
+    allvars = m.allvars
+    if !isempty(allvars)
         println(fio, "@variables model begin")
-        for v in variables(m)
-            println(fio, "    ", v)
+        has_exog = false
+        has_shocks = false
+        for v in allvars
+            if isexog(v)
+                has_exog = true
+            elseif isshock(v)
+                has_shocks = true
+            else
+                println(fio, "    ", v)
+            end
         end
         println(fio, "end # variables")
         println(fio)
-    end
-
-    if !isempty(shocks(m))
-        println(fio, "@shocks model begin")
-        for v in shocks(m)
-            println(fio, "    ", v)
+        if has_exog
+            println(fio, "@exogenous model begin")
+            for v in allvars
+                if isexog(v)
+                    doc = ifelse(isempty(v.doc), "", v.doc * " ")
+                    println(fio, "    ", doc, v.name)
+                end
+            end
+            println(fio, "end # exogenous")
+            println(fio)
         end
-        println(fio, "end # shocks")
-        println(fio)
+        if has_shocks
+            println(fio, "@shocks model begin")
+            for v in allvars
+                if isshock(v)
+                    println(fio, "    ", v)
+                end
+            end
+            println(fio, "end # shocks")
+            println(fio)
+        end
     end
 
     if !isempty(m.autoexogenize)
@@ -91,9 +117,10 @@ function export_model(m::Model, name::AbstractString, fio::IO)
         println(fio)
     end
 
-    if !isempty(equations(m))
+    alleqns = m.alleqns
+    if !isempty(alleqns)
         println(fio, "@equations model begin")
-        for eqn in equations(m)
+        for eqn in alleqns
             str = sprint(print, eqn, context=fio, sizehint=0)
             str = replace(str, r"(\s*\".*\"\s*)" => s"\1\\n    ")
             println(fio, "    ", unescape_string(str))

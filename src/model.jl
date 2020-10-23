@@ -1,3 +1,9 @@
+##################################################################################
+# This file is part of ModelBaseEcon.jl
+# BSD 3-Clause License
+# Copyright (c) 2020, Bank of Canada
+# All rights reserved.
+##################################################################################
 
 export Model
 
@@ -44,9 +50,9 @@ mutable struct Model <: AbstractModel
     sstate::SteadyStateData
     #### Inputs from user
     # transition variables
-    variables::Vector{ModelSymbol}
+    variables::Vector{ModelVariable}
     # shock variables
-    shocks::Vector{ModelSymbol}
+    shocks::Vector{ModelVariable}
     # transition equations
     equations::Vector{Equation}
     # parameters 
@@ -57,7 +63,7 @@ mutable struct Model <: AbstractModel
     maxlag::Int64
     maxlead::Int64
     # auxiliary variables
-    auxvars::Vector{Symbol}
+    auxvars::Vector{ModelVariable}
     # auxiliary equations
     auxeqns::Vector{Equation}
     # ssdata::SteadyStateData
@@ -142,7 +148,10 @@ end
 
 function Base.propertynames(model::Model, private=false)
     return (fieldnames(Model)..., :nvars, :nshks, :nauxs, :allvars, :varshks, :alleqns, 
-    keys(getfield(model, :options))..., fieldnames(ModelFlags)...,)
+    keys(getfield(model, :options))..., fieldnames(ModelFlags)...,
+    Symbol[getfield(model, :variables)...]...,
+    Symbol[getfield(model, :shocks)...]...,
+    keys(getfield(model, :parameters))...,)
 end
 
 function Base.setproperty!(model::Model, name::Symbol, val::Any)
@@ -155,7 +164,28 @@ function Base.setproperty!(model::Model, name::Symbol, val::Any)
     elseif name ∈ fieldnames(ModelFlags)
         return setfield!(getfield(model, :flags), name, val)
     else
-        error("type Model cannot set property $name")
+        ind = indexin([name], getfield(model, :variables))[1]
+        if ind !== nothing
+            if getindex(getfield(model, :variables), ind) != val
+                throw(ArgumentError("Cannot replace variable with a different name. Use `m.var = update(m.var, ...)` to update variable."))
+            end
+            return setindex!(getfield(model, :variables), val, ind)
+        end
+        ind = indexin([name], getfield(model, :shocks))[1]
+        if ind !== nothing
+            if getindex(getfield(model, :shocks), ind) != val
+                throw(ArgumentError("Cannot replace shock with a different name. Use `m.shk = update(m.shk, ...)` to update shock."))
+            end
+            return setindex!(getfield(model, :shocks), val, ind)
+        end
+        ind = indexin([name], getfield(model, :auxvars))[1]
+        if ind !== nothing
+            if getindex(getfield(model, :auxvars), ind) != val
+                throw(ArgumentError("Cannot replace aux variable with a different name. Use `m.aux = update(m.aux, ...)` to update aux variable."))
+            end
+            return setindex!(getfield(model, :auxvars), val, ind)
+        end
+        setfield!(model, name, val)  # will throw an error since Model doesn't have field `$name`
     end
 end
 
@@ -259,7 +289,8 @@ end
 # Note: These macros simply store the information into the corresponding 
 # arrays within the model instance. The actual processing is done in @initialize
 
-export @variables, @logvariables, @steadyvariables, @shocks, @parameters, @equations #= , @autoshocks =#, @autoexogenize
+export @variables, @logvariables, @neglogvariables, @steadyvariables, @exogenous, @shocks
+export @parameters, @equations, @autoshocks, @autoexogenize
 
 """
     @variables model names...
@@ -296,12 +327,28 @@ macro logvariables(model, vars::Symbol...)
     return esc(:( unique!(append!($(model).variables, to_log.($vars))); nothing ))
 end
 
+macro neglogvariables(model, block::Expr)
+    vars = filter(a -> !isa(a, LineNumberNode), block.args)
+    return esc(:(unique!(append!($(model).variables, to_neglog.($vars))); nothing ))
+end
+macro neglogvariables(model, vars::Symbol...)
+    return esc(:( unique!(append!($(model).variables, to_neglog.($vars))); nothing ))
+end
+
 macro steadyvariables(model, block::Expr)
     vars = filter(a -> !isa(a, LineNumberNode), block.args)
     return esc(:(unique!(append!($(model).variables, to_steady.($vars))); nothing ))
 end
 macro steadyvariables(model, vars::Symbol...)
     return esc(:( unique!(append!($(model).variables, to_steady.($vars))); nothing ))
+end
+
+macro exogenous(model, block::Expr)
+    vars = filter(a -> !isa(a, LineNumberNode), block.args)
+    return esc(:(unique!(append!($(model).variables, to_exog.($vars))); nothing ))
+end
+macro exogenous(model, vars::Symbol...)
+    return esc(:( unique!(append!($(model).variables, to_exog.($vars))); nothing ))
 end
 
 """
@@ -331,18 +378,23 @@ macro shocks(model, shks::Symbol...)
     return esc(:( unique!(append!($(model).shocks, to_shock.($shks))); nothing ))
 end
 
-# """
-#     @autoshocks model
+"""
+    @autoshocks model
 
-# Create a list of shocks that matches the list of variables.  Each shock name is
-# created from a variable name by appending "_shk".
-# """
-# macro autoshocks(model)
-#     esc(:(
-#         $(model).shocks = map(x -> Meta.parse("$(x)_shk"), $(model).variables);
-#         nothing
-#     ))
-# end
+Create a list of shocks that matches the list of variables.  Each shock name is
+created from a variable name by appending "_shk".
+"""
+macro autoshocks(model, suf="_shk")
+    esc( quote 
+        $(model).shocks = ModelVariable[
+            to_shock(Symbol(v.name, $(QuoteNode(suf)))) for v in $(model).variables if !isexog(v) && !isshock(v)
+        ]
+        push!($(model).autoexogenize, (
+            v.name => Symbol(v.name, $(QuoteNode(suf))) for v in $(model).variables if !isexog(v)
+        )...)
+        nothing
+    end)
+end
 
 """
     @parameters model begin
@@ -472,6 +524,8 @@ function process_equation(model::Model, expr::Expr;
     add_reference(sym::Symbol, tind::Int, vind::Int) = begin
         if islog(allvars[vind])
             vsym = Symbol("#log", sym, "#", tind, "#")
+        elseif isneglog(allvars[vind])
+            vsym = Symbol("#logm", sym, "#", tind, "#")
         else
             vsym = Symbol("#", sym, "#", tind, "#")
         end
@@ -625,8 +679,10 @@ function process_equation(model::Model, expr::Expr;
                 else
                     error_process("Unrecognized t-reference expression $index.", expr)
                 end
-                if islog(allvars[vind])
-                    return Expr(:call, :exp, references[(tind, vind)])
+                if need_transform(allvars[vind])
+                    func = inverse_transformation(allvars[vind])
+                    arg = references[(tind, vind)]
+                    return :($func($arg))
                 else
                     return references[(tind, vind)]
                 end
@@ -718,27 +774,53 @@ function add_equation!(model::Model, expr::Expr; modelmodule::Module=moduleof(mo
             return Expr(:macrocall, mname, nothing, process.(margs)...)
         end
         # recursively process all arguments
-        args = []
+        ret = Expr(expr.head)
         for i in eachindex(expr.args)
-            push!(args, process(expr.args[i]))
+            push!(ret.args, process(expr.args[i]))
         end
         if getoption!(model; substitutions=true)
-            if expr.head == :call && args[1] == :log && isa(args[2], Expr)
-                # log(something)
-                aux_expr = process_equation(model, Expr(:(=), args[2], 0); modelmodule=modelmodule)
+            local arg
+            matched = @capture(ret, log(arg_))
+            # is it log(arg) 
+            if matched && isa(arg, Expr)
+                local var1, var2, ind1, ind2
+                # is it log(x[t]) ? 
+                matched = @capture(arg, var1_[ind1_])
+                if matched
+                    mv = model.:($var1)
+                    if islog(mv)
+                        # log variable is always positive, no need for substitution
+                        @goto skip_substitution
+                    elseif isshock(mv) || isexog(mv)
+                        if model.verbose
+                            @info "Found log($var1), which is a shock or exogenous variable. Make sure $var1 data is positive."
+                        end
+                        @goto skip_substitution
+                    elseif islin(mv) && model.verbose
+                        @info "Found log($var1). Consider making $var1 a log variable."
+                    end
+                else
+                    # is it log(x[t]/x[t-1]) ?
+                    matched2 = @capture(arg, op_(var1_[ind1_], var2_[ind2_]))
+                    if matched2 && op ∈ (:/, :+, :*) && has_t(ind1) && has_t(ind2) && islog(model.:($var1)) && islog(model.:($var2))
+                        @goto skip_substitution
+                    end
+                end
+                aux_expr = process_equation(model, Expr(:(=), arg, 0); modelmodule=modelmodule)
                 if length(aux_expr.vinds) == 0
-                    # something doesn't contain any variables, no need for substitution
-                    return Expr(:call, :log, args[2])
+                    # arg doesn't contain any variables, no need for substitution
+                    @goto skip_substitution
                 end
                 # substitute log(something) with auxN and add equation exp(auxN) = something
-                naux = 1 + length(model.auxvars)
-                auxs = Symbol("aux$(naux)")
-                push!(model.auxvars, auxs)
-                push!(auxeqns, Expr(:(=), Expr(:call, :exp, Expr(:ref, auxs, :t)), args[2]))
+                push!(model.auxvars, :new)
+                model.auxvars[end] = auxs = Symbol("aux", model.nauxs)
+                push!(auxeqns, Expr(:(=), Expr(:call, :exp, Expr(:ref, auxs, :t)), arg))
                 return Expr(:ref, auxs, :t)
+                @label skip_substitution
+                nothing
             end
         end
-        return Expr(expr.head, args...)
+        return ret
     end
 
     new_expr = process(expr)
@@ -773,12 +855,18 @@ function initialize!(model::Model, modelmodule::Module)
     end
     initfuncs(modelmodule)
     model.parameters.mod[] = modelmodule
+    varshks = model.varshks
+    model.variables = varshks[.!isshock.(varshks)]
+    model.shocks = varshks[isshock.(varshks)]
+    empty!(model.auxvars)
     eqns = [e.expr for e in model.equations]
     empty!(model.equations)
-    empty!(model.auxvars)
     empty!(model.auxeqns)
     for e in eqns
         add_equation!(model, e; modelmodule=modelmodule)
+    end
+    for (i, v) in enumerate(model.allvars)
+        model.:($(v.name)) = update(v, index=i)
     end
     model.evaldata = ModelEvaluationData(model)
     initssdata!(model)
@@ -850,7 +938,7 @@ function update_auxvars(data::AbstractArray{Float64,2}, model::Model;
     end
     result = [data[:,1:nvarshk] zeros(nt, nauxs)]
     for (i, eqn) in enumerate(model.auxeqns)
-        for t in (model.maxlag + 1):(nt - model.maxlead)
+        for t in (eqn.maxlag + 1):(nt - eqn.maxlead)
             idx = [CartesianIndex((t + ti, vi)) for (ti, vi) in eqn.vinds]
             res = eqn.eval_resid(result[idx])
             if res < 1.0

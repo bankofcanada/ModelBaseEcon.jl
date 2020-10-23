@@ -1,5 +1,9 @@
-
-
+##################################################################################
+# This file is part of ModelBaseEcon.jl
+# BSD 3-Clause License
+# Copyright (c) 2020, Bank of Canada
+# All rights reserved.
+##################################################################################
 
 export SteadyStateEquation
 
@@ -26,7 +30,7 @@ Holds the steady state solution for one variable.
 """
 struct SteadyStateVariable{DATA <: AbstractVector{Float64},MASK <: AbstractVector{Bool}}
     # The corresponding entry in m.allvars. Needed for its type
-    name::ModelSymbol
+    name::ModelVariable
     # Its index in the m.allvars array
     index::Int
     # A view in the SteadyStateData.values location for this variable
@@ -35,11 +39,17 @@ struct SteadyStateVariable{DATA <: AbstractVector{Float64},MASK <: AbstractVecto
     mask::MASK
 end
 
-islin(v::SteadyStateVariable) = islin(v.name)
-islog(v::SteadyStateVariable) = islog(v.name)
-isshock(v::SteadyStateVariable) = isshock(v.name)
-issteady(v::SteadyStateVariable) = issteady(v.name)
+for sym = (:lin, :log, :neglog, :steady, :exog, :shock)
+    issym = Symbol("is", sym)
+    eval(quote @inline $(issym)(s::SteadyStateVariable) = $(issym)(s.name) end)
+end
 
+@inline transformation(v::SteadyStateVariable) = transformation(v.name)
+@inline inverse_transformation(v::SteadyStateVariable) = inverse_transformation(v.name)
+@inline transform(x, v::SteadyStateVariable) = transform(x, v.name)
+@inline inverse_transform(x, v::SteadyStateVariable) = inverse_transform(x, v.name)
+
+#############################################################################
 # Access to .level and .slope
 
 Base.getproperty(v::SteadyStateVariable, name::Symbol) = begin
@@ -47,19 +57,20 @@ Base.getproperty(v::SteadyStateVariable, name::Symbol) = begin
         return getfield(v, name)
     end
     data = getfield(v, :data)
-    transform = ifelse(islog(v), exp, identity)
-    return name == :level ? transform(data[1]) :
-            name == :slope ? transform(data[2]) :
+    # we store transformed data, must invert to give back to user
+    return name == :level ? inverse_transform(data[1], v) :
+            name == :slope ? 
+                (islog(v) || isneglog(v) ? exp(data[2]) : data[2]) :
                 getfield(v, name)
 end
 
 Base.setproperty!(v::SteadyStateVariable, name::Symbol, val) = begin
     data = getfield(v, :data)
-    transform = ifelse(islog(v), log, identity)
+    # we store transformed data, must transform user input
     if name == :level
-        data[1] = transform(val)
+        data[1] = transform(val, v)
     elseif name == :slope
-        data[2] = transform(val)
+        data[2] = (islog(v) || isneglog(v) ? log(val) : val) 
     else
         setfield!(v, name, val)  # this will error (immutable)
     end
@@ -71,11 +82,8 @@ function Base.getindex(v::SteadyStateVariable, t; ref=1)
     if eltype(t) != eltype(ref)
         throw(ArgumentError("Must provide reference time of the same type as the time index"))
     end
-    ret = v.data[1] .+ v.data[2] .* (t .- ref)
-    if islog(v)
-        ret = exp.(ret)
-    end
-    return ret
+    # we must inverse transform internal data before returning to user
+    return inverse_transform(v.data[1] .+ v.data[2] .* (t .- ref), v)
 end
 
 # pretty printing 
@@ -107,7 +115,9 @@ function alignment5(io::IO, vars::AbstractVector{SteadyStateVariable})
 end
 
 function show_aligned5(io::IO, v::SteadyStateVariable, a=alignment5(io, v);
-            mask=trues(2), sep1=" = ", sep2=islog(v) ? " * " : " + ", sep3=islog(v) ? "^t" : "*t")
+            mask=trues(2), sep1=" = ", 
+            sep2=islog(v) || isneglog(v) ? " * " : " + ", 
+            sep3=islog(v) || isneglog(v) ? "^t" : "*t")
     name = sprint(print, string(v.name.name), context=io, sizehint=0)
     if mask[1]
         lvl_a = Base.alignment(io, v.level)
@@ -125,7 +135,7 @@ function show_aligned5(io::IO, v::SteadyStateVariable, a=alignment5(io, v);
     end
     print(io, "  ", repeat(' ', a[1] - length(name)), name, 
             sep1, repeat(' ', a[2] - lvl_a[1]), lvl, repeat(' ', a[3] - lvl_a[2]))
-    if (islin(v) || islog(v)) && !(v.data[2] + 1.0 ≈ 1.0)
+    if (!issteady(v) && !isshock(v)) && !(v.data[2] + 1.0 ≈ 1.0)
         print(io, sep2, repeat(' ', a[4] - slp_a[1]), slp, repeat(' ', a[5] - slp_a[2]), sep3)
     end
 end
@@ -164,8 +174,8 @@ function Base.push!(ssd::SteadyStateData, var::ModelSymbol)
             return v
         end
     end
-    push!(getfield(ssd, :values), 0.1, 0.0)
-    push!(getfield(ssd, :mask), false, isshock(var) || issteady(var))
+    push!(getfield(ssd, :values), isexog(var) || isshock(var) ? 0.0 : 0.1, 0.0)
+    push!(getfield(ssd, :mask), isexog(var) || isshock(var), isexog(var) || isshock(var) || issteady(var))
     ind = length(getfield(ssd, :vars)) + 1
     v = SteadyStateVariable(var, ind, @view(getfield(ssd, :values)[2ind .+ (-1:0)]), @view(getfield(ssd, :mask)[2ind .+ (-1:0)]))
     push!(getfield(ssd, :vars), v)
@@ -478,8 +488,9 @@ function setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Mod
             vsym = Symbol("#", type, "#", val, "#")
             push!(vsyms, vsym)
             push!(vinds, type == :level ? 2vind -1 : 2vind)
-            if islog(allvars[vind])
-                return Expr(:call, :exp, vsym)
+            if need_transform(allvars[vind])
+                func = inverse_transformation(allvars[vind])
+                return :($func($vsym))
             else
                 return vsym
             end

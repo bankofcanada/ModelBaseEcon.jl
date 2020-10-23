@@ -30,6 +30,7 @@ function Base.show(io::IO, eqn::AbstractEquation)
 end
 
 Base.:(==)(e1::AbstractEquation, e2::AbstractEquation) = type(e1) == type(e1) && expr(e1) == expr(e2)
+Base.hash(e::AbstractEquation, h::UInt) = hash((type(e), expr(e)), h)
 
 abstract type AbstractModel end
 

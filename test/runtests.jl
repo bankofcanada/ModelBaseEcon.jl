@@ -1,6 +1,42 @@
+##################################################################################
+# This file is part of ModelBaseEcon.jl
+# BSD 3-Clause License
+# Copyright (c) 2020, Bank of Canada
+# All rights reserved.
+##################################################################################
+
 using ModelBaseEcon
 using SparseArrays
 using Test
+
+
+
+
+
+@testset "Tranformations" begin
+    @test_throws ErrorException transformation(Transformation)
+    @test_throws ErrorException inverse_transformation(Transformation)
+    let m = Model()
+        @variables m begin x; @log lx; @neglog lmx; end
+        @test length(m.variables) == 3
+        @test m.x isa ModelVariable{NoTransform}
+        @test m.lx isa ModelVariable{LogTransform}
+        @test m.lmx isa ModelVariable{NegLogTransform}
+        data = rand(20)
+        @test transform(data, m.x) ≈ data
+        @test inverse_transform(data, m.x) ≈ data
+        @test transform(data, m.lx) ≈ log.(data)
+        @test inverse_transform(log.(data), m.lx) ≈ data
+        mdata = -data
+        @test transform(mdata, m.lmx) ≈ log.(data)
+        @test inverse_transform(log.(data), m.lmx) ≈ mdata
+        @neglogvariables m ly
+        @test_throws ArgumentError m.ly = 25
+        @test_throws ArgumentError m.ly = ModelVariable(:lmy)
+        m.ly = update(m.ly, transformation=LogTransform)
+        @test m.ly isa ModelVariable{LogTransform}
+    end
+end 
 
 @testset "Options" begin
     o = Options(tol=1e-7, maxiter=25)
@@ -78,15 +114,15 @@ end
         end
         @test lvars[i] == :ly
     end
-    @test lvars[1].type == :lin
-    @test lvars[2].type == :lin
-    @test lvars[3].type == :log
-    @test lvars[4].type == :log
-    @test lvars[5].type == :lin
-    @test lvars[6].type == :lin
-    @test lvars[7].type == :steady
-    @test lvars[8].type == :steady
-    @test lvars[9].type == :lin
+    @test lvars[1].var_type == :lin
+    @test lvars[2].var_type == :lin
+    @test lvars[3].var_type == :log
+    @test lvars[4].var_type == :log
+    @test lvars[5].var_type == :lin
+    @test lvars[6].var_type == :lin
+    @test lvars[7].var_type == :steady
+    @test lvars[8].var_type == :steady
+    @test lvars[9].var_type == :lin
     for i = 1:length(lvars)
         @test sprint(print, lvars[i], context=IOContext(stdout, :compact => true)) == "ly"
     end
@@ -104,28 +140,28 @@ end
         @variables m begin
             x; @log y; @steady z;
         end
-        @test [v.type for v in m.allvars] == [:lin, :lin, :lin, :lin, :log, :steady]
+        @test [v.var_type for v in m.allvars] == [:lin, :lin, :lin, :lin, :log, :steady]
     end
     let m = Model()
         @shocks m p q r
         @shocks m begin
             x; @log y; @steady z;
         end
-        @test [v.type for v in m.allvars] == [:shock, :shock, :shock, :shock, :shock, :shock]
+        @test [v.var_type for v in m.allvars] == [:shock, :shock, :shock, :shock, :shock, :shock]
     end
     let m = Model()
         @logvariables m p q r
         @logvariables m begin
             x; @log y; @steady z;
         end
-        @test [v.type for v in m.allvars] == [:log, :log, :log, :log, :log, :log]
+        @test [v.var_type for v in m.allvars] == [:log, :log, :log, :log, :log, :log]
     end
     let m = Model()
         @steadyvariables m p q r
         @steadyvariables m begin
             x; @log y; @steady z;
         end
-        @test [v.type for v in m.allvars] == [:steady, :steady, :steady, :steady, :steady, :steady]
+        @test [v.var_type for v in m.allvars] == [:steady, :steady, :steady, :steady, :steady, :steady]
     end
 end
 
@@ -174,6 +210,12 @@ end
     end
     @initialize m
     @test Symbol(m.variables[1]) == m.variables[1]
+
+    for (i, v) = enumerate(m.varshks)
+        s = convert(Symbol, v)
+        @test m.sstate[i] == m.sstate[v] == m.sstate[s] == m.sstate["$s"]   
+    end
+
     m.sstate.values .= rand(length(m.sstate.values))
     @test begin (l, s) = m.sstate.x.data; l == m.sstate.x.level && s == m.sstate.x.slope end
     @test begin (l, s) = m.sstate.k.data; exp(l) == m.sstate.k.level && exp(s) == m.sstate.k.slope end
@@ -183,7 +225,7 @@ end
     @test xdata ≈ m.sstate.x.level .+ ((1:8) .- 3) .* m.sstate.x.slope
     kdata = m.sstate.k[1:8, ref=3]
     @test kdata[3] ≈ m.sstate.k.level
-    @test kdata ≈ m.sstate.k.level .* m.sstate.k.slope .^ ((1:8) .- 3)
+    @test kdata ≈ m.sstate.k.level .* m.sstate.k.slope.^((1:8) .- 3)
 
     @test_throws Exception m.sstate.x.data = [1,2]
     @test_throws ArgumentError m.sstate.nosuchvariable
@@ -492,6 +534,10 @@ end
         @test length(m.sstate.constraints) == 1
         @test neqns(m.sstate) == 3
         @test length(alleqns(m.sstate)) == 3
+        @steadystate m y = 3
+        @test length(m.sstate.constraints) == 1
+        @test neqns(m.sstate) == 3
+        @test length(alleqns(m.sstate)) == 3
         printsstate(io, m)
         lines = split(String(take!(io)), '\n')
         @test length(lines) == 2 + length(m.allvars)
@@ -555,10 +601,10 @@ end
         x = 2 .* ones(4, 2)
         ax = ModelBaseEcon.update_auxvars(x, m; default=0.1)
         @test size(ax) == (4, 4)
-        @test x == ax[:, 1:2]
-        @test ax[:, 3:4] == [0.0 0.0; 0.1 log(2.0); 0.1 log(2.0); 0.0 0.0]
+        @test x == ax[:, 1:2]  # exactly equal
+        @test ax[:, 3:4] ≈ [0.0 0.0; 0.1 log(2.0); 0.1 log(2.0); 0.1 log(2.0)] # computed values, so ≈ equal
     end
-    end
+end
 
 
 @using_example E2
@@ -646,7 +692,6 @@ end
 
 @testset "VarTypesSS" begin
     let m = Model()
-
         m.verbose = !true
 
         @variables m begin
@@ -754,7 +799,7 @@ end
         R, J = eq4.eval_RJ(ss.values[eq4.vinds])
         TMP = fill!(similar(ss.values), 0.0)
         TMP[eq4.vinds] .= J
-        @test R+1.0 ≈ 0.0+1.0
+        @test R + 1.0 ≈ 0.0 + 1.0
         @test TMP[[1,2,3,4,7]] ≈ [-1.0, -m.shift, 1.0, m.shift, -1.0]
         for xlvl = 0.1:0.1:2
             ss.x.level = exp(xlvl)
@@ -765,3 +810,5 @@ end
         end
     end
 end
+
+include("auxsubs.jl")
