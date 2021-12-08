@@ -146,7 +146,7 @@ function Base.getproperty(model::Model, name::Symbol)
     end
 end
 
-function Base.propertynames(model::Model, private=false)
+function Base.propertynames(model::Model, private::Bool=false)
     return (fieldnames(Model)..., :nvars, :nshks, :nauxs, :allvars, :varshks, :alleqns, 
     keys(getfield(model, :options))..., fieldnames(ModelFlags)...,
     Symbol[getfield(model, :variables)...]...,

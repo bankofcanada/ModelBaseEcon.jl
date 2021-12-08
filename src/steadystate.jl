@@ -28,7 +28,7 @@ end
 
 Holds the steady state solution for one variable.
 """
-struct SteadyStateVariable{DATA <: AbstractVector{Float64},MASK <: AbstractVector{Bool}}
+struct SteadyStateVariable{DATA<:AbstractVector{Float64},MASK<:AbstractVector{Bool}}
     # The corresponding entry in m.allvars. Needed for its type
     name::ModelVariable
     # Its index in the m.allvars array
@@ -39,9 +39,11 @@ struct SteadyStateVariable{DATA <: AbstractVector{Float64},MASK <: AbstractVecto
     mask::MASK
 end
 
-for sym = (:lin, :log, :neglog, :steady, :exog, :shock)
+for sym in (:lin, :log, :neglog, :steady, :exog, :shock)
     issym = Symbol("is", sym)
-    eval(quote @inline $(issym)(s::SteadyStateVariable) = $(issym)(s.name) end)
+    eval(quote
+        @inline $(issym)(s::SteadyStateVariable) = $(issym)(s.name)
+    end)
 end
 
 @inline transformation(v::SteadyStateVariable) = transformation(v.name)
@@ -59,9 +61,9 @@ Base.getproperty(v::SteadyStateVariable, name::Symbol) = begin
     data = getfield(v, :data)
     # we store transformed data, must invert to give back to user
     return name == :level ? inverse_transform(data[1], v) :
-            name == :slope ? 
-                (islog(v) || isneglog(v) ? exp(data[2]) : data[2]) :
-                getfield(v, name)
+           name == :slope ?
+           (islog(v) || isneglog(v) ? exp(data[2]) : data[2]) :
+           getfield(v, name)
 end
 
 Base.setproperty!(v::SteadyStateVariable, name::Symbol, val) = begin
@@ -70,7 +72,7 @@ Base.setproperty!(v::SteadyStateVariable, name::Symbol, val) = begin
     if name == :level
         data[1] = transform(val, v)
     elseif name == :slope
-        data[2] = (islog(v) || isneglog(v) ? log(val) : val) 
+        data[2] = (islog(v) || isneglog(v) ? log(val) : val)
     else
         setfield!(v, name, val)  # this will error (immutable)
     end
@@ -78,12 +80,13 @@ end
 
 # use [] to get a time series of values.
 # the ref= value is the t at which it equals its level
-function Base.getindex(v::SteadyStateVariable, t; ref=1)
+function Base.getindex(v::SteadyStateVariable, t; ref = 1)
     if eltype(t) != eltype(ref)
         throw(ArgumentError("Must provide reference time of the same type as the time index"))
     end
+    int_t = convert(Int, first(t) - ref):convert(Int, last(t) - ref)
     # we must inverse transform internal data before returning to user
-    return inverse_transform(v.data[1] .+ v.data[2] .* (t .- ref), v)
+    return inverse_transform(v.data[1] .+ v.data[2] .* int_t, v)
 end
 
 # pretty printing 
@@ -95,7 +98,7 @@ Return a 5-tuple with the number of characters for the name, and the alignment 2
 
 """
 function alignment5(io::IO, v::SteadyStateVariable)
-    name = sprint(print, string(v.name.name), context=io, sizehint=0)
+    name = sprint(print, string(v.name.name), context = io, sizehint = 0)
     lvl_a = Base.alignment(io, v.level)
     if isshock(v) || issteady(v)
         slp_a = (0, 0)
@@ -114,27 +117,27 @@ function alignment5(io::IO, vars::AbstractVector{SteadyStateVariable})
     return a
 end
 
-function show_aligned5(io::IO, v::SteadyStateVariable, a=alignment5(io, v);
-            mask=trues(2), sep1=" = ", 
-            sep2=islog(v) || isneglog(v) ? " * " : " + ", 
-            sep3=islog(v) || isneglog(v) ? "^t" : "*t")
-    name = sprint(print, string(v.name.name), context=io, sizehint=0)
+function show_aligned5(io::IO, v::SteadyStateVariable, a = alignment5(io, v);
+    mask = trues(2), sep1 = " = ",
+    sep2 = islog(v) || isneglog(v) ? " * " : " + ",
+    sep3 = islog(v) || isneglog(v) ? "^t" : "*t")
+    name = sprint(print, string(v.name.name), context = io, sizehint = 0)
     if mask[1]
         lvl_a = Base.alignment(io, v.level)
-        lvl = sprint(show, v.level, context=io, sizehint=0)
+        lvl = sprint(show, v.level, context = io, sizehint = 0)
     else
         lvl_a = (0, 1)
         lvl = "?"
     end
     if mask[2]
         slp_a = Base.alignment(io, v.slope)
-        slp = sprint(show, v.slope, context=io, sizehint=0)
+        slp = sprint(show, v.slope, context = io, sizehint = 0)
     else
         slp_a = (0, 1)
         slp = "?"
     end
-    print(io, "  ", repeat(' ', a[1] - length(name)), name, 
-            sep1, repeat(' ', a[2] - lvl_a[1]), lvl, repeat(' ', a[3] - lvl_a[2]))
+    print(io, "  ", repeat(' ', a[1] - length(name)), name,
+        sep1, repeat(' ', a[2] - lvl_a[1]), lvl, repeat(' ', a[3] - lvl_a[2]))
     if (!issteady(v) && !isshock(v)) && !(v.data[2] + 1.0 ≈ 1.0)
         print(io, sep2, repeat(' ', a[4] - slp_a[1]), slp, repeat(' ', a[5] - slp_a[2]), sep3)
     end
@@ -166,7 +169,10 @@ struct SteadyStateData
     SteadyStateData() = new([], [], [], [], [])
 end
 
-Base.push!(ssd::SteadyStateData, vars...) = for v in vars push!(ssd, v) end
+Base.push!(ssd::SteadyStateData, vars...) =
+    for v in vars
+        push!(ssd, v)
+    end
 Base.push!(ssd::SteadyStateData, var::Symbol) = push!(ssd, convert(ModelSymbol, var))
 function Base.push!(ssd::SteadyStateData, var::ModelSymbol)
     for v in getfield(ssd, :vars)
@@ -177,7 +183,7 @@ function Base.push!(ssd::SteadyStateData, var::ModelSymbol)
     push!(getfield(ssd, :values), isexog(var) || isshock(var) ? 0.0 : 0.1, 0.0)
     push!(getfield(ssd, :mask), isexog(var) || isshock(var), isexog(var) || isshock(var) || issteady(var))
     ind = length(getfield(ssd, :vars)) + 1
-    v = SteadyStateVariable(var, ind, @view(getfield(ssd, :values)[2ind .+ (-1:0)]), @view(getfield(ssd, :mask)[2ind .+ (-1:0)]))
+    v = SteadyStateVariable(var, ind, @view(getfield(ssd, :values)[2ind.+(-1:0)]), @view(getfield(ssd, :mask)[2ind.+(-1:0)]))
     push!(getfield(ssd, :vars), v)
     return v
 end
@@ -243,7 +249,7 @@ end
 #########
 # Implement access to steady state values using dot notation and index notation
 
-function Base.propertynames(ssd::SteadyStateData, private=false)
+function Base.propertynames(ssd::SteadyStateData, private::Bool = false)
     if private
         return ((v.name.name for v in ssd.vars)..., fieldnames(SteadyStateData)...,)
     else
@@ -269,7 +275,7 @@ Base.getindex(ssd::SteadyStateData, sym::ModelSymbol) = getproperty(ssd, sym.nam
 Base.getindex(ssd::SteadyStateData, sym::Symbol) = getproperty(ssd, sym)
 Base.getindex(ssd::SteadyStateData, sym::AbstractString) = getproperty(ssd, Symbol(sym))
 
-@inline ss_symbol(ssd::SteadyStateData, vi::Int) = Symbol("#", ssd.vars[(1+vi) ÷ 2].name.name, "#", (vi % 2 == 1) ? :lvl : :slp, "#")
+@inline ss_symbol(ssd::SteadyStateData, vi::Int) = Symbol("#", ssd.vars[(1+vi)÷2].name.name, "#", (vi % 2 == 1) ? :lvl : :slp, "#")
 
 #########################
 # 
@@ -292,7 +298,7 @@ function printsstate(io::IO, model::AbstractModel)
     println(io, "Steady State Solution:")
     a = max.(alignment5(io, ssd.vars), (0, 0, 3, 0, 3))
     for v in ssd.vars
-        show_aligned5(io, v, a, mask=v.mask)
+        show_aligned5(io, v, a, mask = v.mask)
         println(io)
     end
 end
@@ -323,7 +329,7 @@ Internal structure used for evaluation of the residual of the steady state equat
 derived from a dynamic equation.
 
 """
-struct SSEqnData{M <: AbstractModel}
+struct SSEqnData{M<:AbstractModel}
     "Whether or not to add model.shift"
     shift::Bool
     "Reference to the model object (needed for the current value of shift"
@@ -332,8 +338,8 @@ struct SSEqnData{M <: AbstractModel}
     JT::Vector
     "The dynamic equation instance"
     eqn::Equation
-    SSEqnData(s, m::M, jt, e) where {M <: AbstractModel} = new{M}(s, Ref(m), jt, e)
-    SSEqnData(s, m::Ref{M}, jt, e) where {M <: AbstractModel} = new{M}(s, m, jt, e)
+    SSEqnData(s, m::M, jt, e) where {M<:AbstractModel} = new{M}(s, Ref(m), jt, e)
+    SSEqnData(s, m::Ref{M}, jt, e) where {M<:AbstractModel} = new{M}(s, m, jt, e)
 end
 
 function sseqn_resid_RJ(s::SSEqnData)
@@ -400,7 +406,7 @@ function make_sseqn(model::AbstractModel, eqn::Equation, shift::Bool)
     # ssind converts the dynamic index (t, v) into
     # the corresponding indexes of steady state unknowns.
     # Returned value is a list of length 0, 1, or 2.
-    function ssind((ti, vi), )::Array{Int64,1}
+    function ssind((ti, vi),)::Array{Int64,1}
         no_slope = isshock(allvars[vi]) || issteady(allvars[vi])
         # The level unknown has index 2*vi-1.
         # The slope unknown has index 2*vi. However:
@@ -444,7 +450,7 @@ addition to the equations generated automatically from the dynamic system.
 Internal function, do not call directly. Use [`@steadystate`](@ref) instead.
 
 """
-function setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Module=moduleof(model))
+function setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Module = moduleof(model))
 
     if expr.head != :(=)
         error("Expected an equation, not $(expr.head)")
@@ -487,7 +493,7 @@ function setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Mod
             # corresponding steady state unknown
             vsym = Symbol("#", type, "#", val, "#")
             push!(vsyms, vsym)
-            push!(vinds, type == :level ? 2vind -1 : 2vind)
+            push!(vinds, type == :level ? 2vind - 1 : 2vind)
             if need_transform(allvars[vind])
                 func = inverse_transformation(allvars[vind])
                 return :($func($vsym))
@@ -544,10 +550,10 @@ function setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Mod
         # variables of the same name
         param_assigments = Expr(:block)
         for p in unique(val_params)
-            push!(param_assigments.args, :( local $(p) = $(mparams).$(p) ))
+            push!(param_assigments.args, :(local $(p) = $(mparams).$(p)))
         end
         residual = Expr(:block, source[1], :($(lhs) - $(rhs)))
-        funcs_expr = makefuncs(residual, vsyms, param_assigments; mod=modelmodule)
+        funcs_expr = makefuncs(residual, vsyms, param_assigments; mod = modelmodule)
         modelmodule.eval(funcs_expr)
     end
     # We have all the ingredients to create the instance of SteadyStateEquation
@@ -565,7 +571,7 @@ function setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Mod
     if nargs == 1
         # The equation involves only one variable. See if there's already an equation
         # with just that variable and, if so, remove it.
-        for (i, ssc) = enumerate(ss.constraints)
+        for (i, ssc) in enumerate(ss.constraints)
             if ssc.type == type && length(ssc.vinds) == 1 && ssc.vinds[1] == sscon.vinds[1]
                 ss.constraints[i] = sscon
                 return sscon
@@ -600,12 +606,12 @@ to help the steady state solver find the one you want to use.
 macro steadystate(model, type::Symbol, equation::Expr)
     thismodule = @__MODULE__
     modelmodule = __module__
-    return esc(:($(thismodule).setss!($(model), $(Meta.quot(equation)); type=$(QuoteNode(type)))))  # , modelmodule=$(modelmodule))))
+    return esc(:($(thismodule).setss!($(model), $(Meta.quot(equation)); type = $(QuoteNode(type)))))  # , modelmodule=$(modelmodule))))
 end
 
 macro steadystate(model, equation::Expr)
     thismodule = @__MODULE__
-    return esc(:($(thismodule).setss!($(model), $(Meta.quot(equation)); type=:level))) # , modelmodule=$(modelmodule))))
+    return esc(:($(thismodule).setss!($(model), $(Meta.quot(equation)); type = :level))) # , modelmodule=$(modelmodule))))
 end
 
 """
@@ -629,7 +635,7 @@ function initssdata!(model::AbstractModel)
     for eqn in alleqns(model)
         push!(ss.equations, make_sseqn(model, eqn, false))
     end
-    if ! model.flags.ssZeroSlope
+    if !model.flags.ssZeroSlope
         for eqn in alleqns(model)
             push!(ss.equations, make_sseqn(model, eqn, true))
         end
