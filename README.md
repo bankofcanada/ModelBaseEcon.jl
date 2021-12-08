@@ -1,4 +1,4 @@
-[![Build Status](https://travis-ci.org/bankofcanada/ModelBaseEcon.jl.svg?branch=master)](https://travis-ci.org/bankofcanada/ModelBaseEcon.jl)
+[![build](https://github.com/bankofcanada/ModelBaseEcon.jl/actions/workflows/main.yml/badge.svg?branch=master)](https://github.com/bankofcanada/ModelBaseEcon.jl/actions/workflows/main.yml)
 [![codecov](https://codecov.io/gh/bankofcanada/ModelBaseEcon.jl/branch/master/graph/badge.svg?token=YICWA48ZRV)](https://codecov.io/gh/bankofcanada/ModelBaseEcon.jl)
 
 # ModelBaseEcon
