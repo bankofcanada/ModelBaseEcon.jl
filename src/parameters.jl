@@ -10,7 +10,7 @@ using Lazy: @forward
 # export Parameters, ParamAlias, ParamLink, peval, @alias, @link
 export Parameters, ModelParam, peval, @alias, @link
 
-abstract type ParamAbstract end
+abstract type AbstractParam end
 
 
 """
@@ -39,10 +39,26 @@ parameter, use the [`@alias`](@ref) macro. To create a link parameter use the
 See also: [`ModelParam`](@ref), [`peval`](@ref), [`@alias`](@ref),
 [`@link`](@ref), [`update_links!`](@ref).
 """
-struct Parameters <: AbstractDict{Symbol,ParamAbstract}
+struct Parameters{P<:AbstractParam} <: AbstractDict{Symbol,P}
     mod::Ref{Module}
-    contents::Dict{Symbol,ParamAbstract}
+    contents::Dict{Symbol,P}
 end
+
+"""
+    mutable struct ModelParam
+
+Contains a model parameter. For a simple parameter it simply stores its value.
+For a link or an alias, it stores the link information and also caches the
+current value for speed.
+"""
+mutable struct ModelParam <: AbstractParam
+    depends::Set{Symbol}  # stores the names of parameter that depend on this one
+    link::Union{Nothing,Symbol,Expr}
+    value
+end
+ModelParam() = ModelParam(Set{Symbol}(), nothing, nothing)
+ModelParam(value) = ModelParam(Set{Symbol}(), nothing, value)
+ModelParam(value::Union{Symbol,Expr}) = ModelParam(Set{Symbol}(), value, nothing)
 
 """
     Parameters([mod::Module])
@@ -53,7 +69,7 @@ any link parameters that depend on custom functions or global
 variables/constants. In this case, the `mod` argument should be the module in
 which these definitions exist.
 """
-Parameters(mod::Module=@__MODULE__) = Parameters(Ref(mod), Dict{Symbol,ParamAbstract}())
+Parameters(mod::Module=@__MODULE__) = Parameters(Ref(mod), Dict{Symbol,ModelParam}())
 
 """
     params = @parameters
@@ -77,22 +93,6 @@ Base.deepcopy_internal(p::Parameters, stackdict::IdDict) = Parameters(Ref(p.mod[
 @forward Parameters.contents Base.getindex
 # dict access
 @forward Parameters.contents Base.get, Base.get!
-
-"""
-    mutable struct ModelParam
-
-Contains a model parameter. For a simple parameter it simply stores its value.
-For a link or an alias, it stores the link information and also caches the
-current value for speed.
-"""
-mutable struct ModelParam <: ParamAbstract
-    depends::Set{Symbol}  # stores the names of parameter that depend on this one
-    link::Union{Nothing,Symbol,Expr}
-    value
-end
-ModelParam() = ModelParam(Set{Symbol}(), nothing, nothing)
-ModelParam(value) = ModelParam(Set{Symbol}(), nothing, value)
-ModelParam(value::Union{Symbol,Expr}) = ModelParam(Set{Symbol}(), value, nothing)
 
 """
     @alias name
@@ -193,7 +193,7 @@ function _addlink(params, val, key)
     if !isa(val, ModelParam) || val.link === nothing
         return
     end
-    # we have add `key` to the `.depends` of all parameters we depend on
+    # we have to add `key` to the `.depends` of all parameters we depend on
     MacroTools.postwalk(val.link) do e
         if e isa Symbol
             ep = get(params.contents, e, nothing)
@@ -287,9 +287,9 @@ export update_links!
 Recompute the current values of all parameters.
 
 Typically when a new value of a parameter is assigned, all parameter links and
-aliases that depend on it are updated recursively. If a parameter mutable, e.g.
+aliases that depend on it are updated recursively. If a parameter is mutable, e.g.
 a Vector or another collection, its value can be updated in place without
-re-assigning it, thus the automatic updated does not happen. In this case, it is
+re-assigning it, thus the automatic update does not happen. In this case, it is
 necessary to call `update_links!`.
 """
 update_links!(m::AbstractModel) = update_links!(parameters(m))
@@ -338,3 +338,74 @@ function Base.getproperty(params::Parameters, key::Symbol)
         return peval(params, par)
     end
 end
+
+
+"""
+    assign_parameters!(model, collection; [options])
+    assign_parameters!(model; [options], param=value, ...)
+
+Assign values to model parameters. New parameters can be given as key-value pairs
+in the function call, or in a collection, such as a `Dict` or a `NamedTuple`.
+Individual parameters can be assigned directly to the `model` using
+dot-notation. This function should be more convenient when all parameters values
+are loaded from a file and available in a dictionary or some other key-value
+collection.
+
+There are two options that control the behaviour.
+  * `preserve_links=true` - if set to `true` new values for link-parameters are
+    ignored and the link is updated automatically from the new values of
+    parameters it depends on. If set to `false` any link parameters are
+    overwritten and become non-link parameters set to the given new values.
+  * `check=true` - if a parameter with the given name does not exist we ignore
+    it. When `check` is set to `true` we issue a warning, when set to `false` we
+    ignore it silently.
+
+Example
+```
+julia> @using_example E1
+julia> assign_parameters(E1.model; α=0.3, β=0.7)
+```
+
+"""
+@inline assign_parameters!(mp::Union{AbstractModel, Parameters};  preserve_links=true, check=true, args...) =
+            assign_parameters!(mp, args; preserve_links, check)
+
+@inline assign_parameters!(model::AbstractModel, args; kwargs...) =
+    (assign_parameters!(model.parameters, args; kwargs...); model)
+    
+function assign_parameters!(params::Parameters, args; 
+            preserve_links=true, 
+            check=true)
+    for (skey, value) in args
+        key = Symbol(skey)
+        p = get(params.contents, key, nothing)
+        # if not a parameter, do nothing
+        if p === nothing 
+            check && @warn "Unknown parameter: $key"
+            continue
+        end
+        # if a link and preserve_links is false, do nothing
+        preserve_links && p.link !== nothing && continue
+        # assign new value. Note that if the given value is a parameter, it might contain new link.
+        _rmlink(params, p, key)
+        _addlink(params, value, key)
+        p.link = _link(value)
+        p.value = _value(value)
+        _update_values(params, p, key)
+    end
+    return params
+end
+export assign_parameters!
+
+@inline export_parameters(model::AbstractModel; kwargs...) = export_parameters!(Dict{Symbol, Any}(), model.parameters; kwargs...)
+@inline export_parameters(params::Parameters; kwargs...) = export_parameters!(Dict{Symbol, Any}(), params; kwargs...)
+@inline export_parameters!(container, model::AbstractModel; kwargs...) = export_parameters!(container, model.parameters; kwargs...)
+function export_parameters!(container, params::Parameters; include_links=true)
+    for (key, value) in params
+        if include_links || value.link === nothing
+            push!(container, key => peval(params, value))
+        end
+    end
+    return container
+end
+export export_parameters, export_parameters!
