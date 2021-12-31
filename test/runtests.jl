@@ -368,7 +368,7 @@ end
     @variables mod x
     @shocks mod sx
     @equations mod begin
-    x[t - 1] = sx[t + 1]
+        x[t - 1] = sx[t + 1]
         @lag(x[t]) = @lag(sx[t + 2])
         # 
         x[t - 1] + a = sx[t + 1] + 3
