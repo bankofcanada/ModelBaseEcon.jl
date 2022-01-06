@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020, Bank of Canada
+# Copyright (c) 2020-2022, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -80,7 +80,7 @@ end
 
 # use [] to get a time series of values.
 # the ref= value is the t at which it equals its level
-function Base.getindex(v::SteadyStateVariable, t; ref = one(t))
+function Base.getindex(v::SteadyStateVariable, t; ref = first(t))
     if eltype(t) != eltype(ref)
         throw(ArgumentError("Must provide reference time of the same type as the time index"))
     end
