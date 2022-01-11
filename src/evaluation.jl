@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020, Bank of Canada
+# Copyright (c) 2020-2022, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -20,10 +20,10 @@ with the dual-number arythmetic required by ForwardDiff.
 
 # Implementation (for developers)
 """
-function precompilefuncs(resid, RJ, ::Val{N}) where N
+function precompilefuncs(resid, RJ, ::Val{N}, tag) where N
     ccall(:jl_generating_output, Cint, ()) == 1 || return nothing
 
-    tag = ForwardDiff.Tag{resid,Float64}
+    # tag = MyTag # ForwardDiff.Tag{resid,Float64}
     dual = ForwardDiff.Dual{tag,Float64,N}
     duals = Array{dual,1}
     cfg = ForwardDiff.GradientConfig{tag,Float64,N,duals}
@@ -121,8 +121,8 @@ function makefuncs(expr, vsyms, params_expr = nothing; mod::Module)
             $(params_expr)
             $expr
         end
-        const $fn2 = EquationGradient($fn1, Val{$nargs}())
-        $(@__MODULE__).precompilefuncs($fn1, $fn2, Val{$nargs}())
+        const $fn2 = EquationGradient($fn1, Val($nargs))
+        $(@__MODULE__).precompilefuncs($fn1, $fn2, Val($nargs), MyTag)
         ($fn1, $fn2)
     end
 end

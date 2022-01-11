@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020, Bank of Canada
+# Copyright (c) 2020-2022, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -10,9 +10,9 @@ abstract type AbstractEquation end
 # equations must have these fields: expr, vinds, vsyms, eval_resid, eval_RJ
 for fn in (:expr, :vinds, :vsyms, :eval_resid, :eval_RJ)
     local qnfn = QuoteNode(fn)
-    quote
+    eval(quote
         @inline $fn(eqn::AbstractEquation) = getfield(eqn, $qnfn)
-    end |> eval
+    end)
 end
 
 const default_eqn_type = :any

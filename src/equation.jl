@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020, Bank of Canada
+# Copyright (c) 2020-2022, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -38,7 +38,7 @@ Data structure representing a single equation in our state space model.
 ### Implementation (for developers)
 During the phase of definition of the Model, this type simply stores the expression
 entered by the user. During @initialize(), the true data structure is constructed.
-We need this, because the construction of the equation requaires information from
+We need this, because the construction of the equation requires information from
 the Model object, which may not be available at the time the equation expression
 is first read.
 """
