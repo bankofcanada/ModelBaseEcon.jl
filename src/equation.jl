@@ -26,6 +26,29 @@ const ExtExpr = Union{Expr,Symbol,Number}
 "Placeholder evaluation function to use in Equation costruction while it is being created"
 @inline eqnnotready(x...) = throw(EqnNotReadyError())
 
+"""
+    mutable struct EqnFlags ... end
+
+Holds information about the equation. Flags can be specified in the model
+definition by annotating the equation with `@<flag>` (insert the flag you want
+to raise in place of `<flag>`).
+
+Supported flags:
+ * `@log lhs = rhs` instructs the model parser to make the residual
+   `loc(lhs / rhs)`. Normally the residual is computed as `lhs - rhs`.
+ * `@lin lhs = rhs` marks the equation for selective linearization.
+
+"""
+mutable struct EqnFlags
+    lin::Bool
+    log::Bool
+    EqnFlags() = new(false, false)
+    EqnFlags(lin, log) = new(lin, log)
+end
+
+Base.hash(f::EqnFlags, h::UInt) = hash(((f.:($flag) for flag in fieldnames(EqnFlags))...,), h)
+Base.:(==)(f1::EqnFlags, f2::EqnFlags) = all(f1.:($flag) == f2.:($flag) for flag in fieldnames(EqnFlags))
+
 export Equation
 """
     struct Equation <: AbstractEquation
@@ -44,7 +67,7 @@ is first read.
 """
 struct Equation <: AbstractEquation
     doc::String
-    type::Symbol
+    flags::EqnFlags
     "The original expression entered by the user"
     expr::ExtExpr      # original expression
     """
@@ -74,14 +97,14 @@ end
 
 # 
 # dummy constructor - just stores the expresstion without any processing
-Equation(expr::ExtExpr) = Equation("", default_eqn_type, expr, Expr(:block), [], [], 0, 0, eqnnotready, eqnnotready)
+Equation(expr::ExtExpr) = Equation("", EqnFlags(), expr, Expr(:block), [], [], 0, 0, eqnnotready, eqnnotready)
 
 # constructor that computes maxlag and maxlead on the fly
-function Equation(doc, type, expr, resid, vinds, vsyms, eval_resid, eval_RJ) 
+function Equation(doc, flags, expr, resid, vinds, vsyms, eval_resid, eval_RJ)
     # compute `maxlag` and `maxlead`
     maxlag, maxlead = (isempty(vinds) ? (0, 0) : extrema(v[1] for v in vinds) .* (-1, 1))
     # call the default constructor
-    return Equation(doc, type, expr, resid, vinds, vsyms, maxlag, maxlead, eval_resid, eval_RJ)
+    return Equation(doc, flags, expr, resid, vinds, vsyms, maxlag, maxlead, eval_resid, eval_RJ)
 end
 
 # Allows us to pass a Number of a Symbol or a raw Expr to calls where Equation is expected.

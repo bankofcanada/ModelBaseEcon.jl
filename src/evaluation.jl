@@ -278,7 +278,7 @@ end
 function eval_RJ(point::AbstractMatrix{Float64}, med::ModelEvaluationData)
     # med === NoMED && throw(ModelNotInitError())
     neqns = length(med.alleqns)
-    res = med.R
+    res = similar(med.R)
     jac = med.J
     for (i, eqn, inds, ri) in zip(1:neqns, med.alleqns, med.allinds, med.rowinds)
         res[i], jac.nzval[ri] = eqn.eval_RJ(point[inds])

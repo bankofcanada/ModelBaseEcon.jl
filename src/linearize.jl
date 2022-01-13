@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020, Bank of Canada
+# Copyright (c) 2020-2022, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -12,8 +12,8 @@ Transform model into its linear approximation about its steady state.
 
 ### Keyword arguments
   * `sstate` - linearize about the provided steady state solution
-  * `deviation`::Bool - whether or not the linearized model will tread data passed 
-to is as deviation from the steady state
+  * `deviation`::Bool - whether or not the linearized model will treat data
+    passed to it as deviation from the steady state
 
 See also: [`linearized`](@ref) and [`with_linearized`](@ref)
 """
@@ -24,7 +24,7 @@ export linearize!
 """
     LinearizedModelEvaluationData <: AbstractModelEvaluationData
 
-Model evaluation data for the linearized model case.
+Model evaluation data for the linearized model.
 """
 struct LinearizedModelEvaluationData <: AbstractModelEvaluationData
     deviation::Bool
@@ -176,11 +176,16 @@ end
 function with_linearized(F::Function, model::Model; kwargs...)
     # store the evaluation data
     ed = model.evaldata
-    # linearize 
-    linearize!(model; kwargs...)
-    # do what we have to do
-    ret = F(model)
-    # restore the original model evaluation data
+    ret = try
+        # linearize 
+        linearize!(model; kwargs...)
+        # do what we have to do
+        F(model)
+    catch
+        # restore the original model evaluation data
+        model.evaldata = ed
+        rethrow()
+    end
     model.evaldata = ed
     return ret
 end
