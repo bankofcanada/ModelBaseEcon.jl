@@ -882,6 +882,8 @@ function initialize!(model::Model, modelmodule::Module)
     for (i, v) in enumerate(model.allvars)
         model.:($(v.name)) = update(v, index = i)
     end
+    # Note: we cannot set any other evaluation method yet - they require steady
+    # state solution and we probably don't have that yet.
     model.evaldata = ModelEvaluationData(model)
     initssdata!(model)
     update_links!(model.parameters)
@@ -895,8 +897,8 @@ Prepare a model instance for analysis. Call this macro after all
 variable names, shock names and equations have been defined.
 """
 macro initialize(model::Symbol)
-    # thismodule = @__MODULE__
-    # modelmodule = __module__
+    # @__MODULE__ is this module (ModelBaseEcon)
+    # __module__ is the module where this macro is called (the module where the model exists)
     return quote
         $(@__MODULE__).initialize!($(model), $(__module__))
     end |> esc

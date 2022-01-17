@@ -94,8 +94,8 @@ function linearize!(model::Model;
     deviation::Bool = false)
 
     if !isempty(model.auxvars) || !isempty(model.auxeqns)
-        throw(LinearizationError("there are auxiliary variables.", 
-                    "Try setting `model.options.substitutions=false` in your model file."))
+        throw(LinearizationError("there are auxiliary variables.",
+            "Try setting `model.options.substitutions=false` in your model file."))
     end
     if !all(sstate.mask)
         throw(LinearizationError("the steady state is unknown.", "Solve for the steady state first."))
@@ -107,7 +107,7 @@ function linearize!(model::Model;
     # We need a ModelEvaluationData in order to proceed
     if isa(model.evaldata, ModelEvaluationData)
         med = model.evaldata
-    elseif isa(model.evaldata, LinearizedModelEvaluationData)
+    elseif hasproperty(model.evaldata, :med)
         # Model has already been linearized
         # We're not done though, because it may have been liearized about another point
         # So we simply retrieve the old ModelEvaluationData and keep going with it.
@@ -120,7 +120,7 @@ function linearize!(model::Model;
     ntimes = 1 + model.maxlag + model.maxlead
     nvars = length(model.variables)
     nshks = length(model.shocks)
-    @timer sspt = [repeat(sstate.values[1:2:(2 * nvars)], inner = ntimes); zeros(ntimes * nshks)]
+    @timer sspt = [repeat(sstate.values[1:2:(2nvars)], inner = ntimes); zeros(ntimes * nshks)]
     @timer sspt = reshape(sspt, ntimes, nvars + nshks)
 
     @timer eval_RJ(sspt, med)  # updates med.R and med.J in place

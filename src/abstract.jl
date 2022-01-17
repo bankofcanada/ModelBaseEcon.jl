@@ -20,8 +20,8 @@ end
 @inline flag(eqn::AbstractEquation, f::Symbol) = (flgs = flags(eqn); hasfield(typeof(flgs), f) ? getfield(flgs, f) : false)
 @inline doc(eqn::AbstractEquation) = :doc in fieldnames(typeof(eqn)) ? getfield(eqn, :doc) : ""
 
-@inline eval_resid(eqn::AbstractEquation, x) = eval_resid(eqn)(x)
-@inline eval_RJ(eqn::AbstractEquation, x) = eval_RJ(eqn)(x)
+# @inline eval_resid(eqn::AbstractEquation, x) = eval_resid(eqn)(x)
+# @inline eval_RJ(eqn::AbstractEquation, x) = eval_RJ(eqn)(x)
 
 #
 function Base.show(io::IO, eqn::AbstractEquation)
