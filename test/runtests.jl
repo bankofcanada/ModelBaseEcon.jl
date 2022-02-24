@@ -485,7 +485,7 @@ function test_eval_RJ(m::Model, known_R, known_J)
     nrows = 1 + m.maxlag + m.maxlead
     ncols = length(m.allvars)
     R, J = eval_RJ(zeros(nrows, ncols), m)
-    @test R ≈ known_R
+    @test R ≈ known_R atol = 1e-12
     @test J ≈ known_J
 end
 
