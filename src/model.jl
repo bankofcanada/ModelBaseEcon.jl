@@ -1,19 +1,19 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020, Bank of Canada
+# Copyright (c) 2020-2022, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
 export Model
 
 const defaultoptions = Options(
-    shift=10,
-    substitutions=false, 
-    tol=1e-10, 
-    maxiter=20,
-    verbose=false,
-    warn=Options(no_t=true)
+    shift = 10,
+    substitutions = false,
+    tol = 1e-10,
+    maxiter = 20,
+    verbose = false,
+    warn = Options(no_t = true)
 )
 
 mutable struct ModelFlags
@@ -70,7 +70,7 @@ mutable struct Model <: AbstractModel
     evaldata::AbstractModelEvaluationData
     # 
     # constructor of an empty model
-    Model(opts::Options) = new(merge(defaultoptions, opts), 
+    Model(opts::Options) = new(merge(defaultoptions, opts),
         ModelFlags(), SteadyStateData(), [], [], [], Parameters(), Dict(), 0, 0, [], [], NoMED)
     Model() = new(deepcopy(defaultoptions),
         ModelFlags(), SteadyStateData(), [], [], [], Parameters(), Dict(), 0, 0, [], [], NoMED)
@@ -92,15 +92,15 @@ end
 
 OptionsMod.getoption(model::Model; kwargs...) = getoption(model.options; kwargs...)
 OptionsMod.getoption(model::Model, name::Symbol, default) = getoption(model.options, name, default)
-OptionsMod.getoption(model::Model, name::AS, default) where AS <: AbstractString = getoption(model.options, name, default)
+OptionsMod.getoption(model::Model, name::AS, default) where {AS<:AbstractString} = getoption(model.options, name, default)
 
 OptionsMod.getoption!(model::Model; kwargs...) = getoption!(model.options; kwargs...)
 OptionsMod.getoption!(model::Model, name::Symbol, default) = getoption!(model.options, name, default)
-OptionsMod.getoption!(model::Model, name::AS, default) where AS <: AbstractString = getoption!(model.options, name, default)
+OptionsMod.getoption!(model::Model, name::AS, default) where {AS<:AbstractString} = getoption!(model.options, name, default)
 
 OptionsMod.setoption!(model::Model; kwargs...) = setoption!(model.options; kwargs...)
 OptionsMod.setoption!(model::Model, name::Symbol, value) = setoption!(model.options, name, value)
-OptionsMod.setoption!(model::Model, name::AS, value) where AS <: AbstractString = setoption!(model.options, name, value)
+OptionsMod.setoption!(model::Model, name::AS, value) where {AS<:AbstractString} = setoption!(model.options, name, value)
 OptionsMod.setoption!(f::Function, model::Model) = (f(model.options); model.options)
 
 
@@ -146,12 +146,12 @@ function Base.getproperty(model::Model, name::Symbol)
     end
 end
 
-function Base.propertynames(model::Model, private::Bool=false)
-    return (fieldnames(Model)..., :nvars, :nshks, :nauxs, :allvars, :varshks, :alleqns, 
-    keys(getfield(model, :options))..., fieldnames(ModelFlags)...,
-    Symbol[getfield(model, :variables)...]...,
-    Symbol[getfield(model, :shocks)...]...,
-    keys(getfield(model, :parameters))...,)
+function Base.propertynames(model::Model, private::Bool = false)
+    return (fieldnames(Model)..., :nvars, :nshks, :nauxs, :allvars, :varshks, :alleqns,
+        keys(getfield(model, :options))..., fieldnames(ModelFlags)...,
+        Symbol[getfield(model, :variables)...]...,
+        Symbol[getfield(model, :shocks)...]...,
+        keys(getfield(model, :parameters))...,)
 end
 
 function Base.setproperty!(model::Model, name::Symbol, val::Any)
@@ -198,11 +198,11 @@ function fullprint(io::IO, model::Model)
     io = IOContext(io, :compact => true, :limit => false)
     nvar = length(model.variables)
     nshk = length(model.shocks)
-    nprm = length(model.parameters)  
-    neqn = length(model.equations)  
+    nprm = length(model.parameters)
+    neqn = length(model.equations)
     nvarshk = nvar + nshk
-    function print_things(io, things...; len=0, maxlen=40, last=false) 
-        s = sprint(print, things...; context=io, sizehint=0) 
+    function print_things(io, things...; len = 0, maxlen = 40, last = false)
+        s = sprint(print, things...; context = io, sizehint = 0)
         print(io, s)
         len += length(s) + 2
         last && (println(io), return 0)
@@ -210,13 +210,13 @@ function fullprint(io::IO, model::Model)
     end
     let len = 15
         print(io, length(model.variables), " variable(s): ")
-        if nvar == 0 
+        if nvar == 0
             println(io)
         else
-            for v in model.variables[1:end - 1]
-                len = print_things(io, v; len=len)
+            for v in model.variables[1:end-1]
+                len = print_things(io, v; len = len)
             end
-            print_things(io, model.variables[end]; last=true)
+            print_things(io, model.variables[end]; last = true)
         end
     end
     let len = 15
@@ -224,10 +224,10 @@ function fullprint(io::IO, model::Model)
         if nshk == 0
             println(io)
         else
-            for v in model.shocks[1:end - 1]
-                len = print_things(io, v; len=len)
+            for v in model.shocks[1:end-1]
+                len = print_things(io, v; len = len)
             end
-            print_things(io, model.shocks[end]; last=true)
+            print_things(io, model.shocks[end]; last = true)
         end
     end
     let len = 15
@@ -236,14 +236,18 @@ function fullprint(io::IO, model::Model)
             println(io)
         else
             params = collect(model.parameters)
-            for (k, v) in params[1:end - 1]
-                len = print_things(io, k, " = ", v; len=len)
+            for (k, v) in params[1:end-1]
+                len = print_things(io, k, " = ", v; len = len)
             end
             k, v = params[end]
-            len = print_things(io, k, " = ", v; len=len, last=true)
+            len = print_things(io, k, " = ", v; len = len, last = true)
         end
     end
-    print(io, length(model.equations), " equations(s) with ", length(model.auxeqns), " auxiliary equations: \n")
+    print(io, length(model.equations), " equations(s)")
+    if length(model.auxeqns) > 0
+        print(io, " with ", length(model.auxeqns), " auxiliary equations")
+    end
+    print(io, ": \n")
     function print_aux_eq(bi)
         v = model.auxeqns[bi]
         for (_, ai) in filter(tv -> tv[2] > nvarshk, v.vinds)
@@ -263,8 +267,8 @@ end
 function Base.show(io::IO, model::Model)
     nvar = length(model.variables)
     nshk = length(model.shocks)
-    nprm = length(model.parameters)  
-    neqn = length(model.equations)  
+    nprm = length(model.parameters)
+    neqn = length(model.equations)
     nvarshk = nvar + nshk
     if nvar == nshk == nprm == neqn == 0
         print(io, "Empty model")
@@ -273,8 +277,12 @@ function Base.show(io::IO, model::Model)
         print(io, nvar, " variable(s), ")
         print(io, nshk, " shock(s), ")
         print(io, nprm, " parameter(s), ")
-        print(io, neqn, " equations(s) with ", length(model.auxeqns), " auxiliary equations.")
-    else  
+        print(io, neqn, " equations(s)")
+        if length(model.auxeqns) > 0
+            print(io, " with ", length(model.auxeqns), " auxiliary equations")
+        end
+        print(io, ". \n")
+    else
         # full print
         fullprint(io, model)
         println(io, "Maximum lag: ", model.maxlag)
@@ -313,42 +321,42 @@ end
 """
 macro variables(model, block::Expr)
     vars = filter(a -> !isa(a, LineNumberNode), block.args)
-    return esc(:(unique!(append!($(model).variables, $vars)); nothing ))
+    return esc(:(unique!(append!($(model).variables, $vars)); nothing))
 end
 macro variables(model, vars::Symbol...)
-    return esc(:( unique!(append!($(model).variables, $vars)); nothing ))
+    return esc(:(unique!(append!($(model).variables, $vars)); nothing))
 end
 
 macro logvariables(model, block::Expr)
     vars = filter(a -> !isa(a, LineNumberNode), block.args)
-    return esc(:(unique!(append!($(model).variables, to_log.($vars))); nothing ))
+    return esc(:(unique!(append!($(model).variables, to_log.($vars))); nothing))
 end
 macro logvariables(model, vars::Symbol...)
-    return esc(:( unique!(append!($(model).variables, to_log.($vars))); nothing ))
+    return esc(:(unique!(append!($(model).variables, to_log.($vars))); nothing))
 end
 
 macro neglogvariables(model, block::Expr)
     vars = filter(a -> !isa(a, LineNumberNode), block.args)
-    return esc(:(unique!(append!($(model).variables, to_neglog.($vars))); nothing ))
+    return esc(:(unique!(append!($(model).variables, to_neglog.($vars))); nothing))
 end
 macro neglogvariables(model, vars::Symbol...)
-    return esc(:( unique!(append!($(model).variables, to_neglog.($vars))); nothing ))
+    return esc(:(unique!(append!($(model).variables, to_neglog.($vars))); nothing))
 end
 
 macro steadyvariables(model, block::Expr)
     vars = filter(a -> !isa(a, LineNumberNode), block.args)
-    return esc(:(unique!(append!($(model).variables, to_steady.($vars))); nothing ))
+    return esc(:(unique!(append!($(model).variables, to_steady.($vars))); nothing))
 end
 macro steadyvariables(model, vars::Symbol...)
-    return esc(:( unique!(append!($(model).variables, to_steady.($vars))); nothing ))
+    return esc(:(unique!(append!($(model).variables, to_steady.($vars))); nothing))
 end
 
 macro exogenous(model, block::Expr)
     vars = filter(a -> !isa(a, LineNumberNode), block.args)
-    return esc(:(unique!(append!($(model).variables, to_exog.($vars))); nothing ))
+    return esc(:(unique!(append!($(model).variables, to_exog.($vars))); nothing))
 end
 macro exogenous(model, vars::Symbol...)
-    return esc(:( unique!(append!($(model).variables, to_exog.($vars))); nothing ))
+    return esc(:(unique!(append!($(model).variables, to_exog.($vars))); nothing))
 end
 
 """
@@ -372,10 +380,10 @@ end
 """
 macro shocks(model, block::Expr)
     shks = filter(a -> !isa(a, LineNumberNode), block.args)
-    return esc(:( unique!(append!($(model).shocks, to_shock.($shks))); nothing ))
+    return esc(:(unique!(append!($(model).shocks, to_shock.($shks))); nothing))
 end
 macro shocks(model, shks::Symbol...)
-    return esc(:( unique!(append!($(model).shocks, to_shock.($shks))); nothing ))
+    return esc(:(unique!(append!($(model).shocks, to_shock.($shks))); nothing))
 end
 
 """
@@ -384,8 +392,8 @@ end
 Create a list of shocks that matches the list of variables.  Each shock name is
 created from a variable name by appending "_shk".
 """
-macro autoshocks(model, suf="_shk")
-    esc( quote 
+macro autoshocks(model, suf = "_shk")
+    esc(quote
         $(model).shocks = ModelVariable[
             to_shock(Symbol(v.name, $(QuoteNode(suf)))) for v in $(model).variables if !isexog(v) && !isshock(v)
         ]
@@ -444,7 +452,7 @@ macro autoexogenize(model, args::Expr...)
     end
     args = filter(a -> a isa Expr && a.head == :(=), [args...])
     autoexos = Dict{Symbol,Any}([ex.args for ex in args])
-    esc(:( merge!($(model).autoexogenize, $(autoexos)); nothing ))
+    esc(:(merge!($(model).autoexogenize, $(autoexos)); nothing))
 end
 
 
@@ -476,10 +484,9 @@ end
 ################################################################
 # The processing of equations during model initialization.
 
-const log_eqn_type = Symbol("@", :log)
-
-export islog
-@inline islog(eq::AbstractEquation) = eq.type === log_eqn_type
+export islog, islin
+@inline islog(eq::AbstractEquation) = flag(eq, :log)
+@inline islin(eq::AbstractEquation) = flag(eq, :lin)
 
 error_process(msg, expr) = begin
     throw(ArgumentError("$msg\n  During processing of\n  $(expr)"))
@@ -503,11 +510,11 @@ function process_equation end
 process_equation(model::Model, expr::String; kwargs...) = process_equation(model, Meta.parse(expr); kwargs...)
 # process_equation(model::Model, val::Number; kwargs...) = process_equation(model, Expr(:block, val); kwargs...)
 # process_equation(model::Model, val::Symbol; kwargs...) = process_equation(model, Expr(:block, val); kwargs...)
-function process_equation(model::Model, expr::Expr; 
-    modelmodule::Module=moduleof(model), 
-    line=LineNumberNode(0),
-    type=default_eqn_type,
-    doc="")
+function process_equation(model::Model, expr::Expr;
+    modelmodule::Module = moduleof(model),
+    line = LineNumberNode(0),
+    flags = EqnFlags(),
+    doc = "")
 
     # a list of all known time series 
     allvars = [model.variables; model.shocks; model.auxvars]
@@ -572,7 +579,7 @@ function process_equation(model::Model, expr::Expr;
             try
                 modelmodule.eval(sym)
             catch
-                error_process("Unknown symbol `$(sym)`.", expr)
+                error_process("Undefined `$(sym)`.", expr)
             end
         end
         return sym
@@ -586,25 +593,28 @@ function process_equation(model::Model, expr::Expr;
         end
         if ex.head == :macrocall
             push!(source, ex.args[2])
-            if length(ex.args) == 3 && MacroTools.isexpr(ex.args[3], :(=))
-                type = ex.args[1]
+            macroname = lstrip(string(ex.args[1]), '@')  # strip the leading '@'
+            # check if we have `@<flag> lhs=rhs` situation. Note: there may be multiple flags
+            if hasfield(typeof(flags), Symbol(macroname)) && length(ex.args) == 3
+                setfield!(flags, Symbol(macroname), true)
                 return process(ex.args[3])
             end
-            mfunc = Symbol("at_", string(ex.args[1])[2:end]) # replace leading @ with at_
-            if isdefined(modelmodule, mfunc)
-                mfunc = :( $modelmodule.$mfunc )
-            elseif isdefined(ModelBaseEcon, mfunc)
-                mfunc = :( ModelBaseEcon.$mfunc)
+            # check if we have a corresponding meta function
+            metafuncname = Symbol("at_", macroname) # replace @ with at_
+            if isdefined(modelmodule, metafuncname)
+                metafunc = :($modelmodule.$metafuncname)
+            elseif isdefined(ModelBaseEcon, metafuncname)
+                metafunc = :(ModelBaseEcon.$metafuncname)
             else
-                error_process("Unknown meta function $(ex.args[1]).", ex)
+                error_process("Undefined flag or meta function $(ex.args[1]).", ex)
             end
-            margs = map(filter(x -> !isa(x, LineNumberNode), ex.args[3:end])) do arg
+            margs = map(filter(!MacroTools.isline, ex.args[3:end])) do arg
                 arg = process(arg)
-                arg isa Expr ? Meta.quot(arg) : 
-                arg isa Symbol ? QuoteNode(arg) : 
-                arg 
+                arg isa Expr ? Meta.quot(arg) :
+                arg isa Symbol ? QuoteNode(arg) :
+                arg
             end
-            ex = modelmodule.eval(Expr(:call, mfunc, margs...))
+            return process(modelmodule.eval(Expr(:call, metafunc, margs...)))
         end
         if ex.head == :ref
             # expression is an indexing expression
@@ -617,7 +627,11 @@ function process_equation(model::Model, expr::Expr;
             vind = indexin([name], allvars)[1]  # the index of the variable
             if vind !== nothing
                 # indexing in a time series
-                tind = modelmodule.eval(:(let t = 0; $index end))  # the lag or lead value
+                tind = modelmodule.eval(:(
+                    let t = 0
+                        $index
+                    end
+                ))  # the lag or lead value
                 add_reference(name, tind, vind)
                 return normal_ref(name, tind)
             end
@@ -688,7 +702,7 @@ function process_equation(model::Model, expr::Expr;
                 end
             end
         elseif ex.head == :(=)
-            if type == log_eqn_type
+            if flags.log
                 return Expr(:call, :log, Expr(:call, :/, map(make_residual_expression, ex.args)...))
             else
                 return Expr(:call, :-, map(make_residual_expression, ex.args)...)
@@ -700,7 +714,6 @@ function process_equation(model::Model, expr::Expr;
     # call process() to gather information
     new_expr = process(expr)
     MacroTools.isexpr(new_expr, :(=)) || error_process("Expected equation.", expr)
-    type ∈ (log_eqn_type, default_eqn_type) || error_process("Unknown equation type $(type).", expr)
     # if source information missing, set from argument
     push!(source, line)
     # collect the indices and dummy symbols of the mentioned variables
@@ -716,12 +729,12 @@ function process_equation(model::Model, expr::Expr;
         # variables of the same name
         param_assigments = Expr(:block)
         for p in parameters
-            push!(param_assigments.args, :( local $(p) = $(mparams).$(p) ))
+            push!(param_assigments.args, :(local $(p) = $(mparams).$(p)))
         end
-        funcs_expr = makefuncs(residual, vsyms, param_assigments; mod=modelmodule)
+        funcs_expr = makefuncs(residual, vsyms, param_assigments; mod = modelmodule)
         modelmodule.eval(funcs_expr)
     end
-    return Equation(doc, type, expr, residual, vinds, vsyms, resid, RJ)
+    return Equation(doc, flags, expr, residual, vinds, vsyms, resid, RJ)
 end
 
 
@@ -731,14 +744,14 @@ export add_equation!
 """
     add_equation!(model::Model, expr::Expr; modelmodule::Module)
 
-Process the given expression in the context of the given module, create
-the Equation() instance for it and add it to the model instance. 
-"""
+Process the given expression in the context of the given module, create the
+Equation() instance for it and add it to the model instance.
 
-function add_equation!(model::Model, expr::Expr; modelmodule::Module=moduleof(model))
+"""
+function add_equation!(model::Model, expr::Expr; modelmodule::Module = moduleof(model))
     source = LineNumberNode[]
     auxeqns = Expr[]
-    type = default_eqn_type
+    flags = EqnFlags()
     doc = ""
 
     ##################################
@@ -767,18 +780,19 @@ function add_equation!(model::Model, expr::Expr; modelmodule::Module=moduleof(mo
                 doc = margs[1]
                 return process(margs[2])
             end
-            if mname == log_eqn_type && length(margs) == 1
-                type = mname
+            fname = Symbol(lstrip(string(mname), '@'))
+            if hasfield(typeof(flags), fname) && length(margs) == 1
+                setfield!(flags, fname, true)
                 return process(margs[1])
             end
-            return Expr(:macrocall, mname, nothing, process.(margs)...)
+            return Expr(:macrocall, mname, nothing, (process(a) for a in margs)...)
         end
         # recursively process all arguments
         ret = Expr(expr.head)
         for i in eachindex(expr.args)
             push!(ret.args, process(expr.args[i]))
         end
-        if getoption!(model; substitutions=true)
+        if getoption!(model; substitutions = true)
             local arg
             matched = @capture(ret, log(arg_))
             # is it log(arg) 
@@ -806,7 +820,7 @@ function add_equation!(model::Model, expr::Expr; modelmodule::Module=moduleof(mo
                         @goto skip_substitution
                     end
                 end
-                aux_expr = process_equation(model, Expr(:(=), arg, 0); modelmodule=modelmodule)
+                aux_expr = process_equation(model, Expr(:(=), arg, 0); modelmodule = modelmodule)
                 if length(aux_expr.vinds) == 0
                     # arg doesn't contain any variables, no need for substitution
                     @goto skip_substitution
@@ -827,12 +841,12 @@ function add_equation!(model::Model, expr::Expr; modelmodule::Module=moduleof(mo
     if isempty(source)
         push!(source, LineNumberNode(0))
     end
-    eqn = process_equation(model, new_expr; modelmodule=modelmodule, line=source[1], type=type, doc=doc)
+    eqn = process_equation(model, new_expr; modelmodule = modelmodule, line = source[1], flags = flags, doc = doc)
     push!(model.equations, eqn)
     model.maxlag = max(model.maxlag, eqn.maxlag)
     model.maxlead = max(model.maxlead, eqn.maxlead)
     for i ∈ eachindex(auxeqns)
-        eqn = process_equation(model, auxeqns[i]; modelmodule=modelmodule, line=source[1])
+        eqn = process_equation(model, auxeqns[i]; modelmodule = modelmodule, line = source[1])
         push!(model.auxeqns, eqn)
         model.maxlag = max(model.maxlag, eqn.maxlag)
         model.maxlead = max(model.maxlead, eqn.maxlead)
@@ -863,11 +877,13 @@ function initialize!(model::Model, modelmodule::Module)
     empty!(model.equations)
     empty!(model.auxeqns)
     for e in eqns
-        add_equation!(model, e; modelmodule=modelmodule)
+        add_equation!(model, e; modelmodule = modelmodule)
     end
     for (i, v) in enumerate(model.allvars)
-        model.:($(v.name)) = update(v, index=i)
+        model.:($(v.name)) = update(v, index = i)
     end
+    # Note: we cannot set any other evaluation method yet - they require steady
+    # state solution and we probably don't have that yet.
     model.evaldata = ModelEvaluationData(model)
     initssdata!(model)
     update_links!(model.parameters)
@@ -881,8 +897,8 @@ Prepare a model instance for analysis. Call this macro after all
 variable names, shock names and equations have been defined.
 """
 macro initialize(model::Symbol)
-    # thismodule = @__MODULE__
-    # modelmodule = __module__
+    # @__MODULE__ is this module (ModelBaseEcon)
+    # __module__ is the module where this macro is called (the module where the model exists)
     return quote
         $(@__MODULE__).initialize!($(model), $(__module__))
     end |> esc
@@ -920,8 +936,8 @@ If there are no auxiliary variables/equations in the model, return *a copy* of `
     The current implementation is specialized only to log substitutions.
     TODO: implement a general approach that would work for any substitution.
 """
-function update_auxvars(data::AbstractArray{Float64,2}, model::Model; 
-                tol::Float64=model.options.tol, default::Float64=0.0
+function update_auxvars(data::AbstractArray{Float64,2}, model::Model;
+    tol::Float64 = model.options.tol, default::Float64 = 0.0
 )
     nauxs = length(model.auxvars)
     if nauxs == 0
@@ -936,15 +952,15 @@ function update_auxvars(data::AbstractArray{Float64,2}, model::Model;
     if nt < mintimes
         error("Insufficient time periods $nt. Expected $mintimes or more.")
     end
-    result = [data[:,1:nvarshk] zeros(nt, nauxs)]
+    result = [data[:, 1:nvarshk] zeros(nt, nauxs)]
     for (i, eqn) in enumerate(model.auxeqns)
-        for t in (eqn.maxlag + 1):(nt - eqn.maxlead)
+        for t in (eqn.maxlag+1):(nt-eqn.maxlead)
             idx = [CartesianIndex((t + ti, vi)) for (ti, vi) in eqn.vinds]
             res = eqn.eval_resid(result[idx])
             if res < 1.0
-                result[t, nvarshk + i] = log(1.0 - res)
+                result[t, nvarshk+i] = log(1.0 - res)
             else
-                result[t, nvarshk + i] = default
+                result[t, nvarshk+i] = default
             end
         end
     end

@@ -85,6 +85,7 @@ Base.:(==)(a::Symbol, b::ModelVariable) = a == b.name
 # The hash must be the same as the hash of the symbol, so that we can use
 # ModelVariable as index in a Dict with Symbol keys
 Base.hash(v::ModelVariable, h::UInt) = hash(v.name, h)
+Base.hash(v::ModelVariable) = hash(v.name)
 
 function Base.show(io::IO, v::ModelVariable)
     if get(io, :compact, false)

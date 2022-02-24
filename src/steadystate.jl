@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020, Bank of Canada
+# Copyright (c) 2020-2022, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -80,7 +80,7 @@ end
 
 # use [] to get a time series of values.
 # the ref= value is the t at which it equals its level
-function Base.getindex(v::SteadyStateVariable, t; ref = 1)
+function Base.getindex(v::SteadyStateVariable, t; ref = first(t))
     if eltype(t) != eltype(ref)
         throw(ArgumentError("Must provide reference time of the same type as the time index"))
     end
@@ -342,52 +342,53 @@ struct SSEqnData{M<:AbstractModel}
     SSEqnData(s, m::Ref{M}, jt, e) where {M<:AbstractModel} = new{M}(s, m, jt, e)
 end
 
+##############
+
+@inline __lag(jt, s) = ifelse(s.shift, jt.tlag + s.model[].shift, jt.tlag)
+@inline function __to_dyn_pt(pt, s)
+    # This function applies the transformation from steady
+    # state equation unknowns to dynamic equation unknowns
+    buffer = fill(0.0, length(s.JT))
+    for (i, jt) in enumerate(s.JT)
+        if length(jt.ssinds) == 1
+            pti = pt[jt.ssinds[1]]
+        else
+            pti = pt[jt.ssinds[1]] + __lag(jt, s) * pt[jt.ssinds[2]]
+        end
+        buffer[i] += pti
+    end
+    return buffer
+end
+@inline function __to_ssgrad(pt, jj, s)
+    # This function inverts the transformation. jj is the gradient of the
+    # dynamic equation residual with respect to the dynamic equation unknowns.
+    # Here we compute the Jacobian of the transformation and use it to compute
+    ss = zeros(size(pt))
+    for (i, jt) in enumerate(s.JT)
+        if length(jt.ssinds) == 1
+            pti = pt[jt.ssinds[1]]
+            ss[jt.ssinds[1]] += jj[i]
+        else
+            local lag_jt = __lag(jt, s)
+            pti = pt[jt.ssinds[1]] + lag_jt * pt[jt.ssinds[2]]
+            ss[jt.ssinds[1]] += jj[i]
+            ss[jt.ssinds[2]] += jj[i] * lag_jt
+        end
+    end
+    # NOTE regarding the above: The dynamic equation is F(x_t) = 0
+    # Here we're solving F(u(l+t*s)) = 0
+    # The derivative is dF/dl = F' * u' and dF/ds = F' * u' * t
+    # F' is in jj[i]
+    # u(x) = x, so u'(x) = 1
+    return ss
+end
 function sseqn_resid_RJ(s::SSEqnData)
-    buffer = Vector{Float64}(undef, length(s.JT))
-    @inline lag(jt) = ifelse(s.shift, jt.tlag + s.model[].shift, jt.tlag)
-    function to_dyn_pt(pt::AbstractVector{Float64})
-        # This function applies the transformation from steady
-        # state equation unknowns to dynamic equation unknowns
-        fill!(buffer, 0.0)
-        for (i, jt) in enumerate(s.JT)
-            if length(jt.ssinds) == 1
-                pti = pt[jt.ssinds[1]]
-            else
-                pti = pt[jt.ssinds[1]] + lag(jt) * pt[jt.ssinds[2]]
-            end
-            buffer[i] += pti
-        end
-        return buffer
-    end
-    function to_ssgrad(pt::AbstractVector{Float64}, jj::AbstractVector{Float64})
-        # This function inverts the transformation. jj is the gradient of the
-        # dynamic equation residual with respect to the dynamic equation unknowns.
-        # Here we compute the Jacobian of the transformation and use it to compute
-        ss = zeros(size(pt))
-        for (i, jt) in enumerate(s.JT)
-            if length(jt.ssinds) == 1
-                pti = pt[jt.ssinds[1]]
-                ss[jt.ssinds[1]] += jj[i]
-            else
-                local lag_jt = lag(jt)
-                pti = pt[jt.ssinds[1]] + lag_jt * pt[jt.ssinds[2]]
-                ss[jt.ssinds[1]] += jj[i]
-                ss[jt.ssinds[2]] += jj[i] * lag_jt
-            end
-        end
-        # NOTE regarding the above: The dynamic equation is F(x_t) = 0
-        # Here we're solving F(u(l+t*s)) = 0
-        # The derivative is dF/dl = F' * u' and dF/ds = F' * u' * t
-        # F' is in jj[i]
-        # u(x) = x, so u'(x) = 1
-        return ss
-    end
     function _resid(pt::AbstractVector{Float64})
-        return s.eqn.eval_resid(to_dyn_pt(pt))
+        return s.eqn.eval_resid(__to_dyn_pt(pt, s))
     end
     function _RJ(pt::AbstractVector{Float64})
-        R, jj = s.eqn.eval_RJ(to_dyn_pt(pt))
-        return R, to_ssgrad(pt, jj)
+        R, jj = s.eqn.eval_RJ(__to_dyn_pt(pt, s))
+        return R, __to_ssgrad(pt, jj, s)
     end
     return _resid, _RJ
 end
@@ -653,3 +654,41 @@ Return `true` if the steady state has been solved, or `false` otherwise.
 """
 @inline issssolved(ss::SteadyStateData) = all(ss.mask)
 
+
+export assign_sstate!
+@inline assign_sstate!(model::AbstractModel, args) = (assign_sstate!(model.sstate, args); model)
+@inline assign_sstate!(model::AbstractModel; kwargs...) = assign_sstate!(model, kwargs)
+@inline assign_sstate!(ss::SteadyStateData; kwargs...) = assign_sstate!(ss, kwargs)
+function assign_sstate!(ss::SteadyStateData, args)
+    for (key, value) in args
+        var = getproperty(ss, Symbol(key))
+        if value isa NamedTuple
+            var.level = value.level
+            var.slope = value.slope
+        elseif value isa Union{NTuple{2,<:Number},Vector{<:Number}}
+            var.level = value[1]
+            var.slope = value[2]
+        else
+            var.level = value
+            var.slope = 0
+        end
+        var.mask[:] .= true
+    end
+    return ss
+end
+
+@inline export_sstate!(container, model::AbstractModel) = export_sstate!(container, model.sstate; ssZeroSlope=model.ssZeroSlope)
+@inline export_sstate(m_or_s::Union{AbstractModel,SteadyStateData}; kwargs...) = export_sstate!(Dict{Symbol,Any}(), m_or_s; kwargs...)
+function export_sstate!(container, ss::SteadyStateData; ssZeroSlope::Bool=false)
+    if ssZeroSlope
+        for var in ss.vars
+            push!(container, var.name => var.level)
+        end
+    else
+        for var in ss.vars
+            push!(container, var.name => copy(var.data))
+        end
+    end
+    return container
+end
+export export_sstate, export_sstate!

@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020, Bank of Canada
+# Copyright (c) 2020-2022, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -12,8 +12,8 @@ Transform model into its linear approximation about its steady state.
 
 ### Keyword arguments
   * `sstate` - linearize about the provided steady state solution
-  * `deviation`::Bool - whether or not the linearized model will tread data passed 
-to is as deviation from the steady state
+  * `deviation`::Bool - whether or not the linearized model will treat data
+    passed to it as deviation from the steady state
 
 See also: [`linearized`](@ref) and [`with_linearized`](@ref)
 """
@@ -24,7 +24,7 @@ export linearize!
 """
     LinearizedModelEvaluationData <: AbstractModelEvaluationData
 
-Model evaluation data for the linearized model case.
+Model evaluation data for the linearized model.
 """
 struct LinearizedModelEvaluationData <: AbstractModelEvaluationData
     deviation::Bool
@@ -94,8 +94,8 @@ function linearize!(model::Model;
     deviation::Bool = false)
 
     if !isempty(model.auxvars) || !isempty(model.auxeqns)
-        throw(LinearizationError("there are auxiliary variables.", 
-                    "Try setting `model.options.substitutions=false` in your model file."))
+        throw(LinearizationError("there are auxiliary variables.",
+            "Try setting `model.options.substitutions=false` in your model file."))
     end
     if !all(sstate.mask)
         throw(LinearizationError("the steady state is unknown.", "Solve for the steady state first."))
@@ -107,7 +107,7 @@ function linearize!(model::Model;
     # We need a ModelEvaluationData in order to proceed
     if isa(model.evaldata, ModelEvaluationData)
         med = model.evaldata
-    elseif isa(model.evaldata, LinearizedModelEvaluationData)
+    elseif hasproperty(model.evaldata, :med)
         # Model has already been linearized
         # We're not done though, because it may have been liearized about another point
         # So we simply retrieve the old ModelEvaluationData and keep going with it.
@@ -120,7 +120,7 @@ function linearize!(model::Model;
     ntimes = 1 + model.maxlag + model.maxlead
     nvars = length(model.variables)
     nshks = length(model.shocks)
-    @timer sspt = [repeat(sstate.values[1:2:(2 * nvars)], inner = ntimes); zeros(ntimes * nshks)]
+    @timer sspt = [repeat(sstate.values[1:2:(2nvars)], inner = ntimes); zeros(ntimes * nshks)]
     @timer sspt = reshape(sspt, ntimes, nvars + nshks)
 
     @timer eval_RJ(sspt, med)  # updates med.R and med.J in place
@@ -176,11 +176,16 @@ end
 function with_linearized(F::Function, model::Model; kwargs...)
     # store the evaluation data
     ed = model.evaldata
-    # linearize 
-    linearize!(model; kwargs...)
-    # do what we have to do
-    ret = F(model)
-    # restore the original model evaluation data
+    ret = try
+        # linearize 
+        linearize!(model; kwargs...)
+        # do what we have to do
+        F(model)
+    catch
+        # restore the original model evaluation data
+        model.evaldata = ed
+        rethrow()
+    end
     model.evaldata = ed
     return ret
 end
