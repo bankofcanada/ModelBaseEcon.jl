@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020, Bank of Canada
+# Copyright (c) 2020-2022, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -376,12 +376,13 @@ julia> assign_parameters(E1.model; α=0.3, β=0.7)
 function assign_parameters!(params::Parameters, args; 
             preserve_links=true, 
             check=true)
+    not_model_parameters = Symbol[]
     for (skey, value) in args
         key = Symbol(skey)
         p = get(params.contents, key, nothing)
         # if not a parameter, do nothing
         if p === nothing 
-            check && @warn "Unknown parameter: $key"
+            check && push!(not_model_parameters, key)
             continue
         end
         # if a link and preserve_links is false, do nothing
@@ -392,6 +393,9 @@ function assign_parameters!(params::Parameters, args;
         p.link = _link(value)
         p.value = _value(value)
         _update_values(params, p, key)
+    end
+    if !isempty(not_model_parameters)
+        @warn "Model does not have parameters: " not_model_parameters
     end
     return params
 end

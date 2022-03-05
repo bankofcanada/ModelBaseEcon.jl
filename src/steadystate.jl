@@ -54,15 +54,14 @@ end
 #############################################################################
 # Access to .level and .slope
 
-Base.getproperty(v::SteadyStateVariable, name::Symbol) = begin
-    if name ∈ fieldnames(SteadyStateVariable)
+function Base.getproperty(v::SteadyStateVariable, name::Symbol)
+    if hasfield(typeof(v), name)
         return getfield(v, name)
     end
     data = getfield(v, :data)
     # we store transformed data, must invert to give back to user
     return name == :level ? inverse_transform(data[1], v) :
-           name == :slope ?
-           (islog(v) || isneglog(v) ? exp(data[2]) : data[2]) :
+           name == :slope ? (islog(v) || isneglog(v) ? exp(data[2]) : data[2]) :
            getfield(v, name)
 end
 
@@ -196,7 +195,7 @@ Return a list of all steady state equations.
 
 The list contains all equations derived from the dynamic system and all explicitly added steady state constraints.
 """
-@inline alleqns(ssd::SteadyStateData) = vcat(ssd.equations, ssd.constraints)
+@inline alleqns(ssd::SteadyStateData) = vcat(ssd.constraints, ssd.equations,)
 
 export neqns
 """
@@ -344,7 +343,7 @@ end
 
 ##############
 
-@inline __lag(jt, s) = ifelse(s.shift, jt.tlag + s.model[].shift, jt.tlag)
+@inline __lag(jt, s) = s.shift ? jt.tlag + s.model[].shift : jt.tlag
 @inline function __to_dyn_pt(pt, s)
     # This function applies the transformation from steady
     # state equation unknowns to dynamic equation unknowns
@@ -660,8 +659,14 @@ export assign_sstate!
 @inline assign_sstate!(model::AbstractModel; kwargs...) = assign_sstate!(model, kwargs)
 @inline assign_sstate!(ss::SteadyStateData; kwargs...) = assign_sstate!(ss, kwargs)
 function assign_sstate!(ss::SteadyStateData, args)
+    not_model_variables = Symbol[]
     for (key, value) in args
-        var = getproperty(ss, Symbol(key))
+        sk = Symbol(key)
+        if !hasproperty(ss, sk)
+            push!(not_model_variables, sk)
+            continue
+        end
+        var = getproperty(ss, sk)
         if value isa NamedTuple
             var.level = value.level
             var.slope = value.slope
@@ -674,12 +679,15 @@ function assign_sstate!(ss::SteadyStateData, args)
         end
         var.mask[:] .= true
     end
+    if !isempty(not_model_variables)
+        @warn "Model does not have the following variables: " not_model_variables
+    end
     return ss
 end
 
-@inline export_sstate!(container, model::AbstractModel) = export_sstate!(container, model.sstate; ssZeroSlope=model.ssZeroSlope)
-@inline export_sstate(m_or_s::Union{AbstractModel,SteadyStateData}; kwargs...) = export_sstate!(Dict{Symbol,Any}(), m_or_s; kwargs...)
-function export_sstate!(container, ss::SteadyStateData; ssZeroSlope::Bool=false)
+@inline export_sstate!(container, model::AbstractModel) = export_sstate!(container, model.sstate; ssZeroSlope = model.ssZeroSlope)
+@inline export_sstate(m_or_s::Union{AbstractModel,SteadyStateData}, C::Type = Dict{Symbol,Any}; kwargs...) = export_sstate!(C(), m_or_s; kwargs...)
+function export_sstate!(container, ss::SteadyStateData; ssZeroSlope::Bool = false)
     if ssZeroSlope
         for var in ss.vars
             push!(container, var.name => var.level)
