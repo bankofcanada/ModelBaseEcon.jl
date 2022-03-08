@@ -402,7 +402,7 @@ Internal function, do not call directly.
 """
 function make_sseqn(model::AbstractModel, eqn::Equation, shift::Bool)
     local allvars = model.allvars
-    @inline tvalue(t) = ifelse(shift, t + model.shift, t)
+    tvalue(t) = shift ? t + model.shift : t
     # ssind converts the dynamic index (t, v) into
     # the corresponding indexes of steady state unknowns.
     # Returned value is a list of length 0, 1, or 2.
@@ -431,7 +431,7 @@ function make_sseqn(model::AbstractModel, eqn::Equation, shift::Bool)
         val = (ssinds = indexin(ssind((ti, vi)), vinds), tlag = ti)
         push!(JT, val)
     end
-    type = ifelse(shift == 0, :tzero, :tshift)
+    type = shift == 0 ? :tzero : :tshift
     let sseqndata = SSEqnData(shift, Ref(model), JT, eqn)
         return SteadyStateEquation(type, vinds, vsyms, eqn.expr, sseqn_resid_RJ(sseqndata)...)
     end

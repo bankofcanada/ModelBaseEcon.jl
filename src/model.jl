@@ -608,13 +608,14 @@ function process_equation(model::Model, expr::Expr;
             else
                 error_process("Undefined flag or meta function $(ex.args[1]).", ex)
             end
-            margs = map(filter(!MacroTools.isline, ex.args[3:end])) do arg
+            metaargs = map(filter(!MacroTools.isline, ex.args[3:end])) do arg
                 arg = process(arg)
                 arg isa Expr ? Meta.quot(arg) :
                 arg isa Symbol ? QuoteNode(arg) :
                 arg
             end
-            return process(modelmodule.eval(Expr(:call, metafunc, margs...)))
+            metaout = modelmodule.eval(Expr(:call, metafunc, metaargs...))
+            return process(metaout)
         end
         if ex.head == :ref
             # expression is an indexing expression
@@ -715,6 +716,7 @@ function process_equation(model::Model, expr::Expr;
     new_expr = process(expr)
     MacroTools.isexpr(new_expr, :(=)) || error_process("Expected equation.", expr)
     # if source information missing, set from argument
+    filter!(l -> l !== nothing, source)
     push!(source, line)
     # collect the indices and dummy symbols of the mentioned variables
     # NOTE: Julia documentation assures us that keys() and values() iterate elements of the Dict in the same order!

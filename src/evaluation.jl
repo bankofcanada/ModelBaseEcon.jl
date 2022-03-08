@@ -13,7 +13,7 @@
     precompilefuncs(resid, RJ, ::Val{N}) where N
 
 Add code that precompiles the given `resid` and `RJ` functions together
-with the dual-number arythmetic required by ForwardDiff.
+with the dual-number arithmetic required by ForwardDiff.
 
 !!! warning
     Internal function. Do not call directly
@@ -78,12 +78,12 @@ function funcsyms(mod::Module)
     fn1, fn2 = mod.eval(quote
         let nms = names(@__MODULE__; all = true)
             num = $(@__MODULE__).funcsyms_counter()
-            local fn1 = Symbol("resid_$num")
-            local fn2 = Symbol("RJ_$num")
+            local fn1 = Symbol("resid_", num)
+            local fn2 = Symbol("RJ_", num)
             while fn1 ∈ nms || fn2 ∈ nms
                 num = $(@__MODULE__).funcsyms_counter()
-                fn1 = Symbol("resid_$num")
-                fn2 = Symbol("RJ_$num")
+                fn1 = Symbol("resid_", num)
+                fn2 = Symbol("RJ_", num)
             end
             fn1, fn2
         end
@@ -116,7 +116,7 @@ function makefuncs(expr, vsyms, params_expr = nothing; mod::Module)
     x = gensym("x")
     nargs = length(vsyms)
     return quote
-        function $fn1($x::AbstractVector{T}) where {T<:Real}
+        function $fn1($x::Vector{T}) where {T<:Real}
             ($(vsyms...),) = $x
             $(params_expr)
             $expr
@@ -147,7 +147,7 @@ function initfuncs(mod::Module)
             EquationGradient(fn1::Function, ::Val{N}) where {N} = EquationGradient(fn1,
                 $(@__MODULE__).DiffResults.DiffResult(zero(Float64), zeros(Float64, N)),
                 $(@__MODULE__).ForwardDiff.GradientConfig(fn1, zeros(Float64, N), $(@__MODULE__).ForwardDiff.Chunk{N}(), MyTag))
-            function (s::EquationGradient)(x::AbstractVector{Float64})
+            function (s::EquationGradient)(x::Vector{Float64})
                 $(@__MODULE__).ForwardDiff.gradient!(s.dr, s.fn1, x, s.cfg)
                 return s.dr.value, s.dr.derivs[1]
             end
