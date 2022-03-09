@@ -23,12 +23,12 @@ struct ModelVariable
     vr_type::Symbol   # one of :var, :shock, :exog
     tr_type::Symbol    # transformation, one of :none, :log, :neglog
     ss_type::Symbol    # behaviour as t → ∞, one of :const, :growth
-    index::Int
-    ModelVariable(d, n, vt, tt, st, ind) = begin
+    # index::Int
+    ModelVariable(d, n, vt, tt, st) = begin
         vt ∈ variable_types || error("Unknown variable type $vt. Expected one of $variable_types")
         tt ∈ transformation_types || error("Unknown transformation type $tt. Expected one of $transformation_types")
         st ∈ steadystate_types || error("Unknown steady state type $st. Expected one of $steadystate_types")
-        new(d, n, vt, tt, st, ind)
+        new(d, n, vt, tt, st)
     end
 end
 
@@ -52,13 +52,13 @@ end
 
 function ModelVariable(d, s, t)
     if t ∈ (:log, :neglog)
-        return ModelVariable(d, s, :var, t, :growth, -1)
+        return ModelVariable(d, s, :var, t, :growth, )
     elseif t === :steady
-        return ModelVariable(d, s, :var, :none, :const, -1)
+        return ModelVariable(d, s, :var, :none, :const, )
     elseif t == :lin
-        return ModelVariable(d, s, :var, :none, :growth, -1)
+        return ModelVariable(d, s, :var, :none, :growth, )
     elseif t ∈ (:shock, :exog)
-        return ModelVariable(d, s, t, :none, :growth, -1)
+        return ModelVariable(d, s, t, :none, :growth, )
     end
     # T = ifelse(t == :log, LogTransform, ifelse(t == :neglog, NegLogTransform, NoTransform))
 end
@@ -78,7 +78,7 @@ const ModelSymbol = ModelVariable
 # !!! must not update v.name.
 function update(v::ModelVariable; doc = v.doc,
     vr_type::Symbol = v.vr_type, tr_type::Symbol = v.tr_type, ss_type::Symbol = v.ss_type,
-    index = v.index, transformation = nothing)
+    transformation = nothing)
     if transformation !== nothing
         trsym = _trans2sym(transformation)
         if (tr_type == v.tr_type)
@@ -92,11 +92,11 @@ function update(v::ModelVariable; doc = v.doc,
             error("Given `transformation` is incompatible with the given `ss_type`.")
         end
     end
-    ModelVariable(string(doc), v.name, vr_type, tr_type, ss_type, Int(index))
+    ModelVariable(string(doc), v.name, vr_type, tr_type, ss_type, )
 end
 
-ModelVariable(s::Symbol) = ModelVariable("", s, :var, :none, :growth, -1)
-ModelVariable(d::String, s::Symbol) = ModelVariable(d, s, :var, :none, :growth, -1)
+ModelVariable(s::Symbol) = ModelVariable("", s, :var, :none, :growth,)
+ModelVariable(d::String, s::Symbol) = ModelVariable(d, s, :var, :none, :growth,)
 ModelVariable(s::Symbol, t::Symbol) = ModelVariable("", s, t)
 
 function ModelVariable(s::Expr)

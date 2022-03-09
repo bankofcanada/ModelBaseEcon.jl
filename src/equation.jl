@@ -35,7 +35,7 @@ to raise in place of `<flag>`).
 
 Supported flags:
  * `@log lhs = rhs` instructs the model parser to make the residual
-   `loc(lhs / rhs)`. Normally the residual is computed as `lhs - rhs`.
+   `log(lhs / rhs)`. Normally the residual is computed as `lhs - rhs`.
  * `@lin lhs = rhs` marks the equation for selective linearization.
 
 """
@@ -71,24 +71,17 @@ struct Equation <: AbstractEquation
     "The original expression entered by the user"
     expr::ExtExpr      # original expression
     """
-    The residual expression computed from [`expr`](@ref). 
-    It is used in the evaluation functions. 
-    Leads and lags of variables and shocks mentioned in [`expr`](@ref) 
-    are recorded in [`vinds`](@ref) and translated to symbols in [`vsyms`](@ref).
+    The residual expression computed from [`expr`](@ref). It is used in the
+    evaluation functions. Mentions of known identifiers are replaced by other
+    symbols and mapping of the symbol and the original is recorded
     """
-    resid::Expr     # residual expression (with variables renamed and parameters substituted)
-    """
-    Indexes of variables/shocks mentioned in [`expr`](@ref). Each index is in the form
-    `(t, v)`, where `t` is the lag (if negative), 0, or the lead (if positive) and `v` 
-    is the index of the variable/shock.
-    """
-    vinds::Vector{Tuple{Int64,Int64}}   # (t, v) indices of the relevant variables 
-    "Symbols used in `resid` replacing mentions of variables and shocks"
-    vsyms::Vector{Symbol}  # symbols representing the relevant variables in resid
-    "maximum lag mentioned in `expr`"
-    maxlag::Int64   # for this equation
-    "maximum lead mentioned in `expr`"
-    maxlead::Int64  # for this equation
+    resid::Expr     # residual expression
+    "references to time series variables"
+    tsrefs::OrderedDict{Tuple{ModelSymbol, Int}, Symbol}
+    "references to steady states of variables"
+    ssrefs::OrderedDict{ModelSymbol, Symbol}
+    "references to parameter values"
+    prefs::OrderedDict{Symbol, Symbol}
     "A callable (function) evaluating the residual. Argument is a vector of Float64 same lenght as `vinds`"
     eval_resid::Function  # function evaluating the residual
     "A callable (function) evaluating the (residual, gradient) pair. Argument is a vector of Float64 same lenght as `vinds`"
@@ -97,14 +90,18 @@ end
 
 # 
 # dummy constructor - just stores the expresstion without any processing
-Equation(expr::ExtExpr) = Equation("", EqnFlags(), expr, Expr(:block), [], [], 0, 0, eqnnotready, eqnnotready)
+Equation(expr::ExtExpr) = Equation("", EqnFlags(), expr, Expr(:block), OrderedDict(), OrderedDict(), OrderedDict(), eqnnotready, eqnnotready)
 
-# constructor that computes maxlag and maxlead on the fly
-function Equation(doc, flags, expr, resid, vinds, vsyms, eval_resid, eval_RJ)
-    # compute `maxlag` and `maxlead`
-    maxlag, maxlead = (isempty(vinds) ? (0, 0) : extrema(v[1] for v in vinds) .* (-1, 1))
-    # call the default constructor
-    return Equation(doc, flags, expr, resid, vinds, vsyms, maxlag, maxlead, eval_resid, eval_RJ)
+function Base.getproperty(eqn::Equation, sym::Symbol)
+    if sym == :maxlag
+        tsrefs = getfield(eqn, :tsrefs)
+        return isempty(tsrefs) ? 0 : -minimum(v -> v[2], keys(tsrefs))
+    elseif sym == :maxlead
+        tsrefs = getfield(eqn, :tsrefs)
+        return isempty(tsrefs) ? 0 : maximum(v -> v[2], keys(tsrefs))
+    else
+        return getfield(eqn, sym)
+    end
 end
 
 # Allows us to pass a Number of a Symbol or a raw Expr to calls where Equation is expected.

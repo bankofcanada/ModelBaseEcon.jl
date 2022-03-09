@@ -406,8 +406,9 @@ function make_sseqn(model::AbstractModel, eqn::Equation, shift::Bool)
     # ssind converts the dynamic index (t, v) into
     # the corresponding indexes of steady state unknowns.
     # Returned value is a list of length 0, 1, or 2.
-    function ssind((ti, vi),)::Array{Int64,1}
-        no_slope = isshock(allvars[vi]) || issteady(allvars[vi])
+    function ssind((var, ti),)::Array{Int64,1}
+        vi = _index_of_var(var, allvars)
+        no_slope = isshock(var) || issteady(var)
         # The level unknown has index 2*vi-1.
         # The slope unknown has index 2*vi. However:
         #  * :steady and :shock variables don't have slopes
@@ -421,14 +422,14 @@ function make_sseqn(model::AbstractModel, eqn::Equation, shift::Bool)
     end
     local ss = model.sstate
     # The steady state indexes.
-    vinds = unique(vcat(map(ssind, eqn.vinds)...))
+    vinds = unique(vcat(map(ssind, (collect∘keys)(eqn.tsrefs))...))
     # The corresponding steady state symbols
     vsyms = Symbol[ss_symbol(ss, vi) for vi in vinds]
     # In the next loop we build the matrix JT which transforms
     # from the steady state values to the dynamic point values.
     JT = []
-    for (i, (ti, vi)) in enumerate(eqn.vinds)
-        val = (ssinds = indexin(ssind((ti, vi)), vinds), tlag = ti)
+    for (i, (var, ti)) in enumerate(keys(eqn.tsrefs))
+        val = (ssinds = indexin(ssind((var, ti)), vinds), tlag = ti)
         push!(JT, val)
     end
     type = shift == 0 ? :tzero : :tshift

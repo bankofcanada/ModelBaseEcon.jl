@@ -65,9 +65,9 @@ in the given module.
 
 ### Implementation (for developers)
 We need two identifiers `resid_N` and `RJ_N` where "N" is some integer number.
-The first is going to be the name of the function that evaluates the equation and
-the second is going to be the name of the function that evaluates both the equation
-and its gradient.
+The first is going to be the name of the function that evaluates the equation
+and the second is going to be the name of the function that evaluates both the
+equation and its gradient.
 """
 function funcsyms end
 
@@ -189,17 +189,18 @@ abstract type AbstractModelEvaluationData end
 """
     eval_R!(res::AbstractArray{Float64,1}, point::AbstractArray{Float64, 2}, ::MED) where MED <: AbstractModelEvaluationData
 
-Evaluate the model residual at the given point using the given model evaluation structure.
-The residual is stored in the provided vector.
+Evaluate the model residual at the given point using the given model evaluation
+structure. The residual is stored in the provided vector.
 
 ### Implementation details (for developers)
-When creating a new type of model evaluation data, you must define a
-method of this function specialized to it.
+When creating a new type of model evaluation data, you must define a method of
+this function specialized to it.
 
 The `point` argument will be a 2d array, with the number of rows equal to
-`maxlag+maxlead+1` and the number of columns equal to the number of `variables+shocks+auxvars` of the model.
-The `res` vector will have the same length as the number of equations + auxiliary equations. 
-Your implementation must not modify `point` and must update `res`.
+`maxlag+maxlead+1` and the number of columns equal to the number of
+`variables+shocks+auxvars` of the model. The `res` vector will have the same
+length as the number of equations + auxiliary equations. Your implementation
+must not modify `point` and must update `res`.
 
 See also: [`eval_RJ`](@ref)
 """
@@ -210,17 +211,20 @@ eval_R!(res::AbstractVector{Float64}, point::AbstractMatrix{Float64}, ::AMED) wh
 """
     eval_RJ(point::AbstractArray{Float64, 2}, ::MED) where MED <: AbstractModelEvaluationData
 
-Evaluate the model residual and its Jacobian at the given point using the given model evaluation structure.
-Return a tuple, with the first element being the residual and the second element being the Jacobian.
+Evaluate the model residual and its Jacobian at the given point using the given
+model evaluation structure. Return a tuple, with the first element being the
+residual and the second element being the Jacobian.
 
 ### Implementation details (for developers)
-When creating a new type of model evaluation data, you must define a
-method of this function specialized to it.
+When creating a new type of model evaluation data, you must define a method of
+this function specialized to it.
 
 The `point` argument will be a 2d array, with the number of rows equal to
-`maxlag+maxlead+1` and the number of columns equal to the number of `variables+shocks+auxvars` of the model.
-Your implementation must not modify `point` and must return the tuple of (residual, Jacobian) evaluated
-at the given `point`. The Jacobian is expected to be `SparseMatrixCSC` (*this might change in the future*).
+`maxlag+maxlead+1` and the number of columns equal to the number of
+`variables+shocks+auxvars` of the model. Your implementation must not modify
+`point` and must return the tuple of (residual, Jacobian) evaluated at the given
+`point`. The Jacobian is expected to be `SparseMatrixCSC` (*this might change in
+the future*).
 
 See also: [`eval_R!`](@ref)
 """
@@ -233,9 +237,9 @@ eval_RJ(point::AbstractMatrix{Float64}, ::AMED) where {AMED<:AbstractModelEvalua
 """
     struct NoModelEvaluationData <: AbstractModelEvaluationData
 
-Specific type that indicates that the model cannot be evaluated.
-This is used as a placeholder while the model is being defined.
-During initialization, the actual model evaluation data is created.
+Specific type that indicates that the model cannot be evaluated. This is used as
+a placeholder while the model is being defined. During initialization, the
+actual model evaluation data is created.
 """
 struct NoModelEvaluationData <: AbstractModelEvaluationData end
 const NoMED = NoModelEvaluationData()
@@ -258,6 +262,8 @@ struct ModelEvaluationData{E<:AbstractEquation,I} <: AbstractModelEvaluationData
     rowinds::Vector{Vector{Int64}}
 end
 
+_index_of_var(var, allvars) = indexin([var], allvars)[1]
+
 """
     ModelEvaluationData(model::AbstractModel)
 
@@ -267,19 +273,20 @@ function ModelEvaluationData(model::AbstractModel)
     time0 = 1 + model.maxlag
     alleqns = model.alleqns
     neqns = length(alleqns)
-    allinds = @timer [[CartesianIndex((time0 + ti, vi)) for (ti, vi) in eqn.vinds] for eqn in alleqns]
+    allvars = model.allvars
+    nvars = length(allvars)
+    allinds = [[CartesianIndex((time0 + ti, _index_of_var(var, allvars))) for (var, ti) in keys(eqn.tsrefs)] for eqn in alleqns]
     ntimes = 1 + model.maxlag + model.maxlead
-    nvars = length(model.allvars)
     LI = LinearIndices((ntimes, nvars))
-    II = @timer reduce(vcat, (fill(Int64(i), length(eqn.vinds)) for (i, eqn) in enumerate(alleqns)))
-    JJ = @timer [LI[inds] for inds in allinds]
-    M = @timer SparseArrays.sparse(II, reduce(vcat, JJ), similar(II), neqns, ntimes * nvars)
-    M.nzval .= @timer 1:length(II)
-    rowinds = @timer [copy(M[i, LI[inds]].nzval) for (i, inds) in enumerate(JJ)]
+    II = reduce(vcat, (fill(i, length(eqn.tsrefs)) for (i, eqn) in enumerate(alleqns)))
+    JJ = [LI[inds] for inds in allinds]
+    M = SparseArrays.sparse(II, reduce(vcat, JJ), similar(II), neqns, ntimes * nvars)
+    M.nzval .= 1:length(II)
+    rowinds = [copy(M[i, LI[inds]].nzval) for (i, inds) in enumerate(JJ)]
     ModelEvaluationData(alleqns, allinds, similar(M, Float64), Vector{Float64}(undef, neqns), rowinds)
 end
 
-function eval_R!(res::AbstractVector{Float64}, point::AbstractMatrix{Float64}, med::ModelEvaluationData)
+function eval_R!(res::AbstractVector{Float64}, point::Matrix{Float64}, med::ModelEvaluationData)
     # med === NoMED && throw(ModelNotInitError())
     for (i, eqn, inds) in zip(1:length(med.alleqns), med.alleqns, med.allinds)
         res[i] = eval_resid(eqn, point[inds])
@@ -287,7 +294,7 @@ function eval_R!(res::AbstractVector{Float64}, point::AbstractMatrix{Float64}, m
     return nothing
 end
 
-function eval_RJ(point::AbstractMatrix{Float64}, med::ModelEvaluationData)
+function eval_RJ(point::Matrix{Float64}, med::ModelEvaluationData)
     # med === NoMED && throw(ModelNotInitError())
     neqns = length(med.alleqns)
     res = similar(med.R)
@@ -375,7 +382,7 @@ function SelectiveLinearizationMED(model::AbstractModel)
 end
 
 
-function eval_R!(res::AbstractVector{Float64}, point::AbstractMatrix{Float64}, slmed::SelectiveLinearizationMED)
+function eval_R!(res::AbstractVector{Float64}, point::Matrix{Float64}, slmed::SelectiveLinearizationMED)
     med = slmed.med
     for (i, eqn, inds, eed) in zip(1:length(med.alleqns), med.alleqns, med.allinds, slmed.eedata)
         res[i] = eval_resid(eqn, point[inds], eed)
@@ -383,7 +390,7 @@ function eval_R!(res::AbstractVector{Float64}, point::AbstractMatrix{Float64}, s
     return nothing
 end
 
-function eval_RJ(point::AbstractMatrix{Float64}, slmed::SelectiveLinearizationMED)
+function eval_RJ(point::Matrix{Float64}, slmed::SelectiveLinearizationMED)
     med = slmed.med
     neqns = length(med.alleqns)
     res = similar(med.R)
@@ -397,9 +404,9 @@ end
 """
     selective_linearize!(model)
 
-Instruct the model instance to use selective linearization. 
-Only equations annotated with `@lin` in the model definition will be
-linearized about the current steady state solution while the rest of the eq
+Instruct the model instance to use selective linearization. Only equations
+annotated with `@lin` in the model definition will be linearized about the
+current steady state solution while the rest of the eq
     
 """
 function selective_linearize!(model::AbstractModel)

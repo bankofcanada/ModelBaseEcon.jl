@@ -60,8 +60,8 @@ mutable struct Model <: AbstractModel
     # auto-exogenize mapping of variables and shocks
     autoexogenize::Dict{Symbol,Symbol}
     #### Things we compute
-    maxlag::Int64
-    maxlead::Int64
+    maxlag::Int
+    maxlead::Int
     # auxiliary variables
     auxvars::Vector{ModelVariable}
     # auxiliary equations
@@ -77,15 +77,16 @@ mutable struct Model <: AbstractModel
 end
 
 
-@inline auxvars(m::Model) = getfield(m, :auxvars)
-@inline nauxvars(m::Model) = length(auxvars(m))
+auxvars(m::Model) = getfield(m, :auxvars)
+nauxvars(m::Model) = length(auxvars(m))
 
 # We have to specialize allvars() nallvars() because we have auxvars here
-@inline allvars(m::Model) = vcat(variables(m), shocks(m), auxvars(m))
-@inline nallvars(m::Model) = length(variables(m)) + length(shocks(m)) + length(auxvars(m))
+allvars(m::Model) = vcat(variables(m), shocks(m), auxvars(m))
+nallvars(m::Model) = length(variables(m)) + length(shocks(m)) + length(auxvars(m))
 
-@inline alleqns(m::Model) = vcat(equations(m), getfield(m, :auxeqns))
-@inline nalleqns(m::Model) = length(equations(m)) + length(getfield(m, :auxeqns))
+alleqns(m::Model) = vcat(equations(m), getfield(m, :auxeqns))
+nalleqns(m::Model) = length(equations(m)) + length(getfield(m, :auxeqns))
+
 
 ################################################################
 # Specialize Options methods to the Model type
@@ -517,26 +518,35 @@ function process_equation(model::Model, expr::Expr;
     doc = "")
 
     # a list of all known time series 
-    allvars = [model.variables; model.shocks; model.auxvars]
+    allvars = model.allvars
 
     # keep track of model parameters used in expression
-    parameters = Set{Symbol}()
+    prefs = OrderedDict{Symbol,Symbol}()
     # keep track of references to known time series in the expression
-    references = Dict{Tuple{Int64,Int64},Symbol}()
+    tsrefs = OrderedDict{Tuple{Symbol,Int64},Symbol}()
+    # keep track of references to steady states of known time series in the expression
+    ssrefs = OrderedDict{Symbol,Symbol}()
     # keep track of the source code location where the equation was defined
     #  (helps with tracking the locations of errors)
     source = []
 
-    add_reference(sym, tind) = add_reference(sym, tind, indexin([sym], allvars)[1])
-    add_reference(sym::Symbol, tind::Int, vind::Int) = begin
-        if islog(allvars[vind])
-            vsym = Symbol("#log", sym, "#", tind, "#")
-        elseif isneglog(allvars[vind])
-            vsym = Symbol("#logm", sym, "#", tind, "#")
-        else
-            vsym = Symbol("#", sym, "#", tind, "#")
-        end
-        push!(references, (tind, vind) => vsym) # keep track of indexes and dummy symbol
+    add_tsref(var::ModelVariable, tind) = begin
+        newsym = islog(var) ? Symbol("#log#", var.name, "#", tind, "#") :
+                 isneglog(var) ? Symbol("#logm#", var.name, "#", tind, "#") :
+                 Symbol("#", var.name, "#", tind, "#")
+        push!(tsrefs, (var, tind) => newsym)
+    end
+
+    add_ssref(var::ModelVariable) = begin
+        newsym = islog(var) ? Symbol("#log#", var.name, "#ss#") :
+                 isneglog(var) ? Symbol("#logm#", var.name, "#ss#") :
+                 Symbol("#", var.name, "#ss#")
+        push!(ssrefs, var => newsym)
+    end
+
+    add_pref(par::Symbol) = begin
+        newsym = Symbol("#", par, "#par#")
+        push!(prefs, par => newsym)
     end
 
     ###################
@@ -550,47 +560,41 @@ function process_equation(model::Model, expr::Expr;
     # leave numbers alone
     process(num::Number) = num
     # store line number and discard it from the expression
-    function process(line::LineNumberNode)
-        push!(source, line)
-        return nothing
-    end
+    process(line::LineNumberNode) = (push!(source, line); nothing)
     # Symbols are left alone.
     # Mentions of parameters are tracked and left in place
     # Mentions of time series throw errors (they must always have a t-reference)
     function process(sym::Symbol)
-        if sym ∈ model.variables
+        # is this symbol a known variable?
+        ind = indexin([sym], allvars)[1]
+        if ind !== nothing
             if model.warn.no_t
-                warn_process("Variable `$(sym)` without `t` reference. Assuming `$(sym)[t]`", expr)
+                warn_process("Variable or shock `$(sym)` without `t` reference. Assuming `$(sym)[t]`", expr)
             end
-            add_reference(sym, 0)
+            add_tsref(allvars[ind], 0)
             return Expr(:ref, sym, :t)
-        elseif sym ∈ model.shocks
-            if model.warn.no_t
-                warn_process("Shock `$(sym)` without `t` reference. Assuming `$(sym)[t]`", expr)
-            end
-            add_reference(sym, 0)
-            return Expr(:ref, sym, :t)
-        elseif sym ∈ model.auxvars
-            error_process("Auxiliary `$(sym)` without `t` reference.", expr)
-        elseif haskey(model.parameters, sym)
-            push!(parameters, sym)
-        else
-            # is this symbol valid in the model module?
-            try
-                modelmodule.eval(sym)
-            catch
-                error_process("Undefined `$(sym)`.", expr)
-            end
         end
-        return sym
+        # is this symbol a known parameter
+        if haskey(model.parameters, sym)
+            add_pref(sym)
+            return sym
+        end
+        # is this symbol a valid name in the model module?
+        if isdefined(modelmodule, sym)
+            return sym
+        end
+        # no idea what this is!
+        error_process("Undefined `$(sym)`.", expr)
     end
     # Main version of process() - it's recursive
     function process(ex::Expr)
+        # is this a docstring? 
         if ex.head == :macrocall && ex.args[1] == doc_macro
             push!(source, ex.args[2])
             doc *= ex.args[3]
             return process(ex.args[4])
         end
+        # is this a macro call? if so it could be a variable flag, a meta function, or a regular macro
         if ex.head == :macrocall
             push!(source, ex.args[2])
             macroname = lstrip(string(ex.args[1]), '@')  # strip the leading '@'
@@ -622,7 +626,7 @@ function process_equation(model::Model, expr::Expr;
             name, index = ex.args
             if haskey(model.parameters, name)
                 # indexing in a parameter - leave it alone, but keep track
-                push!(parameters, name)
+                add_pref(name)
                 return Expr(:ref, name, modelmodule.eval(index))
             end
             vind = indexin([name], allvars)[1]  # the index of the variable
@@ -633,7 +637,7 @@ function process_equation(model::Model, expr::Expr;
                         $index
                     end
                 ))  # the lag or lead value
-                add_reference(name, tind, vind)
+                add_tsref(allvars[vind], tind)
                 return normal_ref(name, tind)
             end
             error_process("Undefined reference $(ex).", expr)
@@ -679,6 +683,7 @@ function process_equation(model::Model, expr::Expr;
     # 
     #  * each mention of a time-reference is replaced with its symbol
     make_residual_expression(any) = any
+    make_residual_expression(name::Symbol) = haskey(model.parameters, name) ? prefs[name] : name
     function make_residual_expression(ex::Expr)
         if ex.head == :ref
             name, index = ex.args
@@ -694,12 +699,13 @@ function process_equation(model::Model, expr::Expr;
                 else
                     error_process("Unrecognized t-reference expression $index.", expr)
                 end
-                if need_transform(allvars[vind])
-                    func = inverse_transformation(allvars[vind])
-                    arg = references[(tind, vind)]
-                    return :($func($arg))
+                var = allvars[vind]
+                newsym = tsrefs[(var, tind)]
+                if need_transform(var)
+                    func = inverse_transformation(var)
+                    return :($func($newsym))
                 else
-                    return references[(tind, vind)]
+                    return newsym
                 end
             end
         elseif ex.head == :(=)
@@ -718,10 +724,7 @@ function process_equation(model::Model, expr::Expr;
     # if source information missing, set from argument
     filter!(l -> l !== nothing, source)
     push!(source, line)
-    # collect the indices and dummy symbols of the mentioned variables
-    # NOTE: Julia documentation assures us that keys() and values() iterate elements of the Dict in the same order!
-    vinds = collect(keys(references))
-    vsyms = collect(values(references))
+    newsyms = collect(values(tsrefs))
     # make a residual expressoin for the eval function
     residual = make_residual_expression(new_expr)
     # add the source information to residual expression
@@ -730,13 +733,13 @@ function process_equation(model::Model, expr::Expr;
         # create a list of expressions that assign the values of model parameters to 
         # variables of the same name
         param_assigments = Expr(:block)
-        for p in parameters
-            push!(param_assigments.args, :(local $(p) = $(mparams).$(p)))
+        for (p, newp) in pairs(prefs)
+            push!(param_assigments.args, :(local $(newp) = $(mparams).$(p)))
         end
-        funcs_expr = makefuncs(residual, vsyms, param_assigments; mod = modelmodule)
+        funcs_expr = makefuncs(residual, newsyms, param_assigments; mod = modelmodule)
         modelmodule.eval(funcs_expr)
     end
-    return Equation(doc, flags, expr, residual, vinds, vsyms, resid, RJ)
+    return Equation(doc, flags, expr, residual, tsrefs, ssrefs, prefs, resid, RJ)
 end
 
 
@@ -757,22 +760,23 @@ function add_equation!(model::Model, expr::Expr; modelmodule::Module = moduleof(
     doc = ""
 
     ##################################
-    # We process() the expression looking for substitutions. 
+    # We preprocess() the expression looking for substitutions. 
     # If we find one, we create an auxiliary variable and equation.
     # We also keep track of line number, so we can label the aux equation as
     # defined on the same line.
+    # We also look for doc string and flags (@log, @lin)
     # 
     # We make sure to make a copy of the expression and not to overwrite it. 
     # 
-    process(any) = any
-    function process(line::LineNumberNode)
+    preprocess(any) = any
+    function preprocess(line::LineNumberNode)
         push!(source, line)
         return line
     end
-    function process(expr::Expr)
+    function preprocess(expr::Expr)
         if expr.head == :block && expr.args[1] isa LineNumberNode && length(expr.args) == 2
             push!(source, expr.args[1])
-            return process(expr.args[2])
+            return preprocess(expr.args[2])
         end
         if expr.head == :macrocall
             mname, mline = expr.args[1:2]
@@ -780,19 +784,19 @@ function add_equation!(model::Model, expr::Expr; modelmodule::Module = moduleof(
             push!(source, mline)
             if mname == doc_macro
                 doc = margs[1]
-                return process(margs[2])
+                return preprocess(margs[2])
             end
             fname = Symbol(lstrip(string(mname), '@'))
-            if hasfield(typeof(flags), fname) && length(margs) == 1
+            if hasfield(EqnFlags, fname) && length(margs) == 1
                 setfield!(flags, fname, true)
-                return process(margs[1])
+                return preprocess(margs[1])
             end
-            return Expr(:macrocall, mname, nothing, (process(a) for a in margs)...)
+            return Expr(:macrocall, mname, nothing, (preprocess(a) for a in margs)...)
         end
-        # recursively process all arguments
+        # recursively preprocess all arguments
         ret = Expr(expr.head)
         for i in eachindex(expr.args)
-            push!(ret.args, process(expr.args[i]))
+            push!(ret.args, preprocess(expr.args[i]))
         end
         if getoption!(model; substitutions = true)
             local arg
@@ -823,7 +827,7 @@ function add_equation!(model::Model, expr::Expr; modelmodule::Module = moduleof(
                     end
                 end
                 aux_expr = process_equation(model, Expr(:(=), arg, 0); modelmodule = modelmodule)
-                if length(aux_expr.vinds) == 0
+                if isempty(aux_expr.tsrefs)
                     # arg doesn't contain any variables, no need for substitution
                     @goto skip_substitution
                 end
@@ -839,7 +843,7 @@ function add_equation!(model::Model, expr::Expr; modelmodule::Module = moduleof(
         return ret
     end
 
-    new_expr = process(expr)
+    new_expr = preprocess(expr)
     if isempty(source)
         push!(source, LineNumberNode(0))
     end
@@ -881,9 +885,9 @@ function initialize!(model::Model, modelmodule::Module)
     for e in eqns
         add_equation!(model, e; modelmodule = modelmodule)
     end
-    for (i, v) in enumerate(model.allvars)
-        model.:($(v.name)) = update(v, index = i)
-    end
+    # for (i, v) in enumerate(model.allvars)
+    #     model.:($(v.name)) = update(v, index = i)
+    # end
     # Note: we cannot set any other evaluation method yet - they require steady
     # state solution and we probably don't have that yet.
     model.evaldata = ModelEvaluationData(model)
@@ -954,10 +958,11 @@ function update_auxvars(data::AbstractArray{Float64,2}, model::Model;
     if nt < mintimes
         error("Insufficient time periods $nt. Expected $mintimes or more.")
     end
+    allvars = model.allvars
     result = [data[:, 1:nvarshk] zeros(nt, nauxs)]
     for (i, eqn) in enumerate(model.auxeqns)
         for t in (eqn.maxlag+1):(nt-eqn.maxlead)
-            idx = [CartesianIndex((t + ti, vi)) for (ti, vi) in eqn.vinds]
+            idx = [CartesianIndex((t + ti, _index_of_var(var, allvars))) for (var, ti) in keys(eqn.tsrefs)]
             res = eqn.eval_resid(result[idx])
             if res < 1.0
                 result[t, nvarshk+i] = log(1.0 - res)
