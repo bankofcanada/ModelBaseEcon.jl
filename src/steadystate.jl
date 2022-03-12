@@ -168,22 +168,25 @@ struct SteadyStateData
     SteadyStateData() = new([], [], [], [], [])
 end
 
-Base.push!(ssd::SteadyStateData, vars...) =
-    for v in vars
-        push!(ssd, v)
-    end
+@inline function Base.push!(ssd::SteadyStateData, var, vars...)
+    push!(ssd, var)
+    push!(ssd, vars...)
+end
 Base.push!(ssd::SteadyStateData, var::Symbol) = push!(ssd, convert(ModelSymbol, var))
 function Base.push!(ssd::SteadyStateData, var::ModelSymbol)
-    for v in getfield(ssd, :vars)
+    ssd_vars = getfield(ssd, :vars)
+    ssd_vals = getfield(ssd, :values)
+    ssd_mask = getfield(ssd, :mask)
+    for v in ssd_vars
         if v.name == var
             return v
         end
     end
-    push!(getfield(ssd, :values), isexog(var) || isshock(var) ? 0.0 : 0.1, 0.0)
-    push!(getfield(ssd, :mask), isexog(var) || isshock(var), isexog(var) || isshock(var) || issteady(var))
-    ind = length(getfield(ssd, :vars)) + 1
-    v = SteadyStateVariable(var, ind, @view(getfield(ssd, :values)[2ind.+(-1:0)]), @view(getfield(ssd, :mask)[2ind.+(-1:0)]))
-    push!(getfield(ssd, :vars), v)
+    push!(ssd_vals, isexog(var) || isshock(var) ? 0.0 : 0.1, 0.0)
+    push!(ssd_mask, isexog(var) || isshock(var), isexog(var) || isshock(var) || issteady(var))
+    ind = length(ssd_vars) + 1
+    v = SteadyStateVariable(var, ind, view(ssd_vals, 2ind .+ (-1:0)), view(ssd_mask, 2ind .+ (-1:0)))
+    push!(ssd_vars, v)
     return v
 end
 
@@ -223,8 +226,8 @@ end
 ```
 """
 function geteqn(i::Integer, ssd::SteadyStateData)
-    ci = i - length(ssd.equations)
-    return ci > 0 ? ssd.constraints[ci] : ssd.equations[i]
+    ci = i - length(ssd.constraints)
+    return ci > 0 ? ssd.equations[ci] : ssd.constraints[i]
 end
 
 Base.show(io::IO, ::MIME"text/plain", ssd::SteadyStateData) = show(io, ssd)
@@ -383,9 +386,11 @@ end
 end
 function sseqn_resid_RJ(s::SSEqnData)
     function _resid(pt::AbstractVector{Float64})
+        _update_eqn_params!(s.eqn.eval_resid, s.model[].parameters)
         return s.eqn.eval_resid(__to_dyn_pt(pt, s))
     end
     function _RJ(pt::AbstractVector{Float64})
+        _update_eqn_params!(s.eqn.eval_resid, s.model[].parameters)
         R, jj = s.eqn.eval_RJ(__to_dyn_pt(pt, s))
         return R, __to_ssgrad(pt, jj, s)
     end
@@ -422,7 +427,7 @@ function make_sseqn(model::AbstractModel, eqn::Equation, shift::Bool)
     end
     local ss = model.sstate
     # The steady state indexes.
-    vinds = unique(vcat(map(ssind, (collect∘keys)(eqn.tsrefs))...))
+    vinds = unique(vcat(map(ssind, (collect ∘ keys)(eqn.tsrefs))...))
     # The corresponding steady state symbols
     vsyms = Symbol[ss_symbol(ss, vi) for vi in vinds]
     # In the next loop we build the matrix JT which transforms
@@ -463,6 +468,12 @@ function setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Mod
 
     local allvars = model.allvars
 
+    ss_var_sym(var) = begin
+        ty = (type === :level ? "lvl" : "slp")
+        islog(var) ? Symbol("#log#", var.name, "#", ty, "#") :
+        isneglog(var) ? Symbol("#logm#", var.name, "#", ty, "#") :
+        Symbol("#", var.name, "#", ty, "#")
+    end
     ###############################################
     #     ssprocess(val)
     # 
@@ -488,15 +499,16 @@ function setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Mod
             push!(val_params, val)
             return val
         end
-        vind = indexin([val], allvars)[1]
+        vind = _index_of_var(val, allvars)
         if vind !== nothing
             # it's a vriable of some sort: make a symbol and an index for the
             # corresponding steady state unknown
-            vsym = Symbol("#", type, "#", val, "#")
+            var = allvars[vind]
+            vsym = ss_var_sym(var)
             push!(vsyms, vsym)
             push!(vinds, type == :level ? 2vind - 1 : 2vind)
-            if need_transform(allvars[vind])
-                func = inverse_transformation(allvars[vind])
+            if need_transform(var)
+                func = inverse_transformation(var)
                 return :($func($vsym))
             else
                 return vsym
@@ -528,7 +540,7 @@ function setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Mod
             args = filter(x -> x !== nothing, map(ssprocess, val.args[2:end]))
             return Expr(:call, val.args[1], args...)
         else
-            # whatever this it, process each subexpression and reassemble it
+            # whatever this is, process each subexpression and reassemble it
             args = filter(x -> x !== nothing, map(ssprocess, val.args))
             return Expr(val.head, args...)
         end
@@ -546,17 +558,10 @@ function setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Mod
     push!(source, LineNumberNode(0))
     # create the resid and RJ functions for the new equation
     # To do this, we use `makefuncs` from evaluation.jl
-    resid, RJ = let mparams = parameters(model)
-        # create a list of expressions that assign the values of model parameters to
-        # variables of the same name
-        param_assigments = Expr(:block)
-        for p in unique(val_params)
-            push!(param_assigments.args, :(local $(p) = $(mparams).$(p)))
-        end
-        residual = Expr(:block, source[1], :($(lhs) - $(rhs)))
-        funcs_expr = makefuncs(residual, vsyms, param_assigments; mod = modelmodule)
-        modelmodule.eval(funcs_expr)
-    end
+    residual = Expr(:block, source[1], :($(lhs) - $(rhs)))
+    funcs_expr = makefuncs(residual, vsyms, [], unique(val_params), modelmodule)
+    resid, RJ = modelmodule.eval(funcs_expr)
+    _update_eqn_params!(resid, model.parameters)
     # We have all the ingredients to create the instance of SteadyStateEquation
     for i = 1:2
         # remove blocks with line numbers from expr.args[i]

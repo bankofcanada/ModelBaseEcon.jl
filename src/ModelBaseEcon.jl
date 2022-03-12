@@ -34,12 +34,12 @@ include("misc.jl")
 
 # NOTE: The order of inclusions matters.
 include("abstract.jl")
+include("parameters.jl")
 include("evaluation.jl")
 include("transformations.jl")
 include("variables.jl")
 include("equation.jl")
 include("steadystate.jl")
-include("parameters.jl")
 include("metafuncs.jl")
 include("model.jl")
 include("export_model.jl")

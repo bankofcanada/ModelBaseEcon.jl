@@ -91,7 +91,7 @@ function funcsyms(mod::Module)
 end
 
 """
-    makefuncs(expr, vsyms [, params_expr]; mod::Module)
+    makefuncs(expr, tssyms, sssyms, psyms, mod)
 
 Create two functions that evaluate the residual and its gradient for the given
 expression.
@@ -101,26 +101,25 @@ expression.
 
 ### Arguments
 - `expr`: the expression
-- `vsyms`: a list of variables in the expression.
-- `params_expr`: an expression to be included in the function code before evaluating 
-    the expression. This allows for assigning values of parameters in the expression,
-    i.e. variables that are not arguments to the funcion.
+- `XXsyms`: a list of symbols for variables, steady state, parameters
 
 ### Return value
 Return a quote block to be evaluated in the module where the model is being defined. 
 The quote block contains definitions of the residual function and a second function
 that evaluates both the residual and its gradient.
 """
-function makefuncs(expr, vsyms, params_expr = nothing; mod::Module)
+function makefuncs(expr, tssyms, sssyms, psyms, mod)
     fn1, fn2 = funcsyms(mod)
     x = gensym("x")
-    nargs = length(vsyms)
+    nargs = length(tssyms) + length(sssyms)
     return quote
-        function $fn1($x::Vector{T}) where {T<:Real}
-            ($(vsyms...),) = $x
-            $(params_expr)
+        function (ee::EquationEvaluator{$(QuoteNode(fn1))})($x::Vector{<:Real})
+            ($(tssyms...), $(sssyms...),) = $x
+            ($(psyms...),) = values(ee.params)
             $expr
         end
+        const $fn1 = EquationEvaluator{$(QuoteNode(fn1))}(UInt(0),
+            $(@__MODULE__).OrderedDict(p => nothing for p in ($(QuoteNode.(psyms)...),)))
         const $fn2 = EquationGradient($fn1, Val($nargs))
         $(@__MODULE__).precompilefuncs($fn1, $fn2, Val($nargs), MyTag)
         ($fn1, $fn2)
@@ -139,6 +138,10 @@ function initfuncs(mod::Module)
     if :MyTag ∉ names(mod; all = true)
         mod.eval(quote
             struct MyTag end
+            struct EquationEvaluator{FN} <: Function
+                rev::Ref{UInt}
+                params::$(@__MODULE__).OrderedDict{Symbol,Any}
+            end
             struct EquationGradient{DR,CFG} <: Function
                 fn1::Function
                 dr::DR
@@ -253,6 +256,7 @@ eval_RJ(point::AbstractMatrix{Float64}, ::NoModelEvaluationData) = throw(ModelNo
 The standard model evaluation data used in the general case and by default.
 """
 struct ModelEvaluationData{E<:AbstractEquation,I} <: AbstractModelEvaluationData
+    params::Ref{Parameters{ModelParam}}
     alleqns::Vector{E}
     allinds::Vector{I}
     "Placeholder for the Jacobian matrix"
@@ -263,6 +267,15 @@ struct ModelEvaluationData{E<:AbstractEquation,I} <: AbstractModelEvaluationData
 end
 
 _index_of_var(var, allvars) = indexin([var], allvars)[1]
+
+@inline function _update_eqn_params!(ee, params)
+    if ee.rev[] !== params.rev[]
+        foreach(keys(ee.params)) do k
+            ee.params[k] = getproperty(params, k)
+        end
+        ee.rev[] = params.rev[]
+    end
+end
 
 """
     ModelEvaluationData(model::AbstractModel)
@@ -283,12 +296,13 @@ function ModelEvaluationData(model::AbstractModel)
     M = SparseArrays.sparse(II, reduce(vcat, JJ), similar(II), neqns, ntimes * nvars)
     M.nzval .= 1:length(II)
     rowinds = [copy(M[i, LI[inds]].nzval) for (i, inds) in enumerate(JJ)]
-    ModelEvaluationData(alleqns, allinds, similar(M, Float64), Vector{Float64}(undef, neqns), rowinds)
+    ModelEvaluationData(Ref(model.parameters), alleqns, allinds, similar(M, Float64), Vector{Float64}(undef, neqns), rowinds)
 end
 
 function eval_R!(res::AbstractVector{Float64}, point::Matrix{Float64}, med::ModelEvaluationData)
     # med === NoMED && throw(ModelNotInitError())
     for (i, eqn, inds) in zip(1:length(med.alleqns), med.alleqns, med.allinds)
+        _update_eqn_params!(eqn.eval_resid, med.params[])
         res[i] = eval_resid(eqn, point[inds])
     end
     return nothing
@@ -300,6 +314,7 @@ function eval_RJ(point::Matrix{Float64}, med::ModelEvaluationData)
     res = similar(med.R)
     jac = med.J
     for (i, eqn, inds, ri) in zip(1:neqns, med.alleqns, med.allinds, med.rowinds)
+        _update_eqn_params!(eqn.eval_resid, med.params[])
         res[i], jac.nzval[ri] = eval_RJ(eqn, point[inds])
     end
     return res, jac
@@ -364,6 +379,7 @@ function SelectiveLinearizationMED(model::AbstractModel)
     eedata = Vector{AbstractEqnEvalData}(undef, length(med.alleqns))
     num_lin = 0
     for (i, (eqn, inds)) in enumerate(zip(med.alleqns, med.allinds))
+        _update_eqn_params!(eqn.eval_resid, model.parameters)
         if islin(eqn)
             num_lin += 1
             eedata[i] = LinEqnEvalData(eqn, sspt[inds])
@@ -385,6 +401,7 @@ end
 function eval_R!(res::AbstractVector{Float64}, point::Matrix{Float64}, slmed::SelectiveLinearizationMED)
     med = slmed.med
     for (i, eqn, inds, eed) in zip(1:length(med.alleqns), med.alleqns, med.allinds, slmed.eedata)
+        islin(eqn) || _update_eqn_params!(eqn.eval_resid, med.params)
         res[i] = eval_resid(eqn, point[inds], eed)
     end
     return nothing
@@ -396,6 +413,7 @@ function eval_RJ(point::Matrix{Float64}, slmed::SelectiveLinearizationMED)
     res = similar(med.R)
     jac = med.J
     for (i, eqn, inds, ri, eed) in zip(1:neqns, med.alleqns, med.allinds, med.rowinds, slmed.eedata)
+        islin(eqn) || _update_eqn_params!(eqn.eval_resid, med.params)
         res[i], jac.nzval[ri] = eval_RJ(eqn, point[inds], eed)
     end
     return res, jac

@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020, Bank of Canada
+# Copyright (c) 2020-2022, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -167,7 +167,7 @@ module E
 end
 @testset "Evaluations" begin
     ModelBaseEcon.initfuncs(E)
-    E.eval(ModelBaseEcon.makefuncs(:(x + 3 * y), [:x, :y], mod=E))
+    E.eval(ModelBaseEcon.makefuncs(:(x + 3 * y), [:x, :y], [], [], E))
     @test :resid_1 ∈ names(E, all=true)
     @test :RJ_1 ∈ names(E, all=true)
     @test E.resid_1([1.1, 2.3]) == 8.0

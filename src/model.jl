@@ -259,8 +259,12 @@ function fullprint(io::IO, model::Model)
     end
     for (i, v) in enumerate(model.equations)
         println(io, "   E$i:   ", v)
-        for (_, ai) in filter(tv -> tv[2] > nvarshk, v.vinds)
-            print_aux_eq(ai - nvarshk)
+        allvars = model.allvars
+        for (var, ti) in keys(v.tsrefs)
+            ai = _index_of_var(var, allvars)
+            if ai > nvarshk
+                print_aux_eq(ai - nvarshk)
+            end
         end
     end
 end
@@ -545,7 +549,7 @@ function process_equation(model::Model, expr::Expr;
     end
 
     add_pref(par::Symbol) = begin
-        newsym = Symbol("#", par, "#par#")
+        newsym = par # Symbol("#", par, "#par#")
         push!(prefs, par => newsym)
     end
 
@@ -724,21 +728,16 @@ function process_equation(model::Model, expr::Expr;
     # if source information missing, set from argument
     filter!(l -> l !== nothing, source)
     push!(source, line)
-    newsyms = collect(values(tsrefs))
     # make a residual expressoin for the eval function
     residual = make_residual_expression(new_expr)
     # add the source information to residual expression
     residual = Expr(:block, source[1], residual)
-    resid, RJ = let mparams = model.parameters
-        # create a list of expressions that assign the values of model parameters to 
-        # variables of the same name
-        param_assigments = Expr(:block)
-        for (p, newp) in pairs(prefs)
-            push!(param_assigments.args, :(local $(newp) = $(mparams).$(p)))
-        end
-        funcs_expr = makefuncs(residual, newsyms, param_assigments; mod = modelmodule)
-        modelmodule.eval(funcs_expr)
-    end
+    tssyms = values(tsrefs)
+    sssyms = values(ssrefs)
+    psyms = values(prefs)
+    funcs_expr = makefuncs(residual, tssyms, sssyms, psyms, modelmodule)
+    resid, RJ = modelmodule.eval(funcs_expr)
+    _update_eqn_params!(resid, model.parameters)
     return Equation(doc, flags, expr, residual, tsrefs, ssrefs, prefs, resid, RJ)
 end
 
