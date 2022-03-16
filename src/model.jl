@@ -570,7 +570,7 @@ function process_equation(model::Model, expr::Expr;
     # Mentions of time series throw errors (they must always have a t-reference)
     function process(sym::Symbol)
         # is this symbol a known variable?
-        ind = indexin([sym], allvars)[1]
+        ind = _index_of_var(sym, allvars)
         if ind !== nothing
             if model.warn.no_t
                 warn_process("Variable or shock `$(sym)` without `t` reference. Assuming `$(sym)[t]`", expr)
@@ -601,29 +601,30 @@ function process_equation(model::Model, expr::Expr;
         # is this a macro call? if so it could be a variable flag, a meta function, or a regular macro
         if ex.head == :macrocall
             push!(source, ex.args[2])
-            macroname = lstrip(string(ex.args[1]), '@')  # strip the leading '@'
-            # check if we have `@<flag> lhs=rhs` situation. Note: there may be multiple flags
-            if hasfield(typeof(flags), Symbol(macroname)) && length(ex.args) == 3
-                setfield!(flags, Symbol(macroname), true)
-                return process(ex.args[3])
+            macroname = Symbol(lstrip(string(ex.args[1]), '@'))  # strip the leading '@'
+            # check if this is a steady state mention
+            if macroname ∈ (:sstate,)
+                length(ex.args) == 3 || error_process("Invalid use of @(ex.args[1])", expr)
+                vind = _index_of_var(ex.args[3], allvars)
+                vind === nothing && error_process("Argument of @(ex.args[1]) must be a variable", expr)
+                add_ssref(allvars[vind])
+                return ex
             end
             # check if we have a corresponding meta function
             metafuncname = Symbol("at_", macroname) # replace @ with at_
-            if isdefined(modelmodule, metafuncname)
-                metafunc = :($modelmodule.$metafuncname)
-            elseif isdefined(ModelBaseEcon, metafuncname)
-                metafunc = :(ModelBaseEcon.$metafuncname)
-            else
-                error_process("Undefined flag or meta function $(ex.args[1]).", ex)
+            metafunc = isdefined(modelmodule, metafuncname) ? :($modelmodule.$metafuncname) :
+                       isdefined(ModelBaseEcon, metafuncname) ? :(ModelBaseEcon.$metafuncname) : nothing
+            if metafunc !== nothing
+                metaargs = map(filter(!MacroTools.isline, ex.args[3:end])) do arg
+                    arg = process(arg)
+                    arg isa Expr ? Meta.quot(arg) :
+                    arg isa Symbol ? QuoteNode(arg) :
+                    arg
+                end
+                metaout = modelmodule.eval(Expr(:call, metafunc, metaargs...))
+                return process(metaout)
             end
-            metaargs = map(filter(!MacroTools.isline, ex.args[3:end])) do arg
-                arg = process(arg)
-                arg isa Expr ? Meta.quot(arg) :
-                arg isa Symbol ? QuoteNode(arg) :
-                arg
-            end
-            metaout = modelmodule.eval(Expr(:call, metafunc, metaargs...))
-            return process(metaout)
+            error_process("Undefined meta function $(ex.args[1]).", expr)
         end
         if ex.head == :ref
             # expression is an indexing expression
@@ -688,30 +689,34 @@ function process_equation(model::Model, expr::Expr;
     #  * each mention of a time-reference is replaced with its symbol
     make_residual_expression(any) = any
     make_residual_expression(name::Symbol) = haskey(model.parameters, name) ? prefs[name] : name
+    make_residual_expression(var::ModelVariable, newsym::Symbol) = need_transform(var) ? :($(inverse_transformation(var))($newsym)) : newsym
     function make_residual_expression(ex::Expr)
         if ex.head == :ref
-            name, index = ex.args
-            vind = indexin([name], allvars)[1]
+            varname, tindex = ex.args
+            vind = _index_of_var(varname, allvars)
             if vind !== nothing
                 # The index expression is either t, or t+n or t-n. We made sure of that in process() above.
-                if isa(index, Symbol) && index == :t
+                if isa(tindex, Symbol) && tindex == :t
                     tind = 0
-                elseif isa(index, Expr) && index.head == :call && index.args[1] == :- && index.args[2] == :t
-                    tind = -index.args[3]
-                elseif isa(index, Expr) && index.head == :call && index.args[1] == :+ && index.args[2] == :t
-                    tind = +index.args[3]
+                elseif isa(tindex, Expr) && tindex.head == :call && tindex.args[1] == :- && tindex.args[2] == :t
+                    tind = -tindex.args[3]
+                elseif isa(tindex, Expr) && tindex.head == :call && tindex.args[1] == :+ && tindex.args[2] == :t
+                    tind = +tindex.args[3]
                 else
-                    error_process("Unrecognized t-reference expression $index.", expr)
+                    error_process("Unrecognized t-reference expression $tindex.", expr)
                 end
                 var = allvars[vind]
                 newsym = tsrefs[(var, tind)]
-                if need_transform(var)
-                    func = inverse_transformation(var)
-                    return :($func($newsym))
-                else
-                    return newsym
-                end
+                return make_residual_expression(var, newsym)
             end
+        elseif ex.head === :macrocall
+            macroname, _, varname = ex.args
+            macroname === Symbol("@sstate") || error_process("Unexpected macro call.", expr)
+            vind = _index_of_var(varname, allvars)
+            vind === nothing && error_process("Not a variable name in steady state reference $(ex)", expr)
+            var = allvars[vind]
+            newsym = ssrefs[var]
+            return make_residual_expression(var, newsym)
         elseif ex.head == :(=)
             if flags.log
                 return Expr(:call, :log, Expr(:call, :/, map(make_residual_expression, ex.args)...))
@@ -758,6 +763,9 @@ function add_equation!(model::Model, expr::Expr; modelmodule::Module = moduleof(
     flags = EqnFlags()
     doc = ""
 
+    # keep track if we've processed the "=" yet. (eqn flags are only valid before)
+    done_equalsign = Ref(false)
+
     ##################################
     # We preprocess() the expression looking for substitutions. 
     # If we find one, we create an auxiliary variable and equation.
@@ -772,30 +780,42 @@ function add_equation!(model::Model, expr::Expr; modelmodule::Module = moduleof(
         push!(source, line)
         return line
     end
-    function preprocess(expr::Expr)
-        if expr.head == :block && expr.args[1] isa LineNumberNode && length(expr.args) == 2
-            push!(source, expr.args[1])
-            return preprocess(expr.args[2])
+    function preprocess(ex::Expr)
+        if ex.head === :block && ex.args[1] isa LineNumberNode && length(ex.args) == 2
+            push!(source, ex.args[1])
+            return preprocess(ex.args[2])
         end
-        if expr.head == :macrocall
-            mname, mline = expr.args[1:2]
-            margs = expr.args[3:end]
+        if ex.head === :macrocall
+            mname, mline = ex.args[1:2]
+            margs = ex.args[3:end]
             push!(source, mline)
             if mname == doc_macro
                 doc = margs[1]
                 return preprocess(margs[2])
             end
-            fname = Symbol(lstrip(string(mname), '@'))
-            if hasfield(EqnFlags, fname) && length(margs) == 1
-                setfield!(flags, fname, true)
-                return preprocess(margs[1])
+            if !done_equalsign[]
+                fname = Symbol(lstrip(string(mname), '@'))
+                if hasfield(EqnFlags, fname) && length(margs) == 1
+                    setfield!(flags, fname, true)
+                    return preprocess(margs[1])
+                end
             end
             return Expr(:macrocall, mname, nothing, (preprocess(a) for a in margs)...)
         end
+        if ex.head === :(=)
+            # expression is an equation
+            done_equalsign[] && error_process("Multiple equali signs.", expr)
+            done_equalsign[] = true
+            # recursively process the two sides of the equation
+            lhs, rhs = ex.args
+            lhs = preprocess(lhs)
+            rhs = preprocess(rhs)
+            return Expr(:(=), lhs, rhs)
+        end
         # recursively preprocess all arguments
-        ret = Expr(expr.head)
-        for i in eachindex(expr.args)
-            push!(ret.args, preprocess(expr.args[i]))
+        ret = Expr(ex.head)
+        for i in eachindex(ex.args)
+            push!(ret.args, preprocess(ex.args[i]))
         end
         if getoption!(model; substitutions = true)
             local arg
