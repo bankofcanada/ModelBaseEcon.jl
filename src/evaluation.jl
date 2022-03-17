@@ -119,7 +119,7 @@ function makefuncs(expr, tssyms, sssyms, psyms, mod)
             $expr
         end
         const $fn1 = EquationEvaluator{$(QuoteNode(fn1))}(UInt(0),
-            $(@__MODULE__).OrderedDict(p => nothing for p in ($(QuoteNode.(psyms)...),)))
+            $(@__MODULE__).LittleDict(p => nothing for p in ($(QuoteNode.(psyms)...),)))
         const $fn2 = EquationGradient($fn1, Val($nargs))
         $(@__MODULE__).precompilefuncs($fn1, $fn2, Val($nargs), MyTag)
         ($fn1, $fn2)
@@ -140,7 +140,7 @@ function initfuncs(mod::Module)
             struct MyTag end
             struct EquationEvaluator{FN} <: Function
                 rev::Ref{UInt}
-                params::$(@__MODULE__).OrderedDict{Symbol,Any}
+                params::$(@__MODULE__).LittleDict{Symbol,Any}
             end
             struct EquationGradient{DR,CFG} <: Function
                 fn1::Function
@@ -168,12 +168,44 @@ end
 # selectively linearized equations.
 
 abstract type AbstractEqnEvalData end
-@inline eval_RJ(eqn, x) = eqn.eval_RJ(x)
-@inline eval_resid(eqn, x) = eqn.eval_resid(x)
+eval_RJ(eqn, x) = eqn.eval_RJ(x)
+eval_resid(eqn, x) = eqn.eval_resid(x)
 
-struct EqnEvalData <: AbstractEqnEvalData end
-@inline eval_RJ(eqn, x, ::EqnEvalData) = eqn.eval_RJ(x)
-@inline eval_resid(eqn, x, ::EqnEvalData) = eqn.eval_resid(x)
+abstract type DynEqnEvalData <: AbstractEqnEvalData end
+struct DynEqnEvalData0 <: DynEqnEvalData end
+struct DynEqnEvalDataN <: DynEqnEvalData
+    ss::Vector{Float64}
+end
+
+function _fill_ss_values(eqn, ssvals, allvars)
+    ret = fill(0.0, length(eqn.ssrefs))
+    bad = ModelSymbol[]
+    for (i, v) in enumerate(keys(eqn.ssrefs))
+        vi = _index_of_var(v, allvars)
+        ret[i] = ssvals[2vi-1]
+        if !isapprox(ssvals[2vi], 0, atol = 1e-12)
+            push!(bad, v)
+        end
+    end
+    if !isempty(bad)
+        nzslope = tuple(unique(bad)...)
+        @warn "@sstate used with non-zero slope" eqn nzslope
+    end
+    return ret
+end
+function DynEqnEvalData(eqn, model)
+    return length(eqn.ssrefs) == 0 ? DynEqnEvalData0() : DynEqnEvalDataN(
+        _fill_ss_values(eqn, model.sstate.values, model.allvars)
+    )
+end
+
+eval_resid(eqn, x, ed::DynEqnEvalDataN) = eqn.eval_resid(vcat(x, ed.ss))
+@inline function eval_RJ(eqn, x, ed::DynEqnEvalDataN)
+    R, J = eqn.eval_RJ(vcat(x, ed.ss))
+    return (R, J[1:length(x)])
+end
+eval_resid(eqn, x, ::DynEqnEvalData0) = eqn.eval_resid(x)
+eval_RJ(eqn, x, ::DynEqnEvalData0) = eqn.eval_RJ(x)
 
 
 """
@@ -255,8 +287,9 @@ eval_RJ(point::AbstractMatrix{Float64}, ::NoModelEvaluationData) = throw(ModelNo
 
 The standard model evaluation data used in the general case and by default.
 """
-struct ModelEvaluationData{E<:AbstractEquation,I} <: AbstractModelEvaluationData
+struct ModelEvaluationData{E<:AbstractEquation,I,D<:DynEqnEvalData} <: AbstractModelEvaluationData
     params::Ref{Parameters{ModelParam}}
+    eedata::Vector{D}
     alleqns::Vector{E}
     allinds::Vector{I}
     "Placeholder for the Jacobian matrix"
@@ -270,7 +303,7 @@ _index_of_var(var, allvars) = indexin([var], allvars)[1]
 
 @inline function _update_eqn_params!(ee, params)
     if ee.rev[] !== params.rev[]
-        foreach(keys(ee.params)) do k
+        for k in keys(ee.params)
             ee.params[k] = getproperty(params, k)
         end
         ee.rev[] = params.rev[]
@@ -296,26 +329,29 @@ function ModelEvaluationData(model::AbstractModel)
     M = SparseArrays.sparse(II, reduce(vcat, JJ), similar(II), neqns, ntimes * nvars)
     M.nzval .= 1:length(II)
     rowinds = [copy(M[i, LI[inds]].nzval) for (i, inds) in enumerate(JJ)]
-    ModelEvaluationData(Ref(model.parameters), alleqns, allinds, similar(M, Float64), Vector{Float64}(undef, neqns), rowinds)
+    eedata = [DynEqnEvalData(eqn, model) for eqn in alleqns]
+    if model.dynss && !issssolved(model)
+        @warn "Steady state not solved."
+    end
+    ModelEvaluationData(Ref(model.parameters), eedata,
+        alleqns, allinds, similar(M, Float64), Vector{Float64}(undef, neqns), rowinds)
 end
 
 function eval_R!(res::AbstractVector{Float64}, point::Matrix{Float64}, med::ModelEvaluationData)
-    # med === NoMED && throw(ModelNotInitError())
-    for (i, eqn, inds) in zip(1:length(med.alleqns), med.alleqns, med.allinds)
+    for (i, eqn, inds, ed) in zip(1:length(med.alleqns), med.alleqns, med.allinds, med.eedata)
         _update_eqn_params!(eqn.eval_resid, med.params[])
-        res[i] = eval_resid(eqn, point[inds])
+        res[i] = eval_resid(eqn, point[inds], ed)
     end
     return nothing
 end
 
 function eval_RJ(point::Matrix{Float64}, med::ModelEvaluationData)
-    # med === NoMED && throw(ModelNotInitError())
     neqns = length(med.alleqns)
     res = similar(med.R)
     jac = med.J
-    for (i, eqn, inds, ri) in zip(1:neqns, med.alleqns, med.allinds, med.rowinds)
+    for (i, eqn, inds, ri, ed) in zip(1:neqns, med.alleqns, med.allinds, med.rowinds, med.eedata)
         _update_eqn_params!(eqn.eval_resid, med.params[])
-        res[i], jac.nzval[ri] = eval_RJ(eqn, point[inds])
+        res[i], jac.nzval[ri] = eval_RJ(eqn, point[inds], ed)
     end
     return res, jac
 end
@@ -340,11 +376,11 @@ mutable struct LinEqnEvalData <: AbstractEqnEvalData
     LinEqnEvalData(r, g, s) = new(Float64(r), Float64[g...], Float64[s...])
 end
 
-@inline eval_resid(eqn, x, eed::LinEqnEvalData) = eed.resid + sum(eed.grad .* (x - eed.sspt))
-@inline eval_RJ(eqn, x, eed::LinEqnEvalData) = (eval_resid(eqn, x, eed), eed.grad)
+eval_resid(eqn, x, led::LinEqnEvalData) = led.resid + sum(led.grad .* (x - led.sspt))
+eval_RJ(eqn, x, led::LinEqnEvalData) = (eval_resid(eqn, x, led), led.grad)
 
-function LinEqnEvalData(eqn, sspt)
-    return LinEqnEvalData(eqn.eval_RJ(sspt)..., sspt)
+function LinEqnEvalData(eqn, sspt, ed::DynEqnEvalData)
+    return LinEqnEvalData(eval_RJ(eqn, sspt, ed)..., sspt)
 end
 
 mutable struct SelectiveLinearizationMED <: AbstractModelEvaluationData
@@ -363,14 +399,7 @@ function SelectiveLinearizationMED(model::AbstractModel)
         error("Steady state solution has non-zero slope. Not yet implemented.")
     end
 
-    med = model.evaldata
-    if !isa(med, ModelEvaluationData)
-        if hasproperty(med, :med)
-            med = med.med
-        else
-            med = ModelEvaluationData(model)
-        end
-    end
+    med = ModelEvaluationData(model)
 
     sspt = Matrix{Float64}(undef, 1 + model.maxlag + model.maxlead, length(model.varshks))
     for (i, v) in enumerate(model.varshks)
@@ -380,15 +409,16 @@ function SelectiveLinearizationMED(model::AbstractModel)
     num_lin = 0
     for (i, (eqn, inds)) in enumerate(zip(med.alleqns, med.allinds))
         _update_eqn_params!(eqn.eval_resid, model.parameters)
+        ed = DynEqnEvalData(eqn, model)
         if islin(eqn)
             num_lin += 1
-            eedata[i] = LinEqnEvalData(eqn, sspt[inds])
+            eedata[i] = LinEqnEvalData(eqn, sspt[inds], ed)
             resid = eedata[i].resid
             if abs(resid) > getoption(model, :tol, 1e-12)
                 @warn "Non-zero steady state residual in equation E$i" eqn resid
             end
         else
-            eedata[i] = EqnEvalData()
+            eedata[i] = ed
         end
     end
     if num_lin == 0
@@ -432,3 +462,21 @@ function selective_linearize!(model::AbstractModel)
     return model
 end
 export selective_linearize!
+
+
+"""
+    refresh_med!(model)
+
+Refresh the model evaluation data stored within the given model instance. Most
+notably, this is necessary when the steady state is used in the dynamic
+equations.
+"""
+# dispatcher
+refresh_med!(m::AbstractModel) = refresh_med!(m, typeof(m.evaldata))
+# catch all and issue a meaningful error message
+refresh_med!(m::AbstractModel, T::Type{<:AbstractModelEvaluationData}) = error("Missing method to update MED of type $T")
+# specific cases
+refresh_med!(m::AbstractModel, ::Type{NoModelEvaluationData}) = (m.evaldata = ModelEvaluationData(m); m)
+refresh_med!(m::AbstractModel, ::Type{<:ModelEvaluationData}) = (m.evaldata = ModelEvaluationData(m); m)
+refresh_med!(m::AbstractModel, ::Type{SelectiveLinearizationMED}) = selective_linearize!(m)
+export refresh_med!

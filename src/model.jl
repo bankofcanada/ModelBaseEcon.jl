@@ -48,6 +48,7 @@ mutable struct Model <: AbstractModel
     "Flags contain meta information about the type of model"
     flags::ModelFlags
     sstate::SteadyStateData
+    dynss::Bool
     #### Inputs from user
     # transition variables
     variables::Vector{ModelVariable}
@@ -71,9 +72,9 @@ mutable struct Model <: AbstractModel
     # 
     # constructor of an empty model
     Model(opts::Options) = new(merge(defaultoptions, opts),
-        ModelFlags(), SteadyStateData(), [], [], [], Parameters(), Dict(), 0, 0, [], [], NoMED)
+        ModelFlags(), SteadyStateData(), false, [], [], [], Parameters(), Dict(), 0, 0, [], [], NoMED)
     Model() = new(deepcopy(defaultoptions),
-        ModelFlags(), SteadyStateData(), [], [], [], Parameters(), Dict(), 0, 0, [], [], NoMED)
+        ModelFlags(), SteadyStateData(), false, [], [], [], Parameters(), Dict(), 0, 0, [], [], NoMED)
 end
 
 
@@ -525,11 +526,11 @@ function process_equation(model::Model, expr::Expr;
     allvars = model.allvars
 
     # keep track of model parameters used in expression
-    prefs = OrderedDict{Symbol,Symbol}()
+    prefs = LittleDict{Symbol,Symbol}()
     # keep track of references to known time series in the expression
-    tsrefs = OrderedDict{Tuple{Symbol,Int64},Symbol}()
+    tsrefs = LittleDict{Tuple{Symbol,Int64},Symbol}()
     # keep track of references to steady states of known time series in the expression
-    ssrefs = OrderedDict{Symbol,Symbol}()
+    ssrefs = LittleDict{Symbol,Symbol}()
     # keep track of the source code location where the equation was defined
     #  (helps with tracking the locations of errors)
     source = []
@@ -870,6 +871,7 @@ function add_equation!(model::Model, expr::Expr; modelmodule::Module = moduleof(
     push!(model.equations, eqn)
     model.maxlag = max(model.maxlag, eqn.maxlag)
     model.maxlead = max(model.maxlead, eqn.maxlead)
+    model.dynss = model.dynss || !isempty(eqn.ssrefs)
     for i ∈ eachindex(auxeqns)
         eqn = process_equation(model, auxeqns[i]; modelmodule = modelmodule, line = source[1])
         push!(model.auxeqns, eqn)
@@ -901,17 +903,20 @@ function initialize!(model::Model, modelmodule::Module)
     eqns = [e.expr for e in model.equations]
     empty!(model.equations)
     empty!(model.auxeqns)
+    model.dynss = false
     for e in eqns
         add_equation!(model, e; modelmodule = modelmodule)
     end
-    # for (i, v) in enumerate(model.allvars)
-    #     model.:($(v.name)) = update(v, index = i)
-    # end
-    # Note: we cannot set any other evaluation method yet - they require steady
-    # state solution and we probably don't have that yet.
-    model.evaldata = ModelEvaluationData(model)
     initssdata!(model)
     update_links!(model.parameters)
+    if !model.dynss
+        # Note: we cannot set any other evaluation method yet - they require steady
+        # state solution and we don't have that yet.
+        model.evaldata = ModelEvaluationData(model)
+    else
+        # if dynss is true, then we need the steady state even for the standard MED
+        nothing
+    end
     return nothing
 end
 

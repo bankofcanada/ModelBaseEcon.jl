@@ -346,8 +346,8 @@ end
 
 ##############
 
-@inline __lag(jt, s) = s.shift ? jt.tlag + s.model[].shift : jt.tlag
-@inline function __to_dyn_pt(pt, s)
+__lag(jt, s) = s.shift ? jt.tlag + s.model[].shift : jt.tlag
+function __to_dyn_pt(pt, s)
     # This function applies the transformation from steady
     # state equation unknowns to dynamic equation unknowns
     buffer = fill(0.0, length(s.JT))
@@ -361,18 +361,18 @@ end
     end
     return buffer
 end
-@inline function __to_ssgrad(pt, jj, s)
+function __to_ssgrad(pt, jj, s)
     # This function inverts the transformation. jj is the gradient of the
     # dynamic equation residual with respect to the dynamic equation unknowns.
     # Here we compute the Jacobian of the transformation and use it to compute
     ss = zeros(size(pt))
     for (i, jt) in enumerate(s.JT)
         if length(jt.ssinds) == 1
-            pti = pt[jt.ssinds[1]]
+            # pti = pt[jt.ssinds[1]]
             ss[jt.ssinds[1]] += jj[i]
         else
             local lag_jt = __lag(jt, s)
-            pti = pt[jt.ssinds[1]] + lag_jt * pt[jt.ssinds[2]]
+            # pti = pt[jt.ssinds[1]] + lag_jt * pt[jt.ssinds[2]]
             ss[jt.ssinds[1]] += jj[i]
             ss[jt.ssinds[2]] += jj[i] * lag_jt
         end
@@ -385,11 +385,11 @@ end
     return ss
 end
 function sseqn_resid_RJ(s::SSEqnData)
-    function _resid(pt::AbstractVector{Float64})
+    function _resid(pt::Vector{<:Real})
         _update_eqn_params!(s.eqn.eval_resid, s.model[].parameters)
         return s.eqn.eval_resid(__to_dyn_pt(pt, s))
     end
-    function _RJ(pt::AbstractVector{Float64})
+    function _RJ(pt::Vector{<:Real})
         _update_eqn_params!(s.eqn.eval_resid, s.model[].parameters)
         R, jj = s.eqn.eval_RJ(__to_dyn_pt(pt, s))
         return R, __to_ssgrad(pt, jj, s)
@@ -408,7 +408,7 @@ Internal function, do not call directly.
 function make_sseqn(model::AbstractModel, eqn::Equation, shift::Bool)
     local allvars = model.allvars
     tvalue(t) = shift ? t + model.shift : t
-    # ssind converts the dynamic index (t, v) into
+    # ssind converts the dynamic index (v, t) into
     # the corresponding indexes of steady state unknowns.
     # Returned value is a list of length 0, 1, or 2.
     function ssind((var, ti),)::Array{Int64,1}
@@ -427,14 +427,25 @@ function make_sseqn(model::AbstractModel, eqn::Equation, shift::Bool)
     end
     local ss = model.sstate
     # The steady state indexes.
-    vinds = unique(vcat(map(ssind, (collect ∘ keys)(eqn.tsrefs))...))
+    vinds = Int[]
+    for (v, t) in keys(eqn.tsrefs)
+        push!(vinds, ssind((v,t))...)
+    end
+    for v in keys(eqn.ssrefs)
+        push!(vinds, ssind((v, 0))...)
+    end
+    unique!(vinds)
     # The corresponding steady state symbols
     vsyms = Symbol[ss_symbol(ss, vi) for vi in vinds]
     # In the next loop we build the matrix JT which transforms
     # from the steady state values to the dynamic point values.
     JT = []
-    for (i, (var, ti)) in enumerate(keys(eqn.tsrefs))
+    for (var, ti) in keys(eqn.tsrefs)
         val = (ssinds = indexin(ssind((var, ti)), vinds), tlag = ti)
+        push!(JT, val)
+    end
+    for var in keys(eqn.ssrefs)
+        val = (ssinds = indexin(ssind((var, 0)), vinds), tlag = 0)
         push!(JT, val)
     end
     type = shift == 0 ? :tzero : :tshift

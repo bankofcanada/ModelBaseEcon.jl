@@ -77,11 +77,11 @@ struct Equation <: AbstractEquation
     """
     resid::Expr     # residual expression
     "references to time series variables"
-    tsrefs::OrderedDict{Tuple{ModelSymbol, Int}, Symbol}
+    tsrefs::LittleDict{Tuple{ModelSymbol, Int}, Symbol}
     "references to steady states of variables"
-    ssrefs::OrderedDict{ModelSymbol, Symbol}
+    ssrefs::LittleDict{ModelSymbol, Symbol}
     "references to parameter values"
-    prefs::OrderedDict{Symbol, Symbol}
+    prefs::LittleDict{Symbol, Symbol}
     "A callable (function) evaluating the residual. Argument is a vector of Float64 same lenght as `vinds`"
     eval_resid::Function  # function evaluating the residual
     "A callable (function) evaluating the (residual, gradient) pair. Argument is a vector of Float64 same lenght as `vinds`"
@@ -90,7 +90,7 @@ end
 
 # 
 # dummy constructor - just stores the expresstion without any processing
-Equation(expr::ExtExpr) = Equation("", EqnFlags(), expr, Expr(:block), OrderedDict(), OrderedDict(), OrderedDict(), eqnnotready, eqnnotready)
+Equation(expr::ExtExpr) = Equation("", EqnFlags(), expr, Expr(:block), LittleDict(), LittleDict(), LittleDict(), eqnnotready, eqnnotready)
 
 function Base.getproperty(eqn::Equation, sym::Symbol)
     if sym == :maxlag
