@@ -53,7 +53,7 @@
         for i = 1:50
             m.β = β = rand()
             m.α = α = rand()
-            m.q = q = 2 + (8-2)*rand()
+            m.q = q = 2 + (8 - 2) * rand()
             _, J = seq.eval_RJ(ss.values[seq.vinds])
             @test J[inds] ≈ [1 - β, β, -q * (1 - β)]
         end
@@ -62,3 +62,16 @@
     @test_logs (:warn, r".*non-zero slope.*"i) (:warn, r".*non-zero slope.*"i) refresh_med!(m)
 end
 
+@using_example S2
+@testset "dynss2" begin
+    m = S2.model
+    # make sure @sstate(x) was transformed
+    @test m.equations[1].ssrefs[:x] === Symbol("#log#x#ss#")
+
+    xi = ModelBaseEcon._index_of_var(:x, m.variables)
+    for i = 1:10
+        x = 0.1 + 6*rand()
+        m.sstate.x.level = x
+        @test m.sstate.values[2xi-1] ≈ log(x)
+    end
+end

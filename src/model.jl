@@ -719,10 +719,11 @@ function process_equation(model::Model, expr::Expr;
             newsym = ssrefs[var]
             return make_residual_expression(var, newsym)
         elseif ex.head == :(=)
+            lhs, rhs = map(make_residual_expression, ex.args)
             if flags.log
-                return Expr(:call, :log, Expr(:call, :/, map(make_residual_expression, ex.args)...))
+                return Expr(:call, :log, Expr(:call, :/, lhs, rhs))
             else
-                return Expr(:call, :-, map(make_residual_expression, ex.args)...)
+                return Expr(:call, :-, lhs, rhs)
             end
         end
         return Expr(ex.head, map(make_residual_expression, ex.args)...)
