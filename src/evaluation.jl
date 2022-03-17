@@ -13,7 +13,7 @@
     precompilefuncs(resid, RJ, ::Val{N}) where N
 
 Add code that precompiles the given `resid` and `RJ` functions together
-with the dual-number arythmetic required by ForwardDiff.
+with the dual-number arithmetic required by ForwardDiff.
 
 !!! warning
     Internal function. Do not call directly
@@ -65,9 +65,9 @@ in the given module.
 
 ### Implementation (for developers)
 We need two identifiers `resid_N` and `RJ_N` where "N" is some integer number.
-The first is going to be the name of the function that evaluates the equation and
-the second is going to be the name of the function that evaluates both the equation
-and its gradient.
+The first is going to be the name of the function that evaluates the equation
+and the second is going to be the name of the function that evaluates both the
+equation and its gradient.
 """
 function funcsyms end
 
@@ -78,12 +78,12 @@ function funcsyms(mod::Module)
     fn1, fn2 = mod.eval(quote
         let nms = names(@__MODULE__; all = true)
             num = $(@__MODULE__).funcsyms_counter()
-            local fn1 = Symbol("resid_$num")
-            local fn2 = Symbol("RJ_$num")
+            local fn1 = Symbol("resid_", num)
+            local fn2 = Symbol("RJ_", num)
             while fn1 ∈ nms || fn2 ∈ nms
                 num = $(@__MODULE__).funcsyms_counter()
-                fn1 = Symbol("resid_$num")
-                fn2 = Symbol("RJ_$num")
+                fn1 = Symbol("resid_", num)
+                fn2 = Symbol("RJ_", num)
             end
             fn1, fn2
         end
@@ -91,7 +91,7 @@ function funcsyms(mod::Module)
 end
 
 """
-    makefuncs(expr, vsyms [, params_expr]; mod::Module)
+    makefuncs(expr, tssyms, sssyms, psyms, mod)
 
 Create two functions that evaluate the residual and its gradient for the given
 expression.
@@ -101,26 +101,25 @@ expression.
 
 ### Arguments
 - `expr`: the expression
-- `vsyms`: a list of variables in the expression.
-- `params_expr`: an expression to be included in the function code before evaluating 
-    the expression. This allows for assigning values of parameters in the expression,
-    i.e. variables that are not arguments to the funcion.
+- `XXsyms`: a list of symbols for variables, steady state, parameters
 
 ### Return value
 Return a quote block to be evaluated in the module where the model is being defined. 
 The quote block contains definitions of the residual function and a second function
 that evaluates both the residual and its gradient.
 """
-function makefuncs(expr, vsyms, params_expr = nothing; mod::Module)
+function makefuncs(expr, tssyms, sssyms, psyms, mod)
     fn1, fn2 = funcsyms(mod)
     x = gensym("x")
-    nargs = length(vsyms)
+    nargs = length(tssyms) + length(sssyms)
     return quote
-        function $fn1($x::AbstractVector{T}) where {T<:Real}
-            ($(vsyms...),) = $x
-            $(params_expr)
+        function (ee::EquationEvaluator{$(QuoteNode(fn1))})($x::Vector{<:Real})
+            ($(tssyms...), $(sssyms...),) = $x
+            ($(psyms...),) = values(ee.params)
             $expr
         end
+        const $fn1 = EquationEvaluator{$(QuoteNode(fn1))}(UInt(0),
+            $(@__MODULE__).LittleDict(p => nothing for p in ($(QuoteNode.(psyms)...),)))
         const $fn2 = EquationGradient($fn1, Val($nargs))
         $(@__MODULE__).precompilefuncs($fn1, $fn2, Val($nargs), MyTag)
         ($fn1, $fn2)
@@ -139,6 +138,10 @@ function initfuncs(mod::Module)
     if :MyTag ∉ names(mod; all = true)
         mod.eval(quote
             struct MyTag end
+            struct EquationEvaluator{FN} <: Function
+                rev::Ref{UInt}
+                params::$(@__MODULE__).LittleDict{Symbol,Any}
+            end
             struct EquationGradient{DR,CFG} <: Function
                 fn1::Function
                 dr::DR
@@ -147,7 +150,7 @@ function initfuncs(mod::Module)
             EquationGradient(fn1::Function, ::Val{N}) where {N} = EquationGradient(fn1,
                 $(@__MODULE__).DiffResults.DiffResult(zero(Float64), zeros(Float64, N)),
                 $(@__MODULE__).ForwardDiff.GradientConfig(fn1, zeros(Float64, N), $(@__MODULE__).ForwardDiff.Chunk{N}(), MyTag))
-            function (s::EquationGradient)(x::AbstractVector{Float64})
+            function (s::EquationGradient)(x::Vector{Float64})
                 $(@__MODULE__).ForwardDiff.gradient!(s.dr, s.fn1, x, s.cfg)
                 return s.dr.value, s.dr.derivs[1]
             end
@@ -165,12 +168,44 @@ end
 # selectively linearized equations.
 
 abstract type AbstractEqnEvalData end
-@inline eval_RJ(eqn, x) = eqn.eval_RJ(x)
-@inline eval_resid(eqn, x) = eqn.eval_resid(x)
+eval_RJ(eqn, x) = eqn.eval_RJ(x)
+eval_resid(eqn, x) = eqn.eval_resid(x)
 
-struct EqnEvalData <: AbstractEqnEvalData end
-@inline eval_RJ(eqn, x, ::EqnEvalData) = eqn.eval_RJ(x)
-@inline eval_resid(eqn, x, ::EqnEvalData) = eqn.eval_resid(x)
+abstract type DynEqnEvalData <: AbstractEqnEvalData end
+struct DynEqnEvalData0 <: DynEqnEvalData end
+struct DynEqnEvalDataN <: DynEqnEvalData
+    ss::Vector{Float64}
+end
+
+function _fill_ss_values(eqn, ssvals, allvars)
+    ret = fill(0.0, length(eqn.ssrefs))
+    bad = ModelSymbol[]
+    for (i, v) in enumerate(keys(eqn.ssrefs))
+        vi = _index_of_var(v, allvars)
+        ret[i] = ssvals[2vi-1]
+        if !isapprox(ssvals[2vi], 0, atol = 1e-12)
+            push!(bad, v)
+        end
+    end
+    if !isempty(bad)
+        nzslope = tuple(unique(bad)...)
+        @warn "@sstate used with non-zero slope" eqn nzslope
+    end
+    return ret
+end
+function DynEqnEvalData(eqn, model)
+    return length(eqn.ssrefs) == 0 ? DynEqnEvalData0() : DynEqnEvalDataN(
+        _fill_ss_values(eqn, model.sstate.values, model.allvars)
+    )
+end
+
+eval_resid(eqn, x, ed::DynEqnEvalDataN) = eqn.eval_resid(vcat(x, ed.ss))
+@inline function eval_RJ(eqn, x, ed::DynEqnEvalDataN)
+    R, J = eqn.eval_RJ(vcat(x, ed.ss))
+    return (R, J[1:length(x)])
+end
+eval_resid(eqn, x, ::DynEqnEvalData0) = eqn.eval_resid(x)
+eval_RJ(eqn, x, ::DynEqnEvalData0) = eqn.eval_RJ(x)
 
 
 """
@@ -189,17 +224,18 @@ abstract type AbstractModelEvaluationData end
 """
     eval_R!(res::AbstractArray{Float64,1}, point::AbstractArray{Float64, 2}, ::MED) where MED <: AbstractModelEvaluationData
 
-Evaluate the model residual at the given point using the given model evaluation structure.
-The residual is stored in the provided vector.
+Evaluate the model residual at the given point using the given model evaluation
+structure. The residual is stored in the provided vector.
 
 ### Implementation details (for developers)
-When creating a new type of model evaluation data, you must define a
-method of this function specialized to it.
+When creating a new type of model evaluation data, you must define a method of
+this function specialized to it.
 
 The `point` argument will be a 2d array, with the number of rows equal to
-`maxlag+maxlead+1` and the number of columns equal to the number of `variables+shocks+auxvars` of the model.
-The `res` vector will have the same length as the number of equations + auxiliary equations. 
-Your implementation must not modify `point` and must update `res`.
+`maxlag+maxlead+1` and the number of columns equal to the number of
+`variables+shocks+auxvars` of the model. The `res` vector will have the same
+length as the number of equations + auxiliary equations. Your implementation
+must not modify `point` and must update `res`.
 
 See also: [`eval_RJ`](@ref)
 """
@@ -210,17 +246,20 @@ eval_R!(res::AbstractVector{Float64}, point::AbstractMatrix{Float64}, ::AMED) wh
 """
     eval_RJ(point::AbstractArray{Float64, 2}, ::MED) where MED <: AbstractModelEvaluationData
 
-Evaluate the model residual and its Jacobian at the given point using the given model evaluation structure.
-Return a tuple, with the first element being the residual and the second element being the Jacobian.
+Evaluate the model residual and its Jacobian at the given point using the given
+model evaluation structure. Return a tuple, with the first element being the
+residual and the second element being the Jacobian.
 
 ### Implementation details (for developers)
-When creating a new type of model evaluation data, you must define a
-method of this function specialized to it.
+When creating a new type of model evaluation data, you must define a method of
+this function specialized to it.
 
 The `point` argument will be a 2d array, with the number of rows equal to
-`maxlag+maxlead+1` and the number of columns equal to the number of `variables+shocks+auxvars` of the model.
-Your implementation must not modify `point` and must return the tuple of (residual, Jacobian) evaluated
-at the given `point`. The Jacobian is expected to be `SparseMatrixCSC` (*this might change in the future*).
+`maxlag+maxlead+1` and the number of columns equal to the number of
+`variables+shocks+auxvars` of the model. Your implementation must not modify
+`point` and must return the tuple of (residual, Jacobian) evaluated at the given
+`point`. The Jacobian is expected to be `SparseMatrixCSC` (*this might change in
+the future*).
 
 See also: [`eval_R!`](@ref)
 """
@@ -233,9 +272,9 @@ eval_RJ(point::AbstractMatrix{Float64}, ::AMED) where {AMED<:AbstractModelEvalua
 """
     struct NoModelEvaluationData <: AbstractModelEvaluationData
 
-Specific type that indicates that the model cannot be evaluated.
-This is used as a placeholder while the model is being defined.
-During initialization, the actual model evaluation data is created.
+Specific type that indicates that the model cannot be evaluated. This is used as
+a placeholder while the model is being defined. During initialization, the
+actual model evaluation data is created.
 """
 struct NoModelEvaluationData <: AbstractModelEvaluationData end
 const NoMED = NoModelEvaluationData()
@@ -248,7 +287,9 @@ eval_RJ(point::AbstractMatrix{Float64}, ::NoModelEvaluationData) = throw(ModelNo
 
 The standard model evaluation data used in the general case and by default.
 """
-struct ModelEvaluationData{E<:AbstractEquation,I} <: AbstractModelEvaluationData
+struct ModelEvaluationData{E<:AbstractEquation,I,D<:DynEqnEvalData} <: AbstractModelEvaluationData
+    params::Ref{Parameters{ModelParam}}
+    eedata::Vector{D}
     alleqns::Vector{E}
     allinds::Vector{I}
     "Placeholder for the Jacobian matrix"
@@ -256,6 +297,17 @@ struct ModelEvaluationData{E<:AbstractEquation,I} <: AbstractModelEvaluationData
     "Placeholder for the residual vector"
     R::Vector{Float64}
     rowinds::Vector{Vector{Int64}}
+end
+
+_index_of_var(var, allvars) = indexin([var], allvars)[1]
+
+@inline function _update_eqn_params!(ee, params)
+    if ee.rev[] !== params.rev[]
+        for k in keys(ee.params)
+            ee.params[k] = getproperty(params, k)
+        end
+        ee.rev[] = params.rev[]
+    end
 end
 
 """
@@ -267,33 +319,39 @@ function ModelEvaluationData(model::AbstractModel)
     time0 = 1 + model.maxlag
     alleqns = model.alleqns
     neqns = length(alleqns)
-    allinds = @timer [[CartesianIndex((time0 + ti, vi)) for (ti, vi) in eqn.vinds] for eqn in alleqns]
+    allvars = model.allvars
+    nvars = length(allvars)
+    allinds = [[CartesianIndex((time0 + ti, _index_of_var(var, allvars))) for (var, ti) in keys(eqn.tsrefs)] for eqn in alleqns]
     ntimes = 1 + model.maxlag + model.maxlead
-    nvars = length(model.allvars)
     LI = LinearIndices((ntimes, nvars))
-    II = @timer reduce(vcat, (fill(Int64(i), length(eqn.vinds)) for (i, eqn) in enumerate(alleqns)))
-    JJ = @timer [LI[inds] for inds in allinds]
-    M = @timer SparseArrays.sparse(II, reduce(vcat, JJ), similar(II), neqns, ntimes * nvars)
-    M.nzval .= @timer 1:length(II)
-    rowinds = @timer [copy(M[i, LI[inds]].nzval) for (i, inds) in enumerate(JJ)]
-    ModelEvaluationData(alleqns, allinds, similar(M, Float64), Vector{Float64}(undef, neqns), rowinds)
+    II = reduce(vcat, (fill(i, length(eqn.tsrefs)) for (i, eqn) in enumerate(alleqns)))
+    JJ = [LI[inds] for inds in allinds]
+    M = SparseArrays.sparse(II, reduce(vcat, JJ), similar(II), neqns, ntimes * nvars)
+    M.nzval .= 1:length(II)
+    rowinds = [copy(M[i, LI[inds]].nzval) for (i, inds) in enumerate(JJ)]
+    eedata = [DynEqnEvalData(eqn, model) for eqn in alleqns]
+    if model.dynss && !issssolved(model)
+        @warn "Steady state not solved."
+    end
+    ModelEvaluationData(Ref(model.parameters), eedata,
+        alleqns, allinds, similar(M, Float64), Vector{Float64}(undef, neqns), rowinds)
 end
 
-function eval_R!(res::AbstractVector{Float64}, point::AbstractMatrix{Float64}, med::ModelEvaluationData)
-    # med === NoMED && throw(ModelNotInitError())
-    for (i, eqn, inds) in zip(1:length(med.alleqns), med.alleqns, med.allinds)
-        res[i] = eval_resid(eqn, point[inds])
+function eval_R!(res::AbstractVector{Float64}, point::Matrix{Float64}, med::ModelEvaluationData)
+    for (i, eqn, inds, ed) in zip(1:length(med.alleqns), med.alleqns, med.allinds, med.eedata)
+        _update_eqn_params!(eqn.eval_resid, med.params[])
+        res[i] = eval_resid(eqn, point[inds], ed)
     end
     return nothing
 end
 
-function eval_RJ(point::AbstractMatrix{Float64}, med::ModelEvaluationData)
-    # med === NoMED && throw(ModelNotInitError())
+function eval_RJ(point::Matrix{Float64}, med::ModelEvaluationData)
     neqns = length(med.alleqns)
     res = similar(med.R)
     jac = med.J
-    for (i, eqn, inds, ri) in zip(1:neqns, med.alleqns, med.allinds, med.rowinds)
-        res[i], jac.nzval[ri] = eval_RJ(eqn, point[inds])
+    for (i, eqn, inds, ri, ed) in zip(1:neqns, med.alleqns, med.allinds, med.rowinds, med.eedata)
+        _update_eqn_params!(eqn.eval_resid, med.params[])
+        res[i], jac.nzval[ri] = eval_RJ(eqn, point[inds], ed)
     end
     return res, jac
 end
@@ -318,11 +376,11 @@ mutable struct LinEqnEvalData <: AbstractEqnEvalData
     LinEqnEvalData(r, g, s) = new(Float64(r), Float64[g...], Float64[s...])
 end
 
-@inline eval_resid(eqn, x, eed::LinEqnEvalData) = eed.resid + sum(eed.grad .* (x - eed.sspt))
-@inline eval_RJ(eqn, x, eed::LinEqnEvalData) = (eval_resid(eqn, x, eed), eed.grad)
+eval_resid(eqn, x, led::LinEqnEvalData) = led.resid + sum(led.grad .* (x - led.sspt))
+eval_RJ(eqn, x, led::LinEqnEvalData) = (eval_resid(eqn, x, led), led.grad)
 
-function LinEqnEvalData(eqn, sspt)
-    return LinEqnEvalData(eqn.eval_RJ(sspt)..., sspt)
+function LinEqnEvalData(eqn, sspt, ed::DynEqnEvalData)
+    return LinEqnEvalData(eval_RJ(eqn, sspt, ed)..., sspt)
 end
 
 mutable struct SelectiveLinearizationMED <: AbstractModelEvaluationData
@@ -341,14 +399,7 @@ function SelectiveLinearizationMED(model::AbstractModel)
         error("Steady state solution has non-zero slope. Not yet implemented.")
     end
 
-    med = model.evaldata
-    if !isa(med, ModelEvaluationData)
-        if hasproperty(med, :med)
-            med = med.med
-        else
-            med = ModelEvaluationData(model)
-        end
-    end
+    med = ModelEvaluationData(model)
 
     sspt = Matrix{Float64}(undef, 1 + model.maxlag + model.maxlead, length(model.varshks))
     for (i, v) in enumerate(model.varshks)
@@ -357,15 +408,17 @@ function SelectiveLinearizationMED(model::AbstractModel)
     eedata = Vector{AbstractEqnEvalData}(undef, length(med.alleqns))
     num_lin = 0
     for (i, (eqn, inds)) in enumerate(zip(med.alleqns, med.allinds))
+        _update_eqn_params!(eqn.eval_resid, model.parameters)
+        ed = DynEqnEvalData(eqn, model)
         if islin(eqn)
             num_lin += 1
-            eedata[i] = LinEqnEvalData(eqn, sspt[inds])
+            eedata[i] = LinEqnEvalData(eqn, sspt[inds], ed)
             resid = eedata[i].resid
             if abs(resid) > getoption(model, :tol, 1e-12)
                 @warn "Non-zero steady state residual in equation E$i" eqn resid
             end
         else
-            eedata[i] = EqnEvalData()
+            eedata[i] = ed
         end
     end
     if num_lin == 0
@@ -375,20 +428,22 @@ function SelectiveLinearizationMED(model::AbstractModel)
 end
 
 
-function eval_R!(res::AbstractVector{Float64}, point::AbstractMatrix{Float64}, slmed::SelectiveLinearizationMED)
+function eval_R!(res::AbstractVector{Float64}, point::Matrix{Float64}, slmed::SelectiveLinearizationMED)
     med = slmed.med
     for (i, eqn, inds, eed) in zip(1:length(med.alleqns), med.alleqns, med.allinds, slmed.eedata)
+        islin(eqn) || _update_eqn_params!(eqn.eval_resid, med.params)
         res[i] = eval_resid(eqn, point[inds], eed)
     end
     return nothing
 end
 
-function eval_RJ(point::AbstractMatrix{Float64}, slmed::SelectiveLinearizationMED)
+function eval_RJ(point::Matrix{Float64}, slmed::SelectiveLinearizationMED)
     med = slmed.med
     neqns = length(med.alleqns)
     res = similar(med.R)
     jac = med.J
     for (i, eqn, inds, ri, eed) in zip(1:neqns, med.alleqns, med.allinds, med.rowinds, slmed.eedata)
+        islin(eqn) || _update_eqn_params!(eqn.eval_resid, med.params)
         res[i], jac.nzval[ri] = eval_RJ(eqn, point[inds], eed)
     end
     return res, jac
@@ -397,9 +452,9 @@ end
 """
     selective_linearize!(model)
 
-Instruct the model instance to use selective linearization. 
-Only equations annotated with `@lin` in the model definition will be
-linearized about the current steady state solution while the rest of the eq
+Instruct the model instance to use selective linearization. Only equations
+annotated with `@lin` in the model definition will be linearized about the
+current steady state solution while the rest of the eq
     
 """
 function selective_linearize!(model::AbstractModel)
@@ -407,3 +462,21 @@ function selective_linearize!(model::AbstractModel)
     return model
 end
 export selective_linearize!
+
+
+"""
+    refresh_med!(model)
+
+Refresh the model evaluation data stored within the given model instance. Most
+notably, this is necessary when the steady state is used in the dynamic
+equations.
+"""
+# dispatcher
+refresh_med!(m::AbstractModel) = refresh_med!(m, typeof(m.evaldata))
+# catch all and issue a meaningful error message
+refresh_med!(m::AbstractModel, T::Type{<:AbstractModelEvaluationData}) = error("Missing method to update MED of type $T")
+# specific cases
+refresh_med!(m::AbstractModel, ::Type{NoModelEvaluationData}) = (m.evaldata = ModelEvaluationData(m); m)
+refresh_med!(m::AbstractModel, ::Type{<:ModelEvaluationData}) = (m.evaldata = ModelEvaluationData(m); m)
+refresh_med!(m::AbstractModel, ::Type{SelectiveLinearizationMED}) = selective_linearize!(m)
+export refresh_med!

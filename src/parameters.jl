@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020, Bank of Canada
+# Copyright (c) 2020-2022, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -42,6 +42,7 @@ See also: [`ModelParam`](@ref), [`peval`](@ref), [`@alias`](@ref),
 struct Parameters{P<:AbstractParam} <: AbstractDict{Symbol,P}
     mod::Ref{Module}
     contents::Dict{Symbol,P}
+    rev::Ref{UInt}  # revision number, changes every time we update
 end
 
 """
@@ -60,6 +61,10 @@ ModelParam() = ModelParam(Set{Symbol}(), nothing, nothing)
 ModelParam(value) = ModelParam(Set{Symbol}(), nothing, value)
 ModelParam(value::Union{Symbol,Expr}) = ModelParam(Set{Symbol}(), value, nothing)
 
+Base.hash(mp::ModelParam, h::UInt) = hash((mp.link, mp.value), h)
+
+const _default_dict = Dict{Symbol,ModelParam}()
+const _default_hash = hash(_default_dict)
 """
     Parameters([mod::Module])
 
@@ -69,7 +74,7 @@ any link parameters that depend on custom functions or global
 variables/constants. In this case, the `mod` argument should be the module in
 which these definitions exist.
 """
-Parameters(mod::Module=@__MODULE__) = Parameters(Ref(mod), Dict{Symbol,ModelParam}())
+Parameters(mod::Module = @__MODULE__) = Parameters(Ref(mod), copy(_default_dict), Ref(_default_hash))
 
 """
     params = @parameters
@@ -79,11 +84,11 @@ container, with its evaluation module set to the module in which the macro is
 being called.
 """
 macro parameters()
-    return :( Parameters($__module__) )
+    return :(Parameters($__module__))
 end
 
 # To deepcopy() Parameters, we make a new Ref to the same module and a deepcopy of contents.
-Base.deepcopy_internal(p::Parameters, stackdict::IdDict) = Parameters(Ref(p.mod[]), Base.deepcopy_internal(p.contents, stackdict))
+Base.deepcopy_internal(p::Parameters, stackdict::IdDict) = Parameters(Ref(p.mod[]), Base.deepcopy_internal(p.contents, stackdict), Ref(p.rev[]))
 
 # The following functionality is forwarded to the contents
 # iteration
@@ -107,7 +112,7 @@ end
 ```
 """
 macro alias(arg)
-    return arg isa Symbol ? ModelParam(arg) : :( throw(ArgumentError("`@alias` requires a symbol. Use `@link` with expressions.")) )
+    return arg isa Symbol ? ModelParam(arg) : :(throw(ArgumentError("`@alias` requires a symbol. Use `@link` with expressions.")))
 end
 
 """
@@ -136,13 +141,13 @@ depends on it gets updated automatically.
     In such case, it is necessary to call [`update_links!`](@ref).
 """
 macro link(arg)
-    return arg isa Union{Symbol,Expr} ? ModelParam(arg) : :( throw(ArgumentError("`@link` requires an expression.")) )
+    return arg isa Union{Symbol,Expr} ? ModelParam(arg) : :(throw(ArgumentError("`@link` requires an expression.")))
 end
 
 Base.show(io::IO, p::ModelParam) = begin
     p.link === nothing ? print(io, p.value) :
     p.link isa Symbol ? print(io, "@alias ", p.link) :
-                        print(io, "@link ", p.link)
+    print(io, "@link ", p.link)
 end
 
 Base.:(==)(l::ModelParam, r::ModelParam) = l.link === nothing && l.value == r.value || l.link == r.link
@@ -253,7 +258,7 @@ Iterates the given Parameters collection in the order of dependency.
 Specifically, each parameter comes up only after all parameters it depends on
 have already been visited. The order within that is alphabetical.
 """
-function Base.iterate(params::Parameters, done=Set{Symbol}())
+function Base.iterate(params::Parameters, done = Set{Symbol}())
     if length(done) == length(params.contents)
         return nothing
     end
@@ -294,11 +299,17 @@ necessary to call `update_links!`.
 """
 update_links!(m::AbstractModel) = update_links!(parameters(m))
 function update_links!(params::Parameters)
+    updated = false
     for (k, v) in params
         if v.link !== nothing
             v.value = peval(params, v.link)
+            updated = true
         end
     end
+    if updated
+        params.rev[] = hash(params.contents)
+    end
+    return params
 end
 
 function Base.setindex!(params::Parameters, val, key)
@@ -314,7 +325,8 @@ function Base.setindex!(params::Parameters, val, key)
     p.link = _link(val)
     p.value = _value(val)
     _update_values(params, p, key)
-    params
+    params.rev[] = hash(params.contents)
+    return params
 end
 
 Base.propertynames(params::Parameters) = tuple(keys(params)...)
@@ -367,21 +379,22 @@ julia> assign_parameters(E1.model; α=0.3, β=0.7)
 ```
 
 """
-@inline assign_parameters!(mp::Union{AbstractModel, Parameters};  preserve_links=true, check=true, args...) =
-            assign_parameters!(mp, args; preserve_links, check)
+@inline assign_parameters!(mp::Union{AbstractModel,Parameters}; preserve_links = true, check = true, args...) =
+    assign_parameters!(mp, args; preserve_links, check)
 
 @inline assign_parameters!(model::AbstractModel, args; kwargs...) =
     (assign_parameters!(model.parameters, args; kwargs...); model)
-    
-function assign_parameters!(params::Parameters, args; 
-            preserve_links=true, 
-            check=true)
+
+function assign_parameters!(params::Parameters, args;
+    preserve_links = true,
+    check = true)
+    not_model_parameters = Symbol[]
     for (skey, value) in args
         key = Symbol(skey)
         p = get(params.contents, key, nothing)
         # if not a parameter, do nothing
-        if p === nothing 
-            check && @warn "Unknown parameter: $key"
+        if p === nothing
+            check && push!(not_model_parameters, key)
             continue
         end
         # if a link and preserve_links is false, do nothing
@@ -393,14 +406,18 @@ function assign_parameters!(params::Parameters, args;
         p.value = _value(value)
         _update_values(params, p, key)
     end
+    if !isempty(not_model_parameters)
+        @warn "Model does not have parameters: " not_model_parameters
+    end
+    params.rev[] = hash(params.contents)
     return params
 end
 export assign_parameters!
 
-@inline export_parameters(model::AbstractModel; kwargs...) = export_parameters!(Dict{Symbol, Any}(), model.parameters; kwargs...)
-@inline export_parameters(params::Parameters; kwargs...) = export_parameters!(Dict{Symbol, Any}(), params; kwargs...)
+@inline export_parameters(model::AbstractModel; kwargs...) = export_parameters!(Dict{Symbol,Any}(), model.parameters; kwargs...)
+@inline export_parameters(params::Parameters; kwargs...) = export_parameters!(Dict{Symbol,Any}(), params; kwargs...)
 @inline export_parameters!(container, model::AbstractModel; kwargs...) = export_parameters!(container, model.parameters; kwargs...)
-function export_parameters!(container, params::Parameters; include_links=true)
+function export_parameters!(container, params::Parameters; include_links = true)
     for (key, value) in params
         if include_links || value.link === nothing
             push!(container, key => peval(params, value))

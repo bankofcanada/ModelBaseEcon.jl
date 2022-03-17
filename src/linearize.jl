@@ -105,25 +105,18 @@ function linearize!(model::Model;
     end
 
     # We need a ModelEvaluationData in order to proceed
-    if isa(model.evaldata, ModelEvaluationData)
-        med = model.evaldata
-    elseif hasproperty(model.evaldata, :med)
-        # Model has already been linearized
-        # We're not done though, because it may have been liearized about another point
-        # So we simply retrieve the old ModelEvaluationData and keep going with it.
-        med = model.evaldata.med
-    else
-        # What?! Didn't expect to get here. Oh well, we make a new ModelEvaluationData
-        med = @timer ModelEvaluationData(model)
+    med = model.evaldata
+    if !isa(model.evaldata, ModelEvaluationData)
+        med = ModelEvaluationData(model)
     end
 
     ntimes = 1 + model.maxlag + model.maxlead
     nvars = length(model.variables)
     nshks = length(model.shocks)
-    @timer sspt = [repeat(sstate.values[1:2:(2nvars)], inner = ntimes); zeros(ntimes * nshks)]
-    @timer sspt = reshape(sspt, ntimes, nvars + nshks)
+    sspt = [repeat(sstate.values[1:2:(2nvars)], inner = ntimes); zeros(ntimes * nshks)]
+    sspt = reshape(sspt, ntimes, nvars + nshks)
 
-    @timer eval_RJ(sspt, med)  # updates med.R and med.J in place
+    eval_RJ(sspt, med)  # updates med.R and med.J in place
     model.evaldata = LinearizedModelEvaluationData(deviation, sspt, med)
     return model
 end
@@ -189,3 +182,5 @@ function with_linearized(F::Function, model::Model; kwargs...)
     model.evaldata = ed
     return ret
 end
+
+refresh_med!(m::AbstractModel, ::Type{LinearizedModelEvaluationData}) = linearize!(m, ; deviation = m.evaldata.deviation)
