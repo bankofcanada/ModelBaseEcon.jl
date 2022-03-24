@@ -123,6 +123,10 @@ function Base.getproperty(model::Model, name::Symbol)
         return vcat(getfield(model, :variables), getfield(model, :shocks), getfield(model, :auxvars))
     elseif name == :varshks
         return vcat(getfield(model, :variables), getfield(model, :shocks))
+    elseif name == :exogenous
+        return filter(isexog, getfield(model, :variables))
+    elseif name == :nexog
+        return sum(isexog, getfield(model, :variables))
     elseif name == :alleqns
         return vcat(getfield(model, :equations), getfield(model, :auxeqns))
     elseif haskey(getfield(model, :parameters), name)
@@ -149,7 +153,7 @@ function Base.getproperty(model::Model, name::Symbol)
 end
 
 function Base.propertynames(model::Model, private::Bool = false)
-    return (fieldnames(Model)..., :nvars, :nshks, :nauxs, :allvars, :varshks, :alleqns,
+    return (fieldnames(Model)..., :exogenous, :nvars, :nshks, :nauxs, :nexog, :allvars, :varshks, :alleqns,
         keys(getfield(model, :options))..., fieldnames(ModelFlags)...,
         Symbol[getfield(model, :variables)...]...,
         Symbol[getfield(model, :shocks)...]...,
