@@ -8,9 +8,17 @@
 export SteadyStateEquation
 
 """
-    struct SteadyStateEquation <: AbstractEquation
+    struct SteadyStateEquation <: AbstractEquation ⋯ end
 
 Data structure representing an individual steady state equation.
+
+Steady state equations can be constructed from the dynamic equations of the
+model. Each steady state variable has two unknowns, level and slope, so from
+each dynamic equation we construct two steady state equations.
+
+Steady state equations can also be constructed with [`@steadystate`](@ref) after
+[`@initialize`](@ref) has been called. We call such equations steady state
+constraints.
 """
 struct SteadyStateEquation <: AbstractEquation
     type::Symbol
@@ -24,9 +32,10 @@ end
 ########################################################
 
 """
-    struct SteadyStateVariable
+    struct SteadyStateVariable ⋯ end
 
-Holds the steady state solution for one variable.
+Holds the steady state solution for one variable, which includes the values of
+two steady state unknowns - level and slope.
 """
 struct SteadyStateVariable{DATA<:AbstractVector{Float64},MASK<:AbstractVector{Bool}}
     # The corresponding entry in m.allvars. Needed for its type
@@ -39,17 +48,11 @@ struct SteadyStateVariable{DATA<:AbstractVector{Float64},MASK<:AbstractVector{Bo
     mask::MASK
 end
 
-for sym in (:lin, :log, :neglog, :steady, :exog, :shock)
-    issym = Symbol("is", sym)
-    eval(quote
-        @inline $(issym)(s::SteadyStateVariable) = $(issym)(s.name)
-    end)
-end
 
-@inline transformation(v::SteadyStateVariable) = transformation(v.name)
-@inline inverse_transformation(v::SteadyStateVariable) = inverse_transformation(v.name)
-@inline transform(x, v::SteadyStateVariable) = transform(x, v.name)
-@inline inverse_transform(x, v::SteadyStateVariable) = inverse_transform(x, v.name)
+transform(x, v::SteadyStateVariable) = transform(x, v.name)
+inverse_transform(x, v::SteadyStateVariable) = inverse_transform(x, v.name)
+@forward SteadyStateVariable.name transformation, inverse_transformation
+@forward SteadyStateVariable.name islin, islog, isneglog, issteady, isexog, isshock
 
 #############################################################################
 # Access to .level and .slope
@@ -79,7 +82,7 @@ end
 
 # use [] to get a time series of values.
 # the ref= value is the t at which it equals its level
-function Base.getindex(v::SteadyStateVariable, t; ref = first(t))
+function Base.getindex(v::SteadyStateVariable, t; ref=first(t))
     if eltype(t) != eltype(ref)
         throw(ArgumentError("Must provide reference time of the same type as the time index"))
     end
@@ -88,16 +91,14 @@ function Base.getindex(v::SteadyStateVariable, t; ref = first(t))
     return inverse_transform(v.data[1] .+ v.data[2] .* int_t, v)
 end
 
+#################################
 # pretty printing 
 
-"""
-    alignment5(io::IO, v::SteadyStateVariable)
 
-Return a 5-tuple with the number of characters for the name, and the alignment 2-tuples for level and slope.
-
-"""
+# Return a 5-tuple with the number of characters for the name, and the alignment
+# 2-tuples for level and slope.
 function alignment5(io::IO, v::SteadyStateVariable)
-    name = sprint(print, string(v.name.name), context = io, sizehint = 0)
+    name = sprint(print, string(v.name.name), context=io, sizehint=0)
     lvl_a = Base.alignment(io, v.level)
     if isshock(v) || issteady(v)
         slp_a = (0, 0)
@@ -107,7 +108,6 @@ function alignment5(io::IO, v::SteadyStateVariable)
     (length(name), lvl_a..., slp_a...)
 end
 
-
 function alignment5(io::IO, vars::AbstractVector{SteadyStateVariable})
     a = (0, 0, 0, 0, 0)
     for v in vars
@@ -116,21 +116,21 @@ function alignment5(io::IO, vars::AbstractVector{SteadyStateVariable})
     return a
 end
 
-function show_aligned5(io::IO, v::SteadyStateVariable, a = alignment5(io, v);
-    mask = trues(2), sep1 = " = ",
-    sep2 = islog(v) || isneglog(v) ? " * " : " + ",
-    sep3 = islog(v) || isneglog(v) ? "^t" : "*t")
-    name = sprint(print, string(v.name.name), context = io, sizehint = 0)
+function show_aligned5(io::IO, v::SteadyStateVariable, a=alignment5(io, v);
+    mask=trues(2), sep1=" = ",
+    sep2=islog(v) || isneglog(v) ? " * " : " + ",
+    sep3=islog(v) || isneglog(v) ? "^t" : "*t")
+    name = sprint(print, string(v.name.name), context=io, sizehint=0)
     if mask[1]
         lvl_a = Base.alignment(io, v.level)
-        lvl = sprint(show, v.level, context = io, sizehint = 0)
+        lvl = sprint(show, v.level, context=io, sizehint=0)
     else
         lvl_a = (0, 1)
         lvl = "?"
     end
     if mask[2]
         slp_a = Base.alignment(io, v.slope)
-        slp = sprint(show, v.slope, context = io, sizehint = 0)
+        slp = sprint(show, v.slope, context=io, sizehint=0)
     else
         slp_a = (0, 1)
         slp = "?"
@@ -142,7 +142,7 @@ function show_aligned5(io::IO, v::SteadyStateVariable, a = alignment5(io, v);
     end
 end
 
-@inline Base.show(io::IO, v::SteadyStateVariable) = show_aligned5(io, v)
+Base.show(io::IO, v::SteadyStateVariable) = show_aligned5(io, v)
 
 ########################################################
 
@@ -151,7 +151,11 @@ export SteadyStateData
 """
     SteadyStateData
 
-Data structure that holds information about the steady state solution of the Model.
+Data structure that holds information about the steady state solution of the
+Model. This includes a collection of [`SteadyStateVariable`](@ref)s and two
+collections of [`SteadyStateEquation`](@ref)s - one for the steady state
+equations generated from dynamic equations and another for steady state
+constraints created with [`@steadystate`](@ref).
 """
 struct SteadyStateData
     "List of steady state variables."
@@ -196,25 +200,28 @@ export alleqns
 
 Return a list of all steady state equations.
 
-The list contains all equations derived from the dynamic system and all explicitly added steady state constraints.
+The list contains all explicitly added steady state constraints and all
+equations derived from the dynamic system.
 """
-@inline alleqns(ssd::SteadyStateData) = vcat(ssd.constraints, ssd.equations,)
+alleqns(ssd::SteadyStateData) = vcat(ssd.constraints, ssd.equations,)
 
 export neqns
 """
     neqns(ssd::SteadyStateData)
 
-Return the total number of equations in the steady state system, including the ones derived from the dynamic system and the
-ones added explicitly as steady state constraints.
+Return the total number of equations in the steady state system, including the
+ones added explicitly as steady state constraints and the ones derived from the
+dynamic system.
 """
-@inline neqns(ssd::SteadyStateData) = length(ssd.equations) + length(ssd.constraints)
+neqns(ssd::SteadyStateData) = length(ssd.equations) + length(ssd.constraints)
 
 export geteqn
 """
     geteqn(i, ssd::SteadyStateData)
 
-Return the i-th steady state equation. Index i is interpreted as in the output of `alleqns`.
-Calling `geteqn(i, sdd)` has the same effect as `alleqn(ssd)[i]`, but it's more efficient.
+Return the i-th steady state equation. Index i is interpreted as in the output
+of [`alleqns(::SteadyStateData)`](@ref). Calling `geteqn(i, sdd)` has the same
+effect as `alleqn(ssd)[i]`, but it's more efficient.
 
 ### Example
 ```julia
@@ -251,7 +258,7 @@ end
 #########
 # Implement access to steady state values using dot notation and index notation
 
-function Base.propertynames(ssd::SteadyStateData, private::Bool = false)
+function Base.propertynames(ssd::SteadyStateData, private::Bool=false)
     if private
         return ((v.name.name for v in ssd.vars)..., fieldnames(SteadyStateData)...,)
     else
@@ -300,7 +307,7 @@ function printsstate(io::IO, model::AbstractModel)
     println(io, "Steady State Solution:")
     a = max.(alignment5(io, ssd.vars), (0, 0, 3, 0, 3))
     for v in ssd.vars
-        show_aligned5(io, v, a, mask = v.mask)
+        show_aligned5(io, v, a, mask=v.mask)
         println(io)
     end
 end
@@ -327,9 +334,12 @@ printsstate(model::AbstractModel) = printsstate(Base.stdout, model)
 """
     SSEqnData
 
-Internal structure used for evaluation of the residual of the steady state equation
-derived from a dynamic equation.
+Internal structure used for evaluation of the residual of the steady state
+equation derived from a dynamic equation.
 
+!!! warning
+    This data type is for internal use only and not intended to be used directly
+    by users.
 """
 struct SSEqnData{M<:AbstractModel}
     "Whether or not to add model.shift"
@@ -384,6 +394,16 @@ function __to_ssgrad(pt, jj, s)
     # u(x) = x, so u'(x) = 1
     return ss
 end
+"""
+    sseqn_resid_RJ(sed::SSEqnData)
+
+Create the `eval_resid` and `eval_RJ` for a steady state equation derived from a
+dynamic equation using information from the given [`SSEqnData`](@ref).
+
+!!! warning
+    This function is for internal use only and not intended to be called
+    directly by users.
+"""
 function sseqn_resid_RJ(s::SSEqnData)
     function _resid(pt::Vector{<:Real})
         _update_eqn_params!(s.eqn.eval_resid, s.model[].parameters)
@@ -400,10 +420,12 @@ end
 """
     make_sseqn(model::AbstractModel, eqn::Equation; shift::Int64=0)
 
-Create a steady state equation from the given dynamic equation for the given model.
+Create a steady state equation from the given dynamic equation for the given
+model.
 
-Internal function, do not call directly.
-
+!!! warning
+    This function is for internal use only and not intended to be called
+    directly by users.
 """
 function make_sseqn(model::AbstractModel, eqn::Equation, shift::Bool)
     local allvars = model.allvars
@@ -429,7 +451,7 @@ function make_sseqn(model::AbstractModel, eqn::Equation, shift::Bool)
     # The steady state indexes.
     vinds = Int[]
     for (v, t) in keys(eqn.tsrefs)
-        push!(vinds, ssind((v,t))...)
+        push!(vinds, ssind((v, t))...)
     end
     for v in keys(eqn.ssrefs)
         push!(vinds, ssind((v, 0))...)
@@ -441,11 +463,11 @@ function make_sseqn(model::AbstractModel, eqn::Equation, shift::Bool)
     # from the steady state values to the dynamic point values.
     JT = []
     for (var, ti) in keys(eqn.tsrefs)
-        val = (ssinds = indexin(ssind((var, ti)), vinds), tlag = ti)
+        val = (ssinds=indexin(ssind((var, ti)), vinds), tlag=ti)
         push!(JT, val)
     end
     for var in keys(eqn.ssrefs)
-        val = (ssinds = indexin(ssind((var, 0)), vinds), tlag = 0)
+        val = (ssinds=indexin(ssind((var, 0)), vinds), tlag=0)
         push!(JT, val)
     end
     type = shift == 0 ? :tzero : :tshift
@@ -464,10 +486,12 @@ end
 Add a steady state equation to the model. Equations added by `setss!` are in
 addition to the equations generated automatically from the dynamic system.
 
-Internal function, do not call directly. Use [`@steadystate`](@ref) instead.
-
+!!! warning
+    This function is for internal use only and not intended to be called
+    directly by users. Use [`@steadystate`](@ref) instead of calling this
+    function.
 """
-function setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Module = moduleof(model))
+function setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Module=moduleof(model))
 
     if expr.head != :(=)
         error("Expected an equation, not $(expr.head)")
@@ -603,7 +627,7 @@ end
 export @steadystate
 
 """
-    @steadystate model [type] equation
+    @steadystate model [type] lhs = rhs
 
 Add a steady state equation to the model.
 
@@ -616,29 +640,29 @@ to help the steady state solver find the one you want to use.
   * `model` is the model instance you want to update
   * `type` (optional) is the type of constraint you want to add. This can be `level`
   or `slope`. If missing, the default is `level`
-  * `equation` is the expression defining the steady state constraint. In the
+  * `lhs = rhs` is the expression defining the steady state constraint. In the
   equation, use variables and shocks from the model, but without any t-references.
 
 """
 macro steadystate(model, type::Symbol, equation::Expr)
     thismodule = @__MODULE__
     modelmodule = __module__
-    return esc(:($(thismodule).setss!($(model), $(Meta.quot(equation)); type = $(QuoteNode(type)))))  # , modelmodule=$(modelmodule))))
+    return esc(:($(thismodule).setss!($(model), $(Meta.quot(equation)); type=$(QuoteNode(type)))))  # , modelmodule=$(modelmodule))))
 end
 
 macro steadystate(model, equation::Expr)
     thismodule = @__MODULE__
-    return esc(:($(thismodule).setss!($(model), $(Meta.quot(equation)); type = :level))) # , modelmodule=$(modelmodule))))
+    return esc(:($(thismodule).setss!($(model), $(Meta.quot(equation)); type=:level))) # , modelmodule=$(modelmodule))))
 end
 
 """
     initssdata!(m::AbstractModel)
 
-Initialize the steady state data structure of the given model.
+Create and initialize the `SteadyStateData` structure of the given model.
 
-Do not call directly. This is an internal function, called during
-[`@initialize`](@ref)
-
+!!! warning
+    This function is for internal use only and not intended to be called
+    directly by users. It is called during [`@initialize`](@ref).
 """
 function initssdata!(model::AbstractModel)
     ss = sstate(model)
@@ -667,14 +691,34 @@ export issssolved
 
 Return `true` if the steady state has been solved, or `false` otherwise.
 
+!!! note
+    This function only checks that the steady state is marked as solved. It does
+    not verify that the stored steady state values actually satisfy the steady
+    state system of equations. Use `check_sstate` from StateSpaceEcon for that.
 """
-@inline issssolved(ss::SteadyStateData) = all(ss.mask)
+issssolved(ss::SteadyStateData) = all(ss.mask)
 
 
+"""
+    assign_sstate!(model, collection)
+    assign_sstate!(model; var = value, ...)
+
+Assign a steady state solution from the given collection of name=>value pairs
+into the given model. 
+
+In each pair, the value can be a number in which case it is assigned as the
+level and the slope is set to 0. The value can also be a `Tuple` or a `Vector`
+in which case the first two elements are assigned as the level and the slope.
+Finally, the value can itself be a name-value collection (like a named tuple or
+a dictionary) with fields `:level` and `:slope`. Variables whose steady states
+are found in the collection are assigned and also marked as solved.
+"""
+function assign_sstate! end
 export assign_sstate!
-@inline assign_sstate!(model::AbstractModel, args) = (assign_sstate!(model.sstate, args); model)
-@inline assign_sstate!(model::AbstractModel; kwargs...) = assign_sstate!(model, kwargs)
-@inline assign_sstate!(ss::SteadyStateData; kwargs...) = assign_sstate!(ss, kwargs)
+
+assign_sstate!(model::AbstractModel, args) = (assign_sstate!(model.sstate, args); model)
+assign_sstate!(model::AbstractModel; kwargs...) = assign_sstate!(model, kwargs)
+assign_sstate!(ss::SteadyStateData; kwargs...) = assign_sstate!(ss, kwargs)
 function assign_sstate!(ss::SteadyStateData, args)
     not_model_variables = Symbol[]
     for (key, value) in args
@@ -684,12 +728,12 @@ function assign_sstate!(ss::SteadyStateData, args)
             continue
         end
         var = getproperty(ss, sk)
-        if value isa NamedTuple
+        if value isa Union{NamedTuple,AbstractDict}
             var.level = value.level
-            var.slope = value.slope
-        elseif value isa Union{NTuple{2,<:Number},Vector{<:Number}}
+            var.slope = get(value, :slope, 0)
+        elseif value isa Union{Tuple,Vector}
             var.level = value[1]
-            var.slope = value[2]
+            var.slope = length(value) > 1 ? value[2] : 0
         else
             var.level = value
             var.slope = 0
@@ -702,18 +746,44 @@ function assign_sstate!(ss::SteadyStateData, args)
     return ss
 end
 
-@inline export_sstate!(container, model::AbstractModel) = export_sstate!(container, model.sstate; ssZeroSlope = model.ssZeroSlope)
-@inline export_sstate(m_or_s::Union{AbstractModel,SteadyStateData}, C::Type = Dict{Symbol,Any}; kwargs...) = export_sstate!(C(), m_or_s; kwargs...)
-function export_sstate!(container, ss::SteadyStateData; ssZeroSlope::Bool = false)
+"""
+    export_sstate(model)
+
+Return a dictionary containing the steady state solution stored in the
+given model. The value for each variable will be a number, if the variable has
+zero slope, or a named tuple `(level = NUM, slope=NUM)`.
+"""
+function export_sstate end
+export export_sstate
+
+"""
+    export_sstate!(container, model)
+
+Fill the given container with the steady state solution stored in the 
+given model. The value for each variable will be a number, if the variable has
+zero slope, or else a named tuple of the form `(level = NUM, slope=NUM)`.
+"""
+function export_sstate! end
+export export_sstate!
+
+export_sstate(m_or_s::Union{AbstractModel,SteadyStateData}, C::Type=Dict{Symbol,Any}; kwargs...) = export_sstate!(C(), m_or_s; kwargs...)
+export_sstate!(container, model::AbstractModel) = export_sstate!(container, model.sstate; model.ssZeroSlope, model.tol)
+function export_sstate!(container, ss::SteadyStateData; ssZeroSlope::Bool=false, tol=1e-12)
+    if !issssolved(ss)
+        @warn "Steady state is not solved in `export_sstate!`"
+    end
     if ssZeroSlope
         for var in ss.vars
             push!(container, var.name => var.level)
         end
     else
         for var in ss.vars
-            push!(container, var.name => copy(var.data))
+            if abs(var.slope) > tol
+                push!(container, var.name => (; var.level, var.slope))
+            else
+                push!(container, var.name => var.level)
+            end
         end
     end
     return container
 end
-export export_sstate, export_sstate!

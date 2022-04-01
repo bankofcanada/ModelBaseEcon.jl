@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020, Bank of Canada
+# Copyright (c) 2020-2022, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -9,7 +9,7 @@
 # Part 1: Error handling
 
 """
-    ModelErrorBase
+    abstract type ModelErrorBase <: Exception end
 
 Abstract error type, base for specific error types used in ModelBaseEcon.
 
@@ -57,7 +57,12 @@ Concrete error type used when no specific error description is available.
 struct ModelError <: ModelErrorBase end
 export ModelError
 
-@inline modelerror(ME::Type{<:ModelErrorBase}=ModelError, args...; kwargs...) = throw(ME(args...; kwargs...))
+"""
+    modelerror(ME::Type{<:ModelErrorBase}, args...; kwargs...)
+
+Raise an exception derived from [`ModelErrorBase`](@ref).
+"""
+modelerror(ME::Type{<:ModelErrorBase}=ModelError, args...; kwargs...) = throw(ME(args...; kwargs...))
 
 
 """

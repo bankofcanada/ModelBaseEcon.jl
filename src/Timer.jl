@@ -28,11 +28,6 @@ in individual lines or blocks of code.
   * [`printtimer`](@ref)      - Display timer data.
   * [`@timer`](@ref)          - Measure the runtime taken by the given code.
 
-# Example
-```jldoctest
-julia> true
-[...]
-```
 """
 module Timer
 
@@ -46,11 +41,10 @@ export @timer, inittimer, printtimer, stoptimer
 Stores timing data.
     
 !!! note
-
     For internal use. Do not modify directly.
 
 If equal to `nothing`, timing is disabled.
-Otherwise, contains a "database" of timimng data in the 
+Otherwise, contains a "database" of timing data in the 
 form of a Dict.
 """
 global timerData = nothing
@@ -109,7 +103,7 @@ function _updatetimer(name, t)
     td = get!(timerData, name, Dict(:calls => 0, :seconds => 0.0))
     td[:calls] += 1
     td[:seconds] += t
-    timerData[name] = td
+    # timerData[name] = td
     return
 end
 
