@@ -861,16 +861,18 @@ function add_equation!(model::Model, expr::Expr; modelmodule::Module=moduleof(mo
                 matched = @capture(arg, var1_[ind1_])
                 if matched
                     mv = model.:($var1)
-                    if islog(mv)
-                        # log variable is always positive, no need for substitution
-                        @goto skip_substitution
-                    elseif isshock(mv) || isexog(mv)
-                        if model.verbose
-                            @info "Found log($var1), which is a shock or exogenous variable. Make sure $var1 data is positive."
+                    if mv isa ModelVariable
+                        if islog(mv)
+                            # log variable is always positive, no need for substitution
+                            @goto skip_substitution
+                        elseif isshock(mv) || isexog(mv)
+                            if model.verbose
+                                @info "Found log($var1), which is a shock or exogenous variable. Make sure $var1 data is positive."
+                            end
+                            @goto skip_substitution
+                        elseif islin(mv) && model.verbose
+                            @info "Found log($var1). Consider making $var1 a log variable."
                         end
-                        @goto skip_substitution
-                    elseif islin(mv) && model.verbose
-                        @info "Found log($var1). Consider making $var1 a log variable."
                     end
                 else
                     # is it log(x[t]/x[t-1]) ?

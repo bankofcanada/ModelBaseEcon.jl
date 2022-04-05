@@ -23,7 +23,7 @@ When implementing a derived error type, override two functions:
 
 """
 abstract type ModelErrorBase <: Exception end
-export ModelErrorBase
+# export ModelErrorBase
 """
     msg(::ModelErrorBase)
 
@@ -55,7 +55,7 @@ end
 Concrete error type used when no specific error description is available.
 """
 struct ModelError <: ModelErrorBase end
-export ModelError
+# export ModelError
 
 """
     modelerror(ME::Type{<:ModelErrorBase}, args...; kwargs...)
@@ -74,7 +74,7 @@ has not been initialized.
 struct ModelNotInitError <: ModelErrorBase end
 msg(::ModelNotInitError) = "Model not ready to use."
 hint(::ModelNotInitError) = "Call `@initialize model` first."
-export ModelNotInitError
+# export ModelNotInitError
 
 """
     struct NotImplementedError <: ModelErrorBase
@@ -85,4 +85,4 @@ struct NotImplementedError <: ModelErrorBase
     descr
 end
 msg(fe::NotImplementedError) = "Feature not implemented: $(fe.descr)."
-export NotImplementedError
+# export NotImplementedError

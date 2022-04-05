@@ -7,7 +7,6 @@
 
 import MacroTools: @forward
 
-# export Parameters, ParamAlias, ParamLink, peval, @alias, @link
 export Parameters, ModelParam, peval
 export @parameters, @peval, @alias, @link
 

@@ -236,6 +236,8 @@ function geteqn(i::Integer, ssd::SteadyStateData)
     ci = i - length(ssd.constraints)
     return ci > 0 ? ssd.equations[ci] : ssd.constraints[i]
 end
+geteqn(i::Integer, m::AbstractModel) = geteqn(i, m.sstate)
+
 
 Base.show(io::IO, ::MIME"text/plain", ssd::SteadyStateData) = show(io, ssd)
 Base.show(io::IO, ssd::SteadyStateData) = begin

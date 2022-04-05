@@ -77,7 +77,7 @@ struct LinearizationError <: ModelErrorBase
 end
 msg(le::LinearizationError) = "Cannot linearize model because $(le.reason)"
 hint(le::LinearizationError) = le.hint
-export LinearizationError
+# export LinearizationError
 
 export linearize!
 function linearize!(model::Model;
