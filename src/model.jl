@@ -8,14 +8,22 @@
 export Model
 
 const defaultoptions = Options(
-    shift = 10,
-    substitutions = false,
-    tol = 1e-10,
-    maxiter = 20,
-    verbose = false,
-    warn = Options(no_t = true)
+    shift=10,
+    substitutions=false,
+    tol=1e-10,
+    maxiter=20,
+    verbose=false,
+    warn=Options(no_t=true)
 )
 
+"""
+    mutable struct ModelFlags ⋯ end
+
+Model flags include
+* `ssZeroSlope` - Set to `true` to instruct the solvers that all variables have
+  zero slope in steady state and final conditions. In other words the model is
+  stationary.
+"""
 mutable struct ModelFlags
     linear::Bool
     ssZeroSlope::Bool
@@ -37,10 +45,9 @@ function Base.show(io::IO, flags::ModelFlags)
 end
 
 """
-    Model <: AbstractModel
+    mutable struct Model <: AbstractModel ⋯ end
 
-Data structure that represents a macroeconomic state space model.
-
+Data structure that represents a macroeconomic model.
 """
 mutable struct Model <: AbstractModel
     "Options are various hyper-parameters for tuning the algorithms"
@@ -76,7 +83,6 @@ mutable struct Model <: AbstractModel
     Model() = new(deepcopy(defaultoptions),
         ModelFlags(), SteadyStateData(), false, [], [], [], Parameters(), Dict(), 0, 0, [], [], NoMED)
 end
-
 
 auxvars(m::Model) = getfield(m, :auxvars)
 nauxvars(m::Model) = length(auxvars(m))
@@ -123,6 +129,10 @@ function Base.getproperty(model::Model, name::Symbol)
         return vcat(getfield(model, :variables), getfield(model, :shocks), getfield(model, :auxvars))
     elseif name == :varshks
         return vcat(getfield(model, :variables), getfield(model, :shocks))
+    elseif name == :exogenous
+        return filter(isexog, getfield(model, :variables))
+    elseif name == :nexog
+        return sum(isexog, getfield(model, :variables))
     elseif name == :alleqns
         return vcat(getfield(model, :equations), getfield(model, :auxeqns))
     elseif haskey(getfield(model, :parameters), name)
@@ -148,8 +158,8 @@ function Base.getproperty(model::Model, name::Symbol)
     end
 end
 
-function Base.propertynames(model::Model, private::Bool = false)
-    return (fieldnames(Model)..., :nvars, :nshks, :nauxs, :allvars, :varshks, :alleqns,
+function Base.propertynames(model::Model, private::Bool=false)
+    return (fieldnames(Model)..., :exogenous, :nvars, :nshks, :nauxs, :nexog, :allvars, :varshks, :alleqns,
         keys(getfield(model, :options))..., fieldnames(ModelFlags)...,
         Symbol[getfield(model, :variables)...]...,
         Symbol[getfield(model, :shocks)...]...,
@@ -194,6 +204,15 @@ end
 ################################################################
 # Pretty printing the model and summary (TODO)
 
+"""
+    fullprint(model)
+
+If a model contains more than 20 variables or more than 20 equations, its
+display is truncated. In this case you can call `fullprint` to see the whole
+model.
+"""
+function fullprint end
+
 export fullprint
 fullprint(model::Model) = fullprint(Base.stdout, model)
 function fullprint(io::IO, model::Model)
@@ -203,8 +222,8 @@ function fullprint(io::IO, model::Model)
     nprm = length(model.parameters)
     neqn = length(model.equations)
     nvarshk = nvar + nshk
-    function print_things(io, things...; len = 0, maxlen = 40, last = false)
-        s = sprint(print, things...; context = io, sizehint = 0)
+    function print_things(io, things...; len=0, maxlen=40, last=false)
+        s = sprint(print, things...; context=io, sizehint=0)
         print(io, s)
         len += length(s) + 2
         last && (println(io), return 0)
@@ -216,9 +235,9 @@ function fullprint(io::IO, model::Model)
             println(io)
         else
             for v in model.variables[1:end-1]
-                len = print_things(io, v; len = len)
+                len = print_things(io, v; len=len)
             end
-            print_things(io, model.variables[end]; last = true)
+            print_things(io, model.variables[end]; last=true)
         end
     end
     let len = 15
@@ -227,9 +246,9 @@ function fullprint(io::IO, model::Model)
             println(io)
         else
             for v in model.shocks[1:end-1]
-                len = print_things(io, v; len = len)
+                len = print_things(io, v; len=len)
             end
-            print_things(io, model.shocks[end]; last = true)
+            print_things(io, model.shocks[end]; last=true)
         end
     end
     let len = 15
@@ -239,10 +258,10 @@ function fullprint(io::IO, model::Model)
         else
             params = collect(model.parameters)
             for (k, v) in params[1:end-1]
-                len = print_things(io, k, " = ", v; len = len)
+                len = print_things(io, k, " = ", v; len=len)
             end
             k, v = params[end]
-            len = print_things(io, k, " = ", v; len = len, last = true)
+            len = print_things(io, k, " = ", v; len=len, last=true)
         end
     end
     print(io, length(model.equations), " equations(s)")
@@ -307,23 +326,19 @@ export @variables, @logvariables, @neglogvariables, @steadyvariables, @exogenous
 export @parameters, @equations, @autoshocks, @autoexogenize
 
 """
-    @variables model names...
+    @variables model name1 name2 ...
     @variables model begin
-        names...
+        name1
+        name2
+        ...
     end
 
-Define the names of transition variables in the model.
+Declare the names of variables in the model. 
 
-### Example
-```jldoctest
-@variables model a b c
+In the `begin-end` version the variable names can be preceeded by a description
+(like a docstring) and flags like `@log`, `@steady`, `@exog`, etc. See
+[`ModelVariable`](@ref) for details about this.
 
-# If the list is long, use a begin-end block separating names with newline or semicolon
-@variables model begin
-    a; b
-    c
-end
-````
 """
 macro variables(model, block::Expr)
     vars = filter(a -> !isa(a, LineNumberNode), block.args)
@@ -333,6 +348,12 @@ macro variables(model, vars::Symbol...)
     return esc(:(unique!(append!($(model).variables, $vars)); nothing))
 end
 
+"""
+    @logvariables
+
+Same as [`@variables`](@ref), but the variables declared with `@logvariables`
+are log-transformed.
+"""
 macro logvariables(model, block::Expr)
     vars = filter(a -> !isa(a, LineNumberNode), block.args)
     return esc(:(unique!(append!($(model).variables, to_log.($vars))); nothing))
@@ -341,6 +362,12 @@ macro logvariables(model, vars::Symbol...)
     return esc(:(unique!(append!($(model).variables, to_log.($vars))); nothing))
 end
 
+"""
+    @neglogvariables
+
+Same as [`@variables`](@ref), but the variables declared with `@neglogvariables`
+are negative-log-transformed.
+"""
 macro neglogvariables(model, block::Expr)
     vars = filter(a -> !isa(a, LineNumberNode), block.args)
     return esc(:(unique!(append!($(model).variables, to_neglog.($vars))); nothing))
@@ -349,6 +376,13 @@ macro neglogvariables(model, vars::Symbol...)
     return esc(:(unique!(append!($(model).variables, to_neglog.($vars))); nothing))
 end
 
+"""
+    @steadyvariables
+
+Same as [`@variables`](@ref), but the variables declared with `@steadyvariables`
+have zero slope in their steady state and final conditions.
+
+"""
 macro steadyvariables(model, block::Expr)
     vars = filter(a -> !isa(a, LineNumberNode), block.args)
     return esc(:(unique!(append!($(model).variables, to_steady.($vars))); nothing))
@@ -357,6 +391,12 @@ macro steadyvariables(model, vars::Symbol...)
     return esc(:(unique!(append!($(model).variables, to_steady.($vars))); nothing))
 end
 
+"""
+    @exogenous
+
+Like [`@variables`](@ref), but the names declared with `@exogenous` are 
+exogenous.
+"""
 macro exogenous(model, block::Expr)
     vars = filter(a -> !isa(a, LineNumberNode), block.args)
     return esc(:(unique!(append!($(model).variables, to_exog.($vars))); nothing))
@@ -366,23 +406,10 @@ macro exogenous(model, vars::Symbol...)
 end
 
 """
-    @shocks model names...
-    @shocks model begin
-        names...
-    end
+    @shocks
 
-Define the names of transition shocks in the model.
-
-### Example
-```jldoctest
-@shocks model a_shk b_shk c_shk
-
-# If the list is long, use a begin-end block separating names with newline or semicolon
-@shocks model begin
-    a_shk; b_shk
-    c_shk
-end
-````
+Like [`@variables`](@ref), but the names declared with `@shocks` are 
+shocks.
 """
 macro shocks(model, block::Expr)
     shks = filter(a -> !isa(a, LineNumberNode), block.args)
@@ -393,12 +420,13 @@ macro shocks(model, shks::Symbol...)
 end
 
 """
-    @autoshocks model
+    @autoshocks model [suffix]
 
-Create a list of shocks that matches the list of variables.  Each shock name is
-created from a variable name by appending "_shk".
+Create a list of shocks that matches the list of variables. Each shock name is
+created from a variable name by appending suffix. Default suffix is "_shk", but
+it can be specified as the second argument too.
 """
-macro autoshocks(model, suf = "_shk")
+macro autoshocks(model, suf="_shk")
     esc(quote
         $(model).shocks = ModelVariable[
             to_shock(Symbol(v.name, $(QuoteNode(suf)))) for v in $(model).variables if !isexog(v) && !isshock(v)
@@ -418,9 +446,9 @@ end
 
 Declare and define the model parameters. 
 
-The parameters must have values. Provide the information in a series of assignment
-statements wrapped inside a begin-end block. The names can be used in equations
-as if they were regular variables.
+The parameters must have values. Provide the information in a series of
+assignment statements wrapped inside a begin-end block. Use `@link` and `@alias`
+to define dynamic links. See [`Parameters`](@ref).
 """
 macro parameters(model, args::Expr...)
     if length(args) == 1 && args[1].head == :block
@@ -463,11 +491,13 @@ end
 
 
 """
-Usage example:
-```
-@equations model begin
-    y[t] = a * y[t-1] + b * y[t+1] + y_shk[t]
-```
+    @equations model begin
+        lhs = rhs
+        lhs = rhs
+        ...
+    end
+
+Define model equations. See [`Equation`](@ref).
 """
 macro equations(model, block::Expr)
     if block.head != :block
@@ -491,8 +521,8 @@ end
 # The processing of equations during model initialization.
 
 export islog, islin
-@inline islog(eq::AbstractEquation) = flag(eq, :log)
-@inline islin(eq::AbstractEquation) = flag(eq, :lin)
+islog(eq::AbstractEquation) = flag(eq, :log)
+islin(eq::AbstractEquation) = flag(eq, :lin)
 
 error_process(msg, expr) = begin
     throw(ArgumentError("$msg\n  During processing of\n  $(expr)"))
@@ -505,11 +535,11 @@ end
 """
     process_equation(model::Model, expr; <keyword arguments>)
 
-Process the given expression in the context of the given model and create 
-an Equation() instance for it.
+Process the given expression in the context of the given model and create an
+Equation() instance for it.
 
-Internal function. There should be no need to call directly.
-
+!!! warning
+    This function is for internal use only and should not be called directly.
 """
 function process_equation end
 # export process_equation
@@ -517,10 +547,10 @@ process_equation(model::Model, expr::String; kwargs...) = process_equation(model
 # process_equation(model::Model, val::Number; kwargs...) = process_equation(model, Expr(:block, val); kwargs...)
 # process_equation(model::Model, val::Symbol; kwargs...) = process_equation(model, Expr(:block, val); kwargs...)
 function process_equation(model::Model, expr::Expr;
-    modelmodule::Module = moduleof(model),
-    line = LineNumberNode(0),
-    flags = EqnFlags(),
-    doc = "")
+    modelmodule::Module=moduleof(model),
+    line=LineNumberNode(0),
+    flags=EqnFlags(),
+    doc="")
 
     # a list of all known time series 
     allvars = model.allvars
@@ -558,9 +588,9 @@ function process_equation(model::Model, expr::Expr;
     #    process(expr)
     # 
     # Process the expression, performing various tasks.
-    #  * keep track of mentions of parameters and variables (including shocks)
-    #  * remove line numbers from expression, but keep track so we can insert it into the residual functions
-    #  * for each time-referenece of variable, create a dummy symbol that will be used in constructing the residual functions
+    #  + keep track of mentions of parameters and variables (including shocks)
+    #  + remove line numbers from expression, but keep track so we can insert it into the residual functions
+    #  + for each time-referenece of variable, create a dummy symbol that will be used in constructing the residual functions
     # 
     # leave numbers alone
     process(num::Number) = num
@@ -687,7 +717,7 @@ function process_equation(model::Model, expr::Expr;
     # 
     # Convert a processed equation into an expression that evaluates the residual.
     # 
-    #  * each mention of a time-reference is replaced with its symbol
+    #  + each mention of a time-reference is replaced with its symbol
     make_residual_expression(any) = any
     make_residual_expression(name::Symbol) = haskey(model.parameters, name) ? prefs[name] : name
     make_residual_expression(var::ModelVariable, newsym::Symbol) = need_transform(var) ? :($(inverse_transformation(var))($newsym)) : newsym
@@ -756,10 +786,12 @@ export add_equation!
     add_equation!(model::Model, expr::Expr; modelmodule::Module)
 
 Process the given expression in the context of the given module, create the
-Equation() instance for it and add it to the model instance.
+Equation() instance for it, and add it to the model instance.
 
+Usually there's no need to call this function directly. It is called during
+[`@initialize`](@ref).
 """
-function add_equation!(model::Model, expr::Expr; modelmodule::Module = moduleof(model))
+function add_equation!(model::Model, expr::Expr; modelmodule::Module=moduleof(model))
     source = LineNumberNode[]
     auxeqns = Expr[]
     flags = EqnFlags()
@@ -819,7 +851,7 @@ function add_equation!(model::Model, expr::Expr; modelmodule::Module = moduleof(
         for i in eachindex(ex.args)
             push!(ret.args, preprocess(ex.args[i]))
         end
-        if getoption!(model; substitutions = true)
+        if getoption!(model; substitutions=true)
             local arg
             matched = @capture(ret, log(arg_))
             # is it log(arg) 
@@ -829,16 +861,18 @@ function add_equation!(model::Model, expr::Expr; modelmodule::Module = moduleof(
                 matched = @capture(arg, var1_[ind1_])
                 if matched
                     mv = model.:($var1)
-                    if islog(mv)
-                        # log variable is always positive, no need for substitution
-                        @goto skip_substitution
-                    elseif isshock(mv) || isexog(mv)
-                        if model.verbose
-                            @info "Found log($var1), which is a shock or exogenous variable. Make sure $var1 data is positive."
+                    if mv isa ModelVariable
+                        if islog(mv)
+                            # log variable is always positive, no need for substitution
+                            @goto skip_substitution
+                        elseif isshock(mv) || isexog(mv)
+                            if model.verbose
+                                @info "Found log($var1), which is a shock or exogenous variable. Make sure $var1 data is positive."
+                            end
+                            @goto skip_substitution
+                        elseif islin(mv) && model.verbose
+                            @info "Found log($var1). Consider making $var1 a log variable."
                         end
-                        @goto skip_substitution
-                    elseif islin(mv) && model.verbose
-                        @info "Found log($var1). Consider making $var1 a log variable."
                     end
                 else
                     # is it log(x[t]/x[t-1]) ?
@@ -847,7 +881,7 @@ function add_equation!(model::Model, expr::Expr; modelmodule::Module = moduleof(
                         @goto skip_substitution
                     end
                 end
-                aux_expr = process_equation(model, Expr(:(=), arg, 0); modelmodule = modelmodule)
+                aux_expr = process_equation(model, Expr(:(=), arg, 0); modelmodule=modelmodule)
                 if isempty(aux_expr.tsrefs)
                     # arg doesn't contain any variables, no need for substitution
                     @goto skip_substitution
@@ -868,13 +902,13 @@ function add_equation!(model::Model, expr::Expr; modelmodule::Module = moduleof(
     if isempty(source)
         push!(source, LineNumberNode(0))
     end
-    eqn = process_equation(model, new_expr; modelmodule = modelmodule, line = source[1], flags = flags, doc = doc)
+    eqn = process_equation(model, new_expr; modelmodule=modelmodule, line=source[1], flags=flags, doc=doc)
     push!(model.equations, eqn)
     model.maxlag = max(model.maxlag, eqn.maxlag)
     model.maxlead = max(model.maxlead, eqn.maxlead)
     model.dynss = model.dynss || !isempty(eqn.ssrefs)
     for i ∈ eachindex(auxeqns)
-        eqn = process_equation(model, auxeqns[i]; modelmodule = modelmodule, line = source[1])
+        eqn = process_equation(model, auxeqns[i]; modelmodule=modelmodule, line=source[1])
         push!(model.auxeqns, eqn)
         model.maxlag = max(model.maxlag, eqn.maxlag)
         model.maxlead = max(model.maxlead, eqn.maxlead)
@@ -890,6 +924,16 @@ end
 
 export @initialize
 
+"""
+    initialize!(model, modelmodule)
+
+In the model file, after all declarations of flags, parameters, variables, and
+equations are done, it is necessary to initialize the model instance. Usually it
+is easier to call [`@initialize`](@ref), which automatically sets the
+`modelmodule` value. When it is necessary to set the `modelmodule` argument to
+some other module, then this can be done by calling this function instead of the
+macro.
+"""
 function initialize!(model::Model, modelmodule::Module)
     # Note: we cannot use moduleof here, because the equations are not initialized yet.
     if model.evaldata !== NoMED
@@ -906,7 +950,7 @@ function initialize!(model::Model, modelmodule::Module)
     empty!(model.auxeqns)
     model.dynss = false
     for e in eqns
-        add_equation!(model, e; modelmodule = modelmodule)
+        add_equation!(model, e; modelmodule=modelmodule)
     end
     initssdata!(model)
     update_links!(model.parameters)
@@ -924,8 +968,8 @@ end
 """
     @initialize model
 
-Prepare a model instance for analysis. Call this macro after all
-variable names, shock names and equations have been defined.
+Prepare a model instance for analysis. Call this macro after all parameters,
+variable names, shock names and equations have been declared and defined.
 """
 macro initialize(model::Symbol)
     # @__MODULE__ is this module (ModelBaseEcon)
@@ -939,8 +983,6 @@ end
 
 eval_RJ(x::AbstractMatrix{Float64}, m::Model) = eval_RJ(x, m.evaldata)
 eval_R!(r::AbstractVector{Float64}, x::AbstractMatrix{Float64}, m::Model) = eval_R!(r, x, m.evaldata)
-# @inline printsstate(io::IO, m::Model) = printsstate(io, m.sstate)
-# @inline printsstate(m::Model) = printsstate(m.sstate)
 @inline issssolved(m::Model) = issssolved(m.sstate)
 
 ##########################
@@ -949,26 +991,30 @@ eval_R!(r::AbstractVector{Float64}, x::AbstractMatrix{Float64}, m::Model) = eval
 """
     update_auxvars(point, model; tol=model.tol, default=0.0)
 
-Calculate the values of auxiliary variables from the given values of regular variables and shocks.
+Calculate the values of auxiliary variables from the given values of regular
+variables and shocks.
 
-Auxiliary variables were introduced as substitutions, e.g. log(expression) was replaced by aux1 and
-equation was added exp(aux1) = expression, where expression contains regular variables and shocks.
+Auxiliary variables were introduced as substitutions, e.g. log(expression) was
+replaced by aux1 and equation was added exp(aux1) = expression, where expression
+contains regular variables and shocks.
 
-This function uses the auxiliary equation to compute the value of the auxiliary variable for the
-given values of other variables. Note that the given values of other variables might be inadmissible, 
-in the sense that expression is negative. If that happens, the auxiliary variable is set to the given 
-`default` value.
+This function uses the auxiliary equation to compute the value of the auxiliary
+variable for the given values of other variables. Note that the given values of
+other variables might be inadmissible, in the sense that expression is negative.
+If that happens, the auxiliary variable is set to the given `default` value.
 
-If the `point` array does not contain space for the auxiliary variables, it is extended appropriately.
+If the `point` array does not contain space for the auxiliary variables, it is
+extended appropriately.
 
-If there are no auxiliary variables/equations in the model, return *a copy* of `point`.
+If there are no auxiliary variables/equations in the model, return *a copy* of
+`point`.
 
 !!! note
-    The current implementation is specialized only to log substitutions.
-    TODO: implement a general approach that would work for any substitution.
+    The current implementation is specialized only to log substitutions. TODO:
+    implement a general approach that would work for any substitution.
 """
 function update_auxvars(data::AbstractArray{Float64,2}, model::Model;
-    tol::Float64 = model.options.tol, default::Float64 = 0.0
+    tol::Float64=model.options.tol, default::Float64=0.0
 )
     nauxs = length(model.auxvars)
     if nauxs == 0

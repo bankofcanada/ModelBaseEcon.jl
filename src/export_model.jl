@@ -41,8 +41,8 @@ function export_model(m::Model, name::AbstractString, fio::IO)
             dv = getoption(default, ok, :not_a_default)
             if ov isa Options && dv isa Options
                 _print_modified_options(ov, dv, prefix * "$ok.")
-            elseif dv == :not_a_default || dv != ov
-                println(fio, prefix, ok, " = ", ov)
+            elseif dv === :not_a_default || dv != ov
+                println(fio, prefix, ok, " = ", repr(ov))
             end
         end
     end

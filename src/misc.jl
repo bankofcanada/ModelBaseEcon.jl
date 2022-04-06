@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020, Bank of Canada
+# Copyright (c) 2020-2022, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -9,7 +9,7 @@
 # Part 1: Error handling
 
 """
-    ModelErrorBase
+    abstract type ModelErrorBase <: Exception end
 
 Abstract error type, base for specific error types used in ModelBaseEcon.
 
@@ -23,7 +23,7 @@ When implementing a derived error type, override two functions:
 
 """
 abstract type ModelErrorBase <: Exception end
-export ModelErrorBase
+# export ModelErrorBase
 """
     msg(::ModelErrorBase)
 
@@ -55,9 +55,14 @@ end
 Concrete error type used when no specific error description is available.
 """
 struct ModelError <: ModelErrorBase end
-export ModelError
+# export ModelError
 
-@inline modelerror(ME::Type{<:ModelErrorBase}=ModelError, args...; kwargs...) = throw(ME(args...; kwargs...))
+"""
+    modelerror(ME::Type{<:ModelErrorBase}, args...; kwargs...)
+
+Raise an exception derived from [`ModelErrorBase`](@ref).
+"""
+modelerror(ME::Type{<:ModelErrorBase}=ModelError, args...; kwargs...) = throw(ME(args...; kwargs...))
 
 
 """
@@ -69,7 +74,7 @@ has not been initialized.
 struct ModelNotInitError <: ModelErrorBase end
 msg(::ModelNotInitError) = "Model not ready to use."
 hint(::ModelNotInitError) = "Call `@initialize model` first."
-export ModelNotInitError
+# export ModelNotInitError
 
 """
     struct NotImplementedError <: ModelErrorBase
@@ -80,4 +85,4 @@ struct NotImplementedError <: ModelErrorBase
     descr
 end
 msg(fe::NotImplementedError) = "Feature not implemented: $(fe.descr)."
-export NotImplementedError
+# export NotImplementedError

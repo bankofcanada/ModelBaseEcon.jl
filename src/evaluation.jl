@@ -10,15 +10,14 @@
 
 
 """
-    precompilefuncs(resid, RJ, ::Val{N}) where N
+    precompilefuncs(resid, RJ, ::Val{N}, tag) where N
 
-Add code that precompiles the given `resid` and `RJ` functions together
+Pre-compiles the given `resid` and `RJ` functions together
 with the dual-number arithmetic required by ForwardDiff.
 
 !!! warning
     Internal function. Do not call directly
 
-# Implementation (for developers)
 """
 function precompilefuncs(resid, RJ, ::Val{N}, tag) where {N}
     ccall(:jl_generating_output, Cint, ()) == 1 || return nothing
@@ -57,8 +56,8 @@ end
 """
     funcsyms(mod::Module)
 
-Create a pair of identifiers that does not conflict with existing identifiers
-in the given module.
+Create a pair of identifiers that does not conflict with existing identifiers in
+the given module. 
 
 !!! warning
     Internal function. Do not call directly.
@@ -101,12 +100,15 @@ expression.
 
 ### Arguments
 - `expr`: the expression
-- `XXsyms`: a list of symbols for variables, steady state, parameters
+- `tssyms`: list of time series variable symbols
+- `sssyms`: list of steady state symbols
+- `psyms`: list of parameter symbols
 
 ### Return value
-Return a quote block to be evaluated in the module where the model is being defined. 
-The quote block contains definitions of the residual function and a second function
-that evaluates both the residual and its gradient.
+Return a quote block to be evaluated in the module where the model is being
+defined. The quote block contains definitions of the residual function (as a
+callable `EquationEvaluator` instance) and a second function that evaluates both
+the residual and its gradient (as a callable `EquationGradient` instance).
 """
 function makefuncs(expr, tssyms, sssyms, psyms, mod)
     fn1, fn2 = funcsyms(mod)
@@ -132,7 +134,17 @@ end
 Initialize the given module before creating functions that evaluate residuals
 and thier gradients.
 
+!!! warning
+    Internal function. Do not call directly.
 
+### Implementation (for developers)
+Declare the necessary types in the module where the model is being defined.
+There are two such types. First is `EquationEvaluator`, which is callable and
+stores a collection of parameters. The call will be defined in
+[`makefuncs`](@ref) and will evaluate the residual. The other type is
+`EquationGradient`, which is also callable and stores the `EquationEvaluator`
+together with a `DiffResult` and a `GradientConfig` used by `ForwardDiff`. Its
+call is defined here and computes the residual and the gradient.
 """
 function initfuncs(mod::Module)
     if :MyTag ∉ names(mod; all = true)
@@ -469,14 +481,19 @@ export selective_linearize!
 
 Refresh the model evaluation data stored within the given model instance. Most
 notably, this is necessary when the steady state is used in the dynamic
-equations.
+equations. 
+
+Normally there's no need for the end-used to call this function. It should be
+called when necessay by the solver.
 """
+function refresh_med! end
+export refresh_med!
+
 # dispatcher
 refresh_med!(m::AbstractModel) = refresh_med!(m, typeof(m.evaldata))
 # catch all and issue a meaningful error message
-refresh_med!(m::AbstractModel, T::Type{<:AbstractModelEvaluationData}) = error("Missing method to update MED of type $T")
+refresh_med!(::AbstractModel, T::Type{<:AbstractModelEvaluationData}) = error("Missing method to update MED of type $T")
 # specific cases
 refresh_med!(m::AbstractModel, ::Type{NoModelEvaluationData}) = (m.evaldata = ModelEvaluationData(m); m)
 refresh_med!(m::AbstractModel, ::Type{<:ModelEvaluationData}) = (m.evaldata = ModelEvaluationData(m); m)
 refresh_med!(m::AbstractModel, ::Type{SelectiveLinearizationMED}) = selective_linearize!(m)
-export refresh_med!

@@ -5,16 +5,21 @@
 # All rights reserved.
 ##################################################################################
 
-using Lazy: @forward
+import MacroTools: @forward
 
-# export Parameters, ParamAlias, ParamLink, peval, @alias, @link
-export Parameters, ModelParam, peval, @alias, @link
+export Parameters, ModelParam, peval
+export @parameters, @peval, @alias, @link
 
+"""
+    abstract type AbstractParam end
+
+Base type for model parameters.
+"""
 abstract type AbstractParam end
 
 
 """
-    struct Parameters <: AbstractDict{Symbol, Any}
+    struct Parameters <: AbstractDict{Symbol, Any} ⋯ end
 
 Container for model parameters. It functions as a `Dict` where the keys are the
 parameter names. Simple parameter values are stored directly. Special parameters
@@ -46,7 +51,7 @@ struct Parameters{P<:AbstractParam} <: AbstractDict{Symbol,P}
 end
 
 """
-    mutable struct ModelParam
+    mutable struct ModelParam ⋯ end
 
 Contains a model parameter. For a simple parameter it simply stores its value.
 For a link or an alias, it stores the link information and also caches the
@@ -74,7 +79,7 @@ any link parameters that depend on custom functions or global
 variables/constants. In this case, the `mod` argument should be the module in
 which these definitions exist.
 """
-Parameters(mod::Module = @__MODULE__) = Parameters(Ref(mod), copy(_default_dict), Ref(_default_hash))
+Parameters(mod::Module=@__MODULE__) = Parameters(Ref(mod), copy(_default_dict), Ref(_default_hash))
 
 """
     params = @parameters
@@ -102,7 +107,7 @@ Base.deepcopy_internal(p::Parameters, stackdict::IdDict) = Parameters(Ref(p.mod[
 """
     @alias name
 
-    Create a parameter alias. Use `@alias` in the [`@parameters`](@ref) section of your
+Create a parameter alias. Use `@alias` in the [`@parameters`](@ref) section of your
 model definition.
 ```
 @parameters model begin
@@ -212,13 +217,13 @@ end
 """
     peval(params, what)
 
-Evaluate the given expression in the context of the given parameters.
+Evaluate the given expression in the context of the given parameters `params`.
 
-If `what` is a `ModelParam`, its current value is returned. If there's a chance
-it might be out of date, call [`update_links!`](@ref).
+If `what` is a `ModelParam`, its current value is returned. If it's a link and 
+there's a chance it might be out of date, call [`update_links!`](@ref).
 
 If `what` is a Symbol or an Expr, all mentions of parameter names are
-substituted by their values and the the expression is evaluated.
+substituted by their values and the expression is evaluated.
 
 If `what is any other value, it is returned unchanged.`
 
@@ -226,13 +231,26 @@ See also: [`Parameters`](@ref), [`@alias`](@ref), [`@link`](@ref),
 [`ModelParam`](@ref), [`update_links!`](@ref).
 
 """
-peval(params, val) = val
-peval(params, par::ModelParam) = par.value
-peval(params, sym::Symbol) = sym ∈ keys(params) ? peval(params, params[sym]) : sym
-function peval(params, expr::Expr)
+function peval end
+peval(::Parameters, val) = val
+peval(::Parameters, par::ModelParam) = par.value
+peval(params::Parameters, sym::Symbol) = haskey(params, sym) ? peval(params, params[sym]) : sym
+function peval(params::Parameters, expr::Expr)
     ret = Expr(expr.head)
     ret.args = [peval(params, a) for a in expr.args]
     params.mod[].eval(ret)
+end
+peval(m::AbstractModel, what) = peval(parameters(m), what)
+
+"""
+    @peval params what
+
+Evaluate the expression `what` within the context of the 
+given set of parameters 
+"""
+macro peval(par, what)
+    qwhat = Meta.quot(what)
+    return esc(:(peval($par, $qwhat)))
 end
 
 function _update_values(params, p, key)
@@ -258,7 +276,7 @@ Iterates the given Parameters collection in the order of dependency.
 Specifically, each parameter comes up only after all parameters it depends on
 have already been visited. The order within that is alphabetical.
 """
-function Base.iterate(params::Parameters, done = Set{Symbol}())
+function Base.iterate(params::Parameters, done=Set{Symbol}())
     if length(done) == length(params.contents)
         return nothing
     end
@@ -292,10 +310,10 @@ export update_links!
 Recompute the current values of all parameters.
 
 Typically when a new value of a parameter is assigned, all parameter links and
-aliases that depend on it are updated recursively. If a parameter is mutable, e.g.
-a Vector or another collection, its value can be updated in place without
-re-assigning it, thus the automatic update does not happen. In this case, it is
-necessary to call `update_links!`.
+aliases that depend on it are updated recursively. If a parameter is mutable,
+e.g. a Vector or another collection, its value can be updated in place without
+re-assigning the parameter, thus the automatic update does not happen. In this
+case, it is necessary to call `update_links!` manually.
 """
 update_links!(m::AbstractModel) = update_links!(parameters(m))
 function update_links!(params::Parameters)
@@ -357,9 +375,10 @@ end
     assign_parameters!(model; [options], param=value, ...)
 
 Assign values to model parameters. New parameters can be given as key-value pairs
-in the function call, or in a collection, such as a `Dict` or a `NamedTuple`.
+in the function call, or in a collection, such as a `Dict`, for example.
+    
 Individual parameters can be assigned directly to the `model` using
-dot-notation. This function should be more convenient when all parameters values
+dot notation. This function should be more convenient when all parameters values
 are loaded from a file and available in a dictionary or some other key-value
 collection.
 
@@ -372,6 +391,8 @@ There are two options that control the behaviour.
     it. When `check` is set to `true` we issue a warning, when set to `false` we
     ignore it silently.
 
+See also: [`export_parameters`](@ref) and [`export_parameters!`](@ref)
+
 Example
 ```
 julia> @using_example E1
@@ -379,15 +400,15 @@ julia> assign_parameters(E1.model; α=0.3, β=0.7)
 ```
 
 """
-@inline assign_parameters!(mp::Union{AbstractModel,Parameters}; preserve_links = true, check = true, args...) =
+function assign_parameters! end
+
+assign_parameters!(mp::Union{AbstractModel,Parameters}; preserve_links=true, check=true, args...) =
     assign_parameters!(mp, args; preserve_links, check)
 
-@inline assign_parameters!(model::AbstractModel, args; kwargs...) =
+assign_parameters!(model::AbstractModel, args; kwargs...) =
     (assign_parameters!(model.parameters, args; kwargs...); model)
 
-function assign_parameters!(params::Parameters, args;
-    preserve_links = true,
-    check = true)
+function assign_parameters!(params::Parameters, args; preserve_links=true, check=true)
     not_model_parameters = Symbol[]
     for (skey, value) in args
         key = Symbol(skey)
@@ -414,10 +435,38 @@ function assign_parameters!(params::Parameters, args;
 end
 export assign_parameters!
 
-@inline export_parameters(model::AbstractModel; kwargs...) = export_parameters!(Dict{Symbol,Any}(), model.parameters; kwargs...)
-@inline export_parameters(params::Parameters; kwargs...) = export_parameters!(Dict{Symbol,Any}(), params; kwargs...)
-@inline export_parameters!(container, model::AbstractModel; kwargs...) = export_parameters!(container, model.parameters; kwargs...)
-function export_parameters!(container, params::Parameters; include_links = true)
+"""
+    export_parameters(model; include_links=true)
+    export_parameters(parameters; include_links=true)
+
+Write all parameters into a `Dict{Symbol, Any}`. For link and alias parameter,
+only their current value is stored, the linking information is not. Set
+`include_links=false` to suppress the writing of link and alias parameters.
+
+Use [`assign_parameters!`](@ref) to restore the parameters values from the
+container created here.
+"""
+function export_parameters end
+export_parameters(model::AbstractModel; kwargs...) =
+    export_parameters!(Dict{Symbol,Any}(), model.parameters; kwargs...)
+export_parameters(params::Parameters; kwargs...) =
+    export_parameters!(Dict{Symbol,Any}(), params; kwargs...)
+
+"""
+    export_parameters!(container, model; include_links=true)
+    export_parameters!(container, parameters; include_links=true)
+
+Write all parameters into the given `container`. The parameters are `push!`-ed
+as `name => value` pairs. For link and alias parameter, only their current value
+is stored, the linking information is not. Set `include_links=false` to suppress
+the writing of link and alias parameters.
+
+Use [`assign_parameters!`](@ref) to restore the parameters values from the
+container created here.
+"""
+export_parameters!(container, model::AbstractModel; kwargs...) =
+    export_parameters!(container, model.parameters; kwargs...)
+function export_parameters!(container, params::Parameters; include_links=true)
     for (key, value) in params
         if include_links || value.link === nothing
             push!(container, key => peval(params, value))

@@ -13,7 +13,11 @@ using Test
     @test_throws ErrorException transformation(Transformation)
     @test_throws ErrorException inverse_transformation(Transformation)
     let m = Model()
-        @variables m begin x; @log lx; @neglog lmx; end
+        @variables m begin
+            x
+            @log lx
+            @neglog lmx
+        end
         @test length(m.variables) == 3
         @test m.x.tr_type === :none
         @test m.lx.tr_type === :log
@@ -32,7 +36,7 @@ using Test
         m.ly = update(m.ly, transformation=LogTransform)
         @test m.ly.tr_type === :log
     end
-end 
+end
 
 @testset "Options" begin
     o = Options(tol=1e-7, maxiter=25)
@@ -55,7 +59,10 @@ end
     y1 = :y
     y2 = ModelSymbol(:y)
     y3 = ModelSymbol("y3", :y)
-    y4 = ModelSymbol(quote "y4" y end)
+    y4 = ModelSymbol(quote
+        "y4"
+        y
+    end)
     @test hash(y1) == hash(:y)
     @test hash(y2) == hash(:y)
     @test hash(y3) == hash(:y)
@@ -67,14 +74,17 @@ end
     @test y2 == y3
     @test y2 == y4
     @test y3 == y4
-    ally = Symbol[y1,y2,y3,y4]
+    ally = Symbol[y1, y2, y3, y4]
     @test y1 in ally
     @test y2 in ally
     @test y3 in ally
     @test y4 in ally
-    @test indexin([y1,y2,y3,y4], ally) == [1,1,1,1]
-    ally = ModelSymbol[y1,y2,y3,y4,:y,quote "y5" y end]
-    @test indexin([y1,y2,y3,y4], ally) == [1,1,1,1]
+    @test indexin([y1, y2, y3, y4], ally) == [1, 1, 1, 1]
+    ally = ModelSymbol[y1, y2, y3, y4, :y, quote
+        "y5"
+        y
+    end]
+    @test indexin([y1, y2, y3, y4], ally) == [1, 1, 1, 1]
     @test length(unique(hash.(ally))) == 1
     ally = Dict{Symbol,Any}()
     get!(ally, y1, "y1")
@@ -96,16 +106,34 @@ end
 @testset "VarTypes" begin
     lvars = ModelSymbol[]
     push!(lvars, :ly)
-    push!(lvars, quote "ly" ly end)
-    push!(lvars, quote @log ly end)
-    push!(lvars, quote "ly" @log ly end)
-    push!(lvars, quote @lin ly end)
-    push!(lvars, quote "ly" @lin ly end)
-    push!(lvars, quote @steady ly end)
-    push!(lvars, quote "ly" @steady ly end)
+    push!(lvars, quote
+        "ly"
+        ly
+    end)
+    push!(lvars, quote
+        @log ly
+    end)
+    push!(lvars, quote
+        "ly"
+        @log ly
+    end)
+    push!(lvars, quote
+        @lin ly
+    end)
+    push!(lvars, quote
+        "ly"
+        @lin ly
+    end)
+    push!(lvars, quote
+        @steady ly
+    end)
+    push!(lvars, quote
+        "ly"
+        @steady ly
+    end)
     push!(lvars, ModelSymbol(:ly, :lin))
     for i = 1:length(lvars)
-        for j = i + 1:length(lvars)
+        for j = i+1:length(lvars)
             @test lvars[i] == lvars[j]
         end
         @test lvars[i] == :ly
@@ -134,28 +162,36 @@ end
     let m = Model()
         @variables m p q r
         @variables m begin
-            x; @log y; @steady z;
+            x
+            @log y
+            @steady z
         end
         @test [v.var_type for v in m.allvars] == [:lin, :lin, :lin, :lin, :log, :steady]
     end
     let m = Model()
         @shocks m p q r
         @shocks m begin
-            x; @log y; @steady z;
+            x
+            @log y
+            @steady z
         end
         @test [v.var_type for v in m.allvars] == [:shock, :shock, :shock, :shock, :shock, :shock]
     end
     let m = Model()
         @logvariables m p q r
         @logvariables m begin
-            x; @log y; @steady z;
+            x
+            @log y
+            @steady z
         end
         @test [v.var_type for v in m.allvars] == [:log, :log, :log, :log, :log, :log]
     end
     let m = Model()
         @steadyvariables m p q r
         @steadyvariables m begin
-            x; @log y; @steady z;
+            x
+            @log y
+            @steady z
         end
         @warn "Test disabled"
         # @test [v.var_type for v in m.allvars] == [:steady, :steady, :steady, :steady, :steady, :steady]
@@ -163,7 +199,7 @@ end
 end
 
 module E
-    using ModelBaseEcon
+using ModelBaseEcon
 end
 @testset "Evaluations" begin
     ModelBaseEcon.initfuncs(E)
@@ -210,21 +246,27 @@ end
 
     for (i, v) = enumerate(m.varshks)
         s = convert(Symbol, v)
-        @test m.sstate[i] == m.sstate[v] == m.sstate[s] == m.sstate["$s"]   
+        @test m.sstate[i] == m.sstate[v] == m.sstate[s] == m.sstate["$s"]
     end
 
     m.sstate.values .= rand(length(m.sstate.values))
-    @test begin (l, s) = m.sstate.x.data; l == m.sstate.x.level && s == m.sstate.x.slope end
-    @test begin (l, s) = m.sstate.k.data; exp(l) == m.sstate.k.level && exp(s) == m.sstate.k.slope end
+    @test begin
+        (l, s) = m.sstate.x.data
+        l == m.sstate.x.level && s == m.sstate.x.slope
+    end
+    @test begin
+        (l, s) = m.sstate.k.data
+        exp(l) == m.sstate.k.level && exp(s) == m.sstate.k.slope
+    end
 
     xdata = m.sstate.x[1:8, ref=3]
     @test xdata[3] ≈ m.sstate.x.level
     @test xdata ≈ m.sstate.x.level .+ ((1:8) .- 3) .* m.sstate.x.slope
     kdata = m.sstate.k[1:8, ref=3]
     @test kdata[3] ≈ m.sstate.k.level
-    @test kdata ≈ m.sstate.k.level .* m.sstate.k.slope.^((1:8) .- 3)
+    @test kdata ≈ m.sstate.k.level .* m.sstate.k.slope .^ ((1:8) .- 3)
 
-    @test_throws Exception m.sstate.x.data = [1,2]
+    @test_throws Exception m.sstate.x.data = [1, 2]
     @test_throws ArgumentError m.sstate.nosuchvariable
 
     @steadystate m m = l
@@ -234,7 +276,7 @@ end
     let io = IOBuffer()
         show(io, m.sstate.x)
         lines = split(String(take!(io)), '\n')
-        @test length(lines) == 1 && occursin('+', lines[1]) 
+        @test length(lines) == 1 && occursin('+', lines[1])
 
         show(io, m.sstate.k)
         lines = split(String(take!(io)), '\n')
@@ -244,12 +286,12 @@ end
         show(io, m.sstate.y)
         lines = split(String(take!(io)), '\n')
         @test length(lines) == 1 && !occursin('+', lines[1]) && !occursin('*', lines[1])
-        
+
         m.sstate.l.slope = 1
         show(io, m.sstate.l)
         lines = split(String(take!(io)), '\n')
         @test length(lines) == 1 && !occursin('+', lines[1]) && !occursin('*', lines[1])
-        
+
         show(io, m.sstate.p)
         lines = split(String(take!(io)), '\n')
         @test length(lines) == 1 && !occursin('+', lines[1]) && !occursin('*', lines[1])
@@ -268,7 +310,7 @@ end
         println(io)
         ModelBaseEcon.show_aligned5(io, m.sstate.p, mask=[false, true])
         lines = split(String(take!(io)), '\n')
-        @test length(lines) == 3 
+        @test length(lines) == 3
         for line in lines
             @test length(split(line, '?')) == 2
         end
@@ -278,11 +320,11 @@ end
 
 module MetaTest
 using ModelBaseEcon
-    params = @parameters
-    custom(x) = x + one(x)
-    const val = 12.0
-    params.b = custom(val)
-    params.a = @link custom(val)
+params = @parameters
+custom(x) = x + one(x)
+const val = 12.0
+params.b = custom(val)
+params.a = @link custom(val)
 end
 
 @testset "Parameters" begin
@@ -290,7 +332,7 @@ end
     push!(params, :a => 1.0)
     push!(params, :b => @link 1.0 - a)
     push!(params, :c => @alias b)
-    push!(params, :e => [1,2,3])
+    push!(params, :e => [1, 2, 3])
     push!(params, :d => @link (sin(2π / e[3])))
     @test length(params) == 5
     # dot notation evaluates
@@ -327,7 +369,7 @@ end
     params.e[3] = 2
     update_links!(params)
     @test 1.0 + params.d ≈ 1.0
-    
+
     params.d = @link cos(2π / e[2])
     @test params.d ≈ -1.0
 
@@ -336,7 +378,9 @@ end
 
     @test MetaTest.params.a ≈ 13.0
     @test MetaTest.params.b ≈ 13.0
-    MetaTest.eval(quote custom(x) = 2x + one(x) end)
+    MetaTest.eval(quote
+        custom(x) = 2x + one(x)
+    end)
     update_links!(MetaTest.params)
     @test MetaTest.params.a ≈ 25.0
     @test MetaTest.params.b ≈ 13.0
@@ -358,8 +402,14 @@ end
     @initialize m
     @test_throws ArgumentError ModelBaseEcon.process_equation(m, :(y[t] = 0))
     @test_throws ArgumentError ModelBaseEcon.process_equation(m, :(x[t] = p))
-    @test_throws ArgumentError ModelBaseEcon.process_equation(m, :(x[t] = if false 2 end))
-    @test ModelBaseEcon.process_equation(m, :(x[t] = if false 2 else 0 end)) isa Equation
+    @test_throws ArgumentError ModelBaseEcon.process_equation(m, :(x[t] = if false
+        2
+    end))
+    @test ModelBaseEcon.process_equation(m, :(x[t] = if false
+        2
+    else
+        0
+    end)) isa Equation
     @test ModelBaseEcon.process_equation(m, :(x[t] = ifelse(false, 2, 0))) isa Equation
 end
 
@@ -369,62 +419,64 @@ end
     @variables mod x
     @shocks mod sx
     @equations mod begin
-        x[t - 1] = sx[t + 1]
-        @lag(x[t]) = @lag(sx[t + 2])
+        x[t-1] = sx[t+1]
+        @lag(x[t]) = @lag(sx[t+2])
         # 
-        x[t - 1] + a = sx[t + 1] + 3
-        @lag(x[t] + a) = @lag(sx[t + 2] + 3)
+        x[t-1] + a = sx[t+1] + 3
+        @lag(x[t] + a) = @lag(sx[t+2] + 3)
         # 
-        x[t - 2] = sx[t]
-        @lag(x[t], 2) = @lead(sx[t - 2], 2)
+        x[t-2] = sx[t]
+        @lag(x[t], 2) = @lead(sx[t-2], 2)
         # 
-        x[t] - x[t - 1] = x[t + 1] - x[t] + sx[t]
-        @d(x[t]) = @d(x[t + 1]) + sx[t]
+        x[t] - x[t-1] = x[t+1] - x[t] + sx[t]
+        @d(x[t]) = @d(x[t+1]) + sx[t]
         # 
-        (x[t] - x[t + 1]) - (x[t - 1] - x[t]) = sx[t]
-        @d(x[t] - x[t + 1]) = sx[t]
+        (x[t] - x[t+1]) - (x[t-1] - x[t]) = sx[t]
+        @d(x[t] - x[t+1]) = sx[t]
         # 
-        x[t] - x[t - 2] = sx[t]
-        @d(x[t],0,2) = sx[t]
+        x[t] - x[t-2] = sx[t]
+        @d(x[t], 0, 2) = sx[t]
         # 
-        (x[t] - x[t - 1]) - (x[t - 1] - x[t - 2]) = sx[t]
-        @d(x[t],2) = sx[t]
+        x[t] - 2x[t-1] + x[t-2] = sx[t]
+        @d(x[t], 2) = sx[t]
         # 
-        (x[t] - x[t - 2]) - (x[t - 1] - x[t - 3]) = sx[t]
-        @d(x[t],1,2) = sx[t]
+        x[t] - x[t-1] - x[t-2] + x[t-3] = sx[t]
+        @d(x[t], 1, 2) = sx[t]
         # 
-        log(x[t] - x[t - 2]) - log(x[t - 1] - x[t - 3]) = sx[t]
-        @dlog(@d(x[t],0,2)) = sx[t]
+        log(x[t] - x[t-2]) - log(x[t-1] - x[t-3]) = sx[t]
+        @dlog(@d(x[t], 0, 2)) = sx[t]
         # 
-        (x[t] + 0.3x[t + 2]) + (x[t - 1] + 0.3x[t + 1]) + (x[t - 2] + 0.3x[t]) = 0
-        @movsum(x[t] + 0.3x[t + 2],3) = 0
+        (x[t] + 0.3x[t+2]) + (x[t-1] + 0.3x[t+1]) + (x[t-2] + 0.3x[t]) = 0
+        @movsum(x[t] + 0.3x[t+2], 3) = 0
         # 
-        ((x[t] + 0.3x[t + 2]) + (x[t - 1] + 0.3x[t + 1]) + (x[t - 2] + 0.3x[t])) / 3 = 0
-        @movav(x[t] + 0.3x[t + 2],3) = 0
+        ((x[t] + 0.3x[t+2]) + (x[t-1] + 0.3x[t+1]) + (x[t-2] + 0.3x[t])) / 3 = 0
+        @movav(x[t] + 0.3x[t+2], 3) = 0
     end
     @initialize mod
 
     compare_resids(e1, e2) = (
-        e1.resid.head == e2.resid.head  && (
+        e1.resid.head == e2.resid.head && (
             (length(e1.resid.args) == length(e2.resid.args) == 2 && e1.resid.args[2] == e2.resid.args[2]) ||
             (length(e1.resid.args) == length(e2.resid.args) == 1 && e1.resid.args[1] == e2.resid.args[1])
         )
     )
 
     for i = 2:2:length(mod.equations)
-        @test compare_resids(mod.equations[i - 1], mod.equations[i])
+        @test compare_resids(mod.equations[i-1], mod.equations[i])
     end
     # test errors and warnings
     mod.warn.no_t = false
-    @test  add_equation!(mod, :(x = sx[t])) isa Model
-    @test  add_equation!(mod, :(x[t] = sx)) isa Model
-    @test  add_equation!(mod, :(x[t] = sx[t])) isa Model
-    @test compare_resids(mod.equations[end], mod.equations[end - 1])
-    @test compare_resids(mod.equations[end], mod.equations[end - 2])
+    @test add_equation!(mod, :(x = sx[t])) isa Model
+    @test add_equation!(mod, :(x[t] = sx)) isa Model
+    @test add_equation!(mod, :(x[t] = sx[t])) isa Model
+    @test compare_resids(mod.equations[end], mod.equations[end-1])
+    @test compare_resids(mod.equations[end], mod.equations[end-2])
     @test_throws ArgumentError add_equation!(mod, :(@notametafunction(x[t]) = 7))
     @test_throws ArgumentError add_equation!(mod, :(x[t] = unknownsymbol))
     @test_throws ArgumentError add_equation!(mod, :(x[t] = unknownseries[t]))
-    @test_throws ArgumentError add_equation!(mod, :(x[t] = let c = 5; sx[t + c]; end))
+    @test_throws ArgumentError add_equation!(mod, :(x[t] = let c = 5
+        sx[t+c]
+    end))
 
 end
 
@@ -436,16 +488,17 @@ end
         @parameters m begin
             a = 0.3
             b = @link 1 - a
-            d = [1,2,3]
+            d = [1, 2, 3]
             c = @link sin(2π / d[3])
         end
         @variables m begin
-            "variable x" x
+            "variable x"
+            x
         end
         @shocks m sx
         @equations m begin
             "This equation is super cool"
-            a * @d(x) = b * @d(x[t + 1]) + sx
+            a * @d(x) = b * @d(x[t+1]) + sx
         end
         @initialize m
         @steadystate m x = a + 1
@@ -473,7 +526,7 @@ end
         @variables m X
         @shocks m EX
         @equations m begin
-            @log X[t] = rho * X[t - 1] + EX[t]
+            @log X[t] = rho * X[t-1] + EX[t]
         end
         @initialize m
         @test length(m.equations) == 1 && islog(m.equations[1])
@@ -574,7 +627,7 @@ end
         show(io, MIME"text/plain"(), m.parameters)
         @test length(split(String(take!(io)), '\n')) == 4
     end
-    end
+end
 
 module AUX
 using ModelBaseEcon
@@ -582,14 +635,14 @@ model = Model()
 model.substitutions = true
 @variables model x y
 @equations model begin
-    x[t + 1] = log(x[t] - x[t - 1])
-    y[t + 1] = y[t] + log(y[t - 1])
+    x[t+1] = log(x[t] - x[t-1])
+    y[t+1] = y[t] + log(y[t-1])
 end
 @initialize model
 end
 @testset "AUX" begin
     let m = AUX.model
-    @test m.nvars == 2
+        @test m.nvars == 2
         @test m.nshks == 0
         @test m.nauxs == 2
         @test length(m.auxeqns) == 2
@@ -613,9 +666,9 @@ end
     @test E2.model.maxlag == 1
     @test E2.model.maxlead == 1
     test_eval_RJ(E2.model, [0.0, 0.0, 0.0],
-        [-.5      1  -.48     0    0  0    0   -.02     0  0  -1  0  0  0 0 0  0 0;
-           0  -.375     0  -.75    1  0    0  -.125     0  0   0  0  0 -1 0 0  0 0;
-           0      0  -.02     0  .02  0  -.5      1  -.48  0   0  0  0  0 0 0 -1 0])
+        [-0.5 1 -0.48 0 0 0 0 -0.02 0 0 -1 0 0 0 0 0 0 0
+            0 -0.375 0 -0.75 1 0 0 -0.125 0 0 0 0 0 -1 0 0 0 0
+            0 0 -0.02 0 0.02 0 -0.5 1 -0.48 0 0 0 0 0 0 0 -1 0])
     compare_RJ_R!_(E2.model)
 end
 
@@ -658,10 +711,10 @@ end
     compare_RJ_R!_(E3.model)
     test_eval_RJ(E3.model, [0.0, 0.0, 0.0],
         sparse(
-            [1, 1, 2, 1, 3, 1, 1, 2, 2, 3,  3,  3,  1,  2,  3,  3,  1,  2,  3],
+            [1, 1, 2, 1, 3, 1, 1, 2, 2, 3, 3, 3, 1, 2, 3, 3, 1, 2, 3],
             [2, 3, 3, 4, 4, 5, 6, 8, 9, 9, 13, 14, 15, 15, 15, 16, 21, 27, 33],
             [-0.5, 1.0, -0.375, -0.3, -0.02, -0.05, -0.05, -0.75, 1.0, 0.02, -0.25,
-             -0.25, -0.02, -0.125, 1.0, -0.48, -1.0, -1.0, -1.0],
+                -0.25, -0.02, -0.125, 1.0, -0.48, -1.0, -1.0, -1.0],
             3, 36,
         )
     )
@@ -682,7 +735,7 @@ end
             [2, 2, 2, 3, 5, 2, 2, 2, 1, 1, 3, 4, 1, 3, 6, 5, 5, 4, 4, 6, 6, 2, 1],
             [1, 2, 3, 3, 3, 4, 5, 6, 8, 9, 9, 9, 10, 15, 15, 20, 21, 26, 27, 32, 33, 39, 45],
             [-0.1, -0.1, 1.0, -1.0, -1.0, -0.1, -0.1, -0.1, -0.2, 1.0, -1.0, -1.0, -0.2, 1.0,
-             -1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0, -1.0],
+                -1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0, -1.0],
             6, 6 * 8,
         ))
 end
@@ -696,7 +749,7 @@ end
             @log q
         end
         @equations m begin
-            2p[t] = p[t + 1] + 0.1
+            2p[t] = p[t+1] + 0.1
             q[t] = p[t] + 1
         end
         @initialize m
@@ -739,9 +792,9 @@ end
         @shocks m s1 s2
         @equations m begin
             "linear growth with slope 0.2"
-            lx[t] = lx[t - 1] + 0.2 + s1[t]
+            lx[t] = lx[t-1] + 0.2 + s1[t]
             "exponential with the same rate as the slope of lx"
-            log(x[t]) = lx[t] + s2[t + 1]
+            log(x[t]) = lx[t] + s2[t+1]
         end
         @initialize m
         # 
@@ -772,7 +825,7 @@ end
         TMP = fill!(similar(ss.values), 0.0)
         TMP[eq1.vinds] .= J
         @test R == 0
-        @test TMP[[1,2,5]] ≈ [0.0, 1.0, -1.0]
+        @test TMP[[1, 2, 5]] ≈ [0.0, 1.0, -1.0]
         # test with eq4
         ss.lx.data .= [1.5, 0.2]
         ss.x.data .= [1.5, 0.2]
@@ -797,13 +850,13 @@ end
         TMP = fill!(similar(ss.values), 0.0)
         TMP[eq4.vinds] .= J
         @test R + 1.0 ≈ 0.0 + 1.0
-        @test TMP[[1,2,3,4,7]] ≈ [-1.0, -m.shift, 1.0, m.shift, -1.0]
+        @test TMP[[1, 2, 3, 4, 7]] ≈ [-1.0, -m.shift, 1.0, m.shift, -1.0]
         for xlvl = 0.1:0.1:2
             ss.x.level = exp(xlvl)
             R, J = eq4.eval_RJ(ss.values[eq4.vinds])
             @test R ≈ xlvl - 1.5
             TMP[eq4.vinds] .= J
-            @test TMP[[1,2,3,4,7]] ≈ [-1.0, -m.shift, 1.0, m.shift, -1.0]
+            @test TMP[[1, 2, 3, 4, 7]] ≈ [-1.0, -m.shift, 1.0, m.shift, -1.0]
         end
     end
 end

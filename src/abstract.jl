@@ -5,23 +5,25 @@
 # All rights reserved.
 ##################################################################################
 
+"""
+    abstract type AbstractEquation end
+
+Base type for [`Equation`](@ref).
+"""
 abstract type AbstractEquation end
 
 # equations must have these fields: expr, vinds, vsyms, eval_resid, eval_RJ
 for fn in (:expr, :vinds, :vsyms, :eval_resid, :eval_RJ)
     local qnfn = QuoteNode(fn)
     eval(quote
-        @inline $fn(eqn::AbstractEquation) = getfield(eqn, $qnfn)
+        $fn(eqn::AbstractEquation) = getfield(eqn, $qnfn)
     end)
 end
 
 # equations might have these fields. If not, we provide defaults
-@inline flags(eqn::AbstractEquation) = hasfield(typeof(eqn), :flags) ? getfield(eqn, :flags) : nothing
-@inline flag(eqn::AbstractEquation, f::Symbol) = (flgs = flags(eqn); hasfield(typeof(flgs), f) ? getfield(flgs, f) : false)
-@inline doc(eqn::AbstractEquation) = :doc in fieldnames(typeof(eqn)) ? getfield(eqn, :doc) : ""
-
-# @inline eval_resid(eqn::AbstractEquation, x) = eval_resid(eqn)(x)
-# @inline eval_RJ(eqn::AbstractEquation, x) = eval_RJ(eqn)(x)
+flags(eqn::AbstractEquation) = hasfield(typeof(eqn), :flags) ? getfield(eqn, :flags) : nothing
+flag(eqn::AbstractEquation, f::Symbol) = (flgs = flags(eqn); hasfield(typeof(flgs), f) ? getfield(flgs, f) : false)
+doc(eqn::AbstractEquation) = :doc in fieldnames(typeof(eqn)) ? getfield(eqn, :doc) : ""
 
 #
 function Base.show(io::IO, eqn::AbstractEquation)
@@ -42,30 +44,35 @@ end
 Base.:(==)(e1::AbstractEquation, e2::AbstractEquation) = flags(e1) == flags(e2) && expr(e1) == expr(e2)
 Base.hash(e::AbstractEquation, h::UInt) = hash((flags(e), expr(e)), h)
 
+"""
+    abstract type AbstractModel end
+
+Base type for [`Model`](@ref).
+"""
 abstract type AbstractModel end
 
 # a subtype of AbstractModel is expected to have a number of fields.
 # If it doesn't, the creater of the new model type must define the
 # access methods that follow.
 
-@inline variables(m::AM) where {AM<:AbstractModel} = getfield(m, :variables)
-@inline nvariables(m::AM) where {AM<:AbstractModel} = length(variables(m))
+variables(m::AM) where {AM<:AbstractModel} = getfield(m, :variables)
+nvariables(m::AM) where {AM<:AbstractModel} = length(variables(m))
 
-@inline shocks(m::AM) where {AM<:AbstractModel} = getfield(m, :shocks)
-@inline nshocks(m::AM) where {AM<:AbstractModel} = length(shocks(m))
+shocks(m::AM) where {AM<:AbstractModel} = getfield(m, :shocks)
+nshocks(m::AM) where {AM<:AbstractModel} = length(shocks(m))
 
-@inline allvars(m::AM) where {AM<:AbstractModel} = vcat(variables(m), shocks(m))
-@inline nallvars(m::AM) where {AM<:AbstractModel} = length(variables(m)) + length(shocks(m))
+allvars(m::AM) where {AM<:AbstractModel} = vcat(variables(m), shocks(m))
+nallvars(m::AM) where {AM<:AbstractModel} = length(variables(m)) + length(shocks(m))
 
-@inline sstate(m::AM) where {AM<:AbstractModel} = getfield(m, :sstate)
+sstate(m::AM) where {AM<:AbstractModel} = getfield(m, :sstate)
 
-@inline parameters(m::AM) where {AM<:AbstractModel} = getfield(m, :parameters)
+parameters(m::AM) where {AM<:AbstractModel} = getfield(m, :parameters)
 
-@inline equations(m::AM) where {AM<:AbstractModel} = getfield(m, :equations)
-@inline nequations(m::AM) where {AM<:AbstractModel} = length(equations(m))
+equations(m::AM) where {AM<:AbstractModel} = getfield(m, :equations)
+nequations(m::AM) where {AM<:AbstractModel} = length(equations(m))
 
-@inline alleqns(m::AM) where {AM<:AbstractModel} = getfield(m, :equations)
-@inline nalleqns(m::AM) where {AM<:AbstractModel} = length(equations(m))
+alleqns(m::AM) where {AM<:AbstractModel} = getfield(m, :equations)
+nalleqns(m::AM) where {AM<:AbstractModel} = length(equations(m))
 
 export parameters
 export variables, nvariables
@@ -76,7 +83,14 @@ export sstate
 
 
 # @inline moduleof(f::Function) = parentmodule(f)
-@inline moduleof(e::AbstractEquation) = parentmodule(eval_resid(e))
+"""
+    moduleof(equation)
+    moduleof(model)
+
+Return the module in which the given equation or model was initialized.
+"""
+function moduleof end
+moduleof(e::AbstractEquation) = parentmodule(eval_resid(e))
 function moduleof(m::AbstractModel)
     eqns = equations(m)
     if isempty(eqns)

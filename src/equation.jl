@@ -23,19 +23,21 @@ hint(::EqnNotReadyError) = "Call `@initialize model` or `add_equation!()` first.
 # being a Number or a Symbol.  So we need a type that allows these.
 const ExtExpr = Union{Expr,Symbol,Number}
 
-"Placeholder evaluation function to use in Equation costruction while it is being created"
-@inline eqnnotready(x...) = throw(EqnNotReadyError())
+# Placeholder evaluation function to use in Equation construction while it is
+# being created
+eqnnotready(x...) = throw(EqnNotReadyError())
 
 """
-    mutable struct EqnFlags ... end
+    mutable struct EqnFlags ⋯ end
 
 Holds information about the equation. Flags can be specified in the model
 definition by annotating the equation with `@<flag>` (insert the flag you want
-to raise in place of `<flag>`).
+to raise in place of `<flag>`). Multiple flags may be applied to the same
+equation.
 
 Supported flags:
  * `@log lhs = rhs` instructs the model parser to make the residual
-   `log(lhs / rhs)`. Normally the residual is computed as `lhs - rhs`.
+   `log(lhs / rhs)`. Normally the residual is `lhs - rhs`.
  * `@lin lhs = rhs` marks the equation for selective linearization.
 
 """
@@ -51,21 +53,29 @@ Base.:(==)(f1::EqnFlags, f2::EqnFlags) = all(f1.:($flag) == f2.:($flag) for flag
 
 export Equation
 """
-    struct Equation <: AbstractEquation
+    struct Equation <: AbstractEquation ⋯ end
 
-Data structure representing a single equation in our state space model.
+Data type representing a single equation in a model.
 
-### Methods (for users)
-  * TODO
+Equations are defined in [`@equations`](@ref) blocks. The actual equation
+instances are later created with [`@initialize`](@ref) and stored within
+the model object.
 
-### Implementation (for developers)
-During the phase of definition of the Model, this type simply stores the expression
-entered by the user. During @initialize(), the true data structure is constructed.
-We need this, because the construction of the equation requires information from
-the Model object, which may not be available at the time the equation expression
-is first read.
+Equation flags can be specified by annotating the equation definition with one
+or more `@<flag>`. See [`EqnFlags`](@ref) for details.
+
+Each equation has two functions associated with it, one which computes the
+residual and the other computes both the residual and the gradient . Usually
+there's no need to users to call these functions directly. They are used
+internally by the solvers.
 """
 struct Equation <: AbstractEquation
+    ### Implementation note 
+    # During the phase of definition of the Model, this type simply stores the expression
+    # entered by the user. During @initialize(), the full data structure is constructed.
+    # We need this, because the construction of the equation requires information from
+    # the Model object, which may not be available at the time the equation expression
+    # is first read.
     doc::String
     flags::EqnFlags
     "The original expression entered by the user"
