@@ -115,8 +115,10 @@ function linearize!(model::Model;
     nshks = length(model.shocks)
     sspt = [repeat(sstate.values[1:2:(2nvars)], inner = ntimes); zeros(ntimes * nshks)]
     sspt = reshape(sspt, ntimes, nvars + nshks)
-
-    eval_RJ(sspt, med)  # updates med.R and med.J in place
+    
+    res, _ = eval_RJ(sspt, med)  # updates med.J in place, returns updated R and J
+    med.R .= res
+    
     model.evaldata = LinearizedModelEvaluationData(deviation, sspt, med)
     return model
 end
