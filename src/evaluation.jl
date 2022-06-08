@@ -443,7 +443,7 @@ end
 function eval_R!(res::AbstractVector{Float64}, point::Matrix{Float64}, slmed::SelectiveLinearizationMED)
     med = slmed.med
     for (i, eqn, inds, eed) in zip(1:length(med.alleqns), med.alleqns, med.allinds, slmed.eedata)
-        islin(eqn) || _update_eqn_params!(eqn.eval_resid, med.params)
+        islin(eqn) || _update_eqn_params!(eqn.eval_resid, med.params[])
         res[i] = eval_resid(eqn, point[inds], eed)
     end
     return nothing
@@ -455,7 +455,7 @@ function eval_RJ(point::Matrix{Float64}, slmed::SelectiveLinearizationMED)
     res = similar(med.R)
     jac = med.J
     for (i, eqn, inds, ri, eed) in zip(1:neqns, med.alleqns, med.allinds, med.rowinds, slmed.eedata)
-        islin(eqn) || _update_eqn_params!(eqn.eval_resid, med.params)
+        islin(eqn) || _update_eqn_params!(eqn.eval_resid, med.params[])
         res[i], jac.nzval[ri] = eval_RJ(eqn, point[inds], eed)
     end
     return res, jac
