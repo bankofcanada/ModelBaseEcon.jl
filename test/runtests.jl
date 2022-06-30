@@ -30,29 +30,59 @@ using Test
         mdata = -data
         @test transform(mdata, m.lmx) ≈ log.(data)
         @test inverse_transform(log.(data), m.lmx) ≈ mdata
+        @test !need_transform(:y)
+        y = to_lin(:y)
+        @test y.tr_type === :none
+        @logvariables m lmy
         @neglogvariables m ly
         @test_throws ArgumentError m.ly = 25
+        @test_throws ArgumentError m.lmy = -25
         @test_throws ArgumentError m.ly = ModelVariable(:lmy)
+        @test_throws ErrorException update(m.ly, tr_type=:log, transformation=NoTransform)
         m.ly = update(m.ly, transformation=LogTransform)
+        m.lmy = update(m.lmy, tr_type=:neglog, transformation=NegLogTransform)
         @test m.ly.tr_type === :log
+        @test m.lmy.tr_type === :neglog
+        
+        @test_throws ErrorException m.dummy = nothing
+        
     end
 end
 
 @testset "Options" begin
     o = Options(tol=1e-7, maxiter=25)
+    @test propertynames(o) == (:maxiter, :tol)
     @test getoption(o, tol=1e7) == 1e-7
-    @test getoption(o, abstol=1e-10) == 1e-10
-    @test "abstol" ∉ o
+    @test getoption(o, "name", "") == ""
+    @test getoption(o, abstol=1e-10, name="") == (1e-10, "")
+    @test all(["abstol","name"] .∉ Ref(o))
     @test getoption!(o, abstol=1e-11) == 1e-11
     @test :abstol ∈ o
     @test setoption!(o, reltol=1e-3, linear=false) isa Options
-    @test "reltol" ∈ o
-    @test :linear ∈ o
+    @test all(["reltol", :linear] .∈ Ref(o))
     @test getoption!(o, tol=nothing, linear=true, name="Zoro") == (1e-7, false, "Zoro")
     @test "name" ∈ o && o.name == "Zoro"
-    z = Options(o)
+    z = Options()
+    @test merge(z, o) == Options(o...) == Options(o)
+    @test merge!(z, o) == Options(Dict(string(k) => v for (k,v) in pairs(o))...)
+    @test o == z
+    @test Dict(o...) == z
+    @test o == Dict(z...)
     z.name = "Oro"
     @test o.name == "Zoro"
+    @test setoption!(z, "linear", true) isa Options
+    @test getoption!(z, "linear", false) == true
+    @test getoption!(z, :name, "") == "Oro"
+    @test show(IOBuffer(), o) === nothing
+    @test show(IOBuffer(), MIME"text/plain"(), o) === nothing
+
+    @using_example S1
+    m = S1.model
+    @test getoption(m, "shift", 1) == getoption(m, shift=1) == 10
+    @test getoption!(m, "substitutions", true) == getoption!(m, :substitutions, true) == false
+    @test getoption(setoption!(m, "maxiter", 25), maxiter = 0) == 25
+    @test getoption(setoption!(m, verbose = true), "verbose", false) == true
+    @test typeof(setoption!(println, m)) == Options
 end
 
 @testset "Vars" begin
@@ -67,6 +97,7 @@ end
     @test hash(y2) == hash(:y)
     @test hash(y3) == hash(:y)
     @test hash(y4) == hash(:y)
+    @test hash(y4, UInt(0)) == hash(:y, UInt(0))
     @test_throws ArgumentError ModelSymbol(:(x + 5))
     @test y1 == y2
     @test y3 == y1
@@ -169,13 +200,14 @@ end
         @test [v.var_type for v in m.allvars] == [:lin, :lin, :lin, :lin, :log, :steady]
     end
     let m = Model()
-        @shocks m p q r
+        @shocks m p q r        
         @shocks m begin
             x
             @log y
             @steady z
         end
         @test [v.var_type for v in m.allvars] == [:shock, :shock, :shock, :shock, :shock, :shock]
+        @test (m.r = to_shock(m.r)) == :r
     end
     let m = Model()
         @logvariables m p q r
@@ -187,6 +219,15 @@ end
         @test [v.var_type for v in m.allvars] == [:log, :log, :log, :log, :log, :log]
     end
     let m = Model()
+        @neglogvariables m p q r
+        @neglogvariables m begin
+            x
+            @log y
+            @steady z
+        end
+        @test [v.var_type for v in m.allvars] == [:neglog, :neglog, :neglog, :neglog, :neglog, :neglog]
+    end
+    let m = Model()
         @steadyvariables m p q r
         @steadyvariables m begin
             x
@@ -195,6 +236,7 @@ end
         end
         @warn "Test disabled"
         # @test [v.var_type for v in m.allvars] == [:steady, :steady, :steady, :steady, :steady, :steady]
+
     end
 end
 
@@ -211,7 +253,7 @@ end
 end
 
 @testset "Misc" begin
-    m = Model()
+    m = Model(Options(verbose=true))
     out = let io = IOBuffer()
         print(io, m.flags)
         readlines(seek(io, 0))
@@ -221,7 +263,11 @@ end
         sline = strip(line)
         @test isempty(sline) || length(split(sline, "=")) == 2
     end
-    @test_throws ModelBaseEcon.ModelErrorBase ModelBaseEcon.modelerror()
+    @test fullprint(IOBuffer(), m) === nothing
+    @test_throws ModelBaseEcon.ModelError ModelBaseEcon.modelerror()
+    sprint(showerror, ModelBaseEcon.ModelError())
+    sprint(showerror, ModelBaseEcon.ModelNotInitError()) 
+    sprint(showerror, ModelBaseEcon.NotImplementedError(""))
     @variables m x y z
     @logvariables m k l m
     @steadyvariables m p q r
@@ -238,10 +284,18 @@ end
     for s in (:p, :q, :r)
         @test m.:($s) isa ModelSymbol && issteady(m.:($s))
     end
+    @test_throws ArgumentError m.a = 1
+    @test_throws ModelBaseEcon.EqnNotReadyError ModelBaseEcon.eqnnotready()
+    sprint(showerror, ModelBaseEcon.EqnNotReadyError())
+
+    @test_throws ErrorException try @eval @equations m :(p[t] = 0) catch err; throw(ErrorException(err.msg)); end
+
     @equations m begin
         p[t] = 0
     end
     @initialize m
+    @test_throws ErrorException @initialize m
+
     @test Symbol(m.variables[1]) == m.variables[1]
 
     for (i, v) = enumerate(m.varshks)
@@ -314,10 +368,55 @@ end
         for line in lines
             @test length(split(line, '?')) == 2
         end
+        @test fullprint(io, m) === nothing
+        @test show(io, m) === nothing
+        @test show(IOBuffer(), MIME"text/plain"(), m) === nothing
+        @test show(io, Model()) === nothing
+
+        @test m.exogenous == ModelVariable[]
+        @test m.nexog == 0
+        @test_throws ErrorException m.dummy 
+
+        @test show(IOBuffer(), MIME"text/plain"(), m.flags) === nothing
     end
 end
 
+@testset "Timer" begin
+    @test inittimer() === nothing
+    @timer "model" m = Model()
+    @timer "model" @variables m x
+    @timer "model" @shocks m sx
+    @timer "model" @equations m begin
+            x[t-1] = sx[t+1]
+            @lag(x[t]) = @lag(sx[t+2])
+        end
+    @timer params = @parameters
+    @test printtimer(IOBuffer()) === nothing
+    @test_throws ErrorException try @eval @timer catch err; throw(ErrorException(err.msg)); end
+    @test stoptimer() === nothing
+end
 
+@testset "Abstract" begin
+    struct AM <: ModelBaseEcon.AbstractModel end
+    m = AM()
+    @test_throws ErrorException ModelBaseEcon.alleqns(m)
+    @test_throws ErrorException ModelBaseEcon.allvars(m)
+    @test_throws ErrorException ModelBaseEcon.nalleqns(m) == 0
+    @test_throws ErrorException ModelBaseEcon.nallvars(m) == 0
+    # @test_throws ErrorException ModelBaseEcon.modelof(m)
+end
+
+@testset "metafuncts" begin
+    @test ModelBaseEcon.has_t(1) == false
+    @test ModelBaseEcon.has_t(:(x[t]-x[t-1])) == true
+    @test ModelBaseEcon.at_lag(:(x[t]),0) == :(x[t])
+    @test_throws ErrorException ModelBaseEcon.at_d(:(x[t]),0,-1)
+    @test ModelBaseEcon.at_d(:(x[t]),3,0) == :(((x[t] - 3 * x[t - 1]) + 3 * x[t - 2]) - x[t - 3])
+    @test ModelBaseEcon.at_movsumew(:(x[t]), 3, 2.0) == :(x[t] + 2.0 * x[t - 1] + 4.0 * x[t - 2])
+    @test ModelBaseEcon.at_movsumew(:(x[t]), 3, :y) == :(x[t] + y ^ 1 * x[t - 1] + y ^ 2 * x[t - 2])
+    @test ModelBaseEcon.at_movavew(:(x[t]), 3, 2.0) == :((x[t] + 2.0 * x[t - 1] + 4.0 * x[t - 2]) / 7.0)
+    @test ModelBaseEcon.at_movavew(:(x[t]), 3, :y) == :(((x[t] + y ^ 1 * x[t - 1] + y ^ 2 * x[t - 2]) * (1 - y)) / (1 - y ^ 3))
+end
 module MetaTest
 using ModelBaseEcon
 params = @parameters
@@ -411,6 +510,8 @@ end
         0
     end)) isa Equation
     @test ModelBaseEcon.process_equation(m, :(x[t] = ifelse(false, 2, 0))) isa Equation
+    p = 0
+    @test ModelBaseEcon.process_equation(m, "x=$p") isa Equation
 end
 
 @testset "Meta" begin
@@ -477,7 +578,7 @@ end
     @test_throws ArgumentError add_equation!(mod, :(x[t] = let c = 5
         sx[t+c]
     end))
-
+    @test ModelBaseEcon.update_auxvars(ones(2,2), mod) == ones(2,2)
 end
 
 ############################################################################
@@ -515,6 +616,26 @@ end
         @test sstate(TestModel.model).constraints == sstate(m).constraints
 
         @test_throws ArgumentError TestModel.model.parameters.d = @alias c
+
+        @test export_parameters(TestModel.model) == Dict(:a => 0.3, :b => 0.7, :d => [1, 2, 3], :c => sin(2π/3))
+        @test export_parameters!(Dict{Symbol,Any}(), TestModel.model) == export_parameters(TestModel.model.parameters)
+
+        p = deepcopy(parameters(m))
+        @test_throws BoundsError assign_parameters!(TestModel.model, d=2.0)
+        map!(x->ModelParam(), values(TestModel.model.parameters.contents))
+        @test parameters(assign_parameters!(TestModel.model, p)) == p
+
+        ss = Dict(:x => 0.0, :sx => 0.0)
+        assign_sstate!(TestModel.model, y = 0.0)
+        @test export_sstate(assign_sstate!(TestModel.model,ss)) == ss
+        @test export_sstate!(Dict(),TestModel.model.sstate, ssZeroSlope=true) == ss
+
+        ss = sstate(m)
+        @test show(IOBuffer(), MIME"text/plain"(), ss) === nothing
+        @test geteqn(1,m) == first(m.sstate.constraints)
+        @test geteqn(neqns(ss), m) == last(m.sstate.equations)
+        @test propertynames(ss, true) == (:x, :sx, :vars, :values, :mask, :equations, :constraints)
+        @test fullprint(IOBuffer(), m) === nothing
 
         rm("../examples/TestModel.jl")
     end
@@ -609,17 +730,20 @@ end
     @test !islinearized(m)
     linearize!(m)
     @test islinearized(m)
+    @test_throws ArgumentError refresh_med!(Model())
 end
 
 @testset "E1.params" begin
     let m = E1.model
         @test propertynames(m.parameters) == (:α, :β)
+        @test peval(m, :α) == 0.5
         m.β = @link 1.0 - α
         m.parameters.beta = @alias β
         for α = 0.0:0.1:1.0
             m.α = α
             test_eval_RJ(m, [0.0], [-α 1.0 -m.beta 0.0 -1.0 0.0;])
         end
+        @test_logs (:warn, r"Model does not have parameters*"i) assign_parameters!(m, γ=0)
     end
     let io = IOBuffer(), m = E1.model
         show(io, m.parameters)
@@ -645,14 +769,23 @@ end
         @test m.nvars == 2
         @test m.nshks == 0
         @test m.nauxs == 2
-        @test length(m.auxeqns) == 2
+        @test_throws ArgumentError m.aux1 = 1
+        @test (m.aux1 = update(m.aux1; doc = "aux1")) == :aux1
+        @test length(m.auxeqns) == ModelBaseEcon.nauxvars(m) == 2
         x = ones(2, 2)
+        @test_throws ErrorException ModelBaseEcon.update_auxvars(x, m)
+        x = ones(4, 3)
         @test_throws ErrorException ModelBaseEcon.update_auxvars(x, m)
         x = 2 .* ones(4, 2)
         ax = ModelBaseEcon.update_auxvars(x, m; default=0.1)
         @test size(ax) == (4, 4)
         @test x == ax[:, 1:2]  # exactly equal
         @test ax[:, 3:4] ≈ [0.0 0.0; 0.1 log(2.0); 0.1 log(2.0); 0.1 log(2.0)] # computed values, so ≈ equal
+        @test propertynames(AUX.model) == (fieldnames(Model)..., :exogenous, :nvars, :nshks, :nauxs, :nexog, :allvars, :varshks, :alleqns,
+            keys(AUX.model.options)..., fieldnames(ModelBaseEcon.ModelFlags)..., Symbol[AUX.model.variables...]..., 
+            Symbol[AUX.model.shocks...]..., keys(AUX.model.parameters)...,)
+        @test show(IOBuffer(), m) === nothing
+        @test show(IOContext(IOBuffer(), :compact => true), m) === nothing
     end
 end
 
@@ -706,6 +839,9 @@ end
     @test length(E3.model.variables) == 3
     @test length(E3.model.shocks) == 3
     @test length(E3.model.equations) == 3
+    @test ModelBaseEcon.nallvars(E3.model) == 6
+    @test ModelBaseEcon.allvars(E3.model) == ModelVariable.([:pinf,:rate,:ygap,:pinf_shk,:rate_shk,:ygap_shk])
+    @test ModelBaseEcon.nalleqns(E3.model) == 3
     @test E3.model.maxlag == 2
     @test E3.model.maxlead == 3
     compare_RJ_R!_(E3.model)
@@ -718,6 +854,7 @@ end
             3, 36,
         )
     )
+    @test_throws ModelBaseEcon.ModelNotInitError eval_RJ(zeros(2,2), ModelBaseEcon.NoModelEvaluationData())
 end
 
 @using_example E6
