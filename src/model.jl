@@ -269,11 +269,12 @@ function fullprint(io::IO, model::Model)
         print(io, " with ", length(model.auxeqns), " auxiliary equations")
     end
     print(io, ": \n")
-    function print_aux_eq(bi)
+    function print_aux_eq(bi) 
         v = model.auxeqns[bi]
-        for (_, ai) in filter(tv -> tv[2] > nvarshk, v.vinds)
+        for (var, ti) in keys(v.tsrefs)
+            ai = _index_of_var(var, model.allvars)
             ci = ai - nvarshk
-            ci < bi && print_aux_eq(ci)
+            (1 <= ci < bi) && print_aux_eq(ci)
         end
         println(io, "   |->A$bi:   ", v)
     end
