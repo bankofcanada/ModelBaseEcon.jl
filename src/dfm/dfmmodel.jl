@@ -264,12 +264,12 @@ struct DFMModel <: AbstractModel
         Ref(zeros(0, 0)), ModelSymbol[])
 end
 
-_blocks(m::DFMModel) = values(m.factorblocks)
-_get_block(m::DFMModel, name::Symbol) = m.factorblocks[name]
+_blocks(m) = values(m.factorblocks)
+_get_block(m, name::Symbol) = m.factorblocks[name]
 
 # define exported UI for DFMModel
-nobserved(m::DFMModel) = length(m.variables)
-nobservedshocks(m::DFMModel) = error()
+nobserved(m) = length(observed(m))
+nobservedshocks(m) = length(observedshocks(m))
 nfactors(m::DFMModel) = sum(_nfactors, _blocks(m.factorblocks); init=0)
 nstates(m::DFMModel) = sum(_nstates, _blocks(m.factorblocks); init=0)
 nstateshocks(m::DFMModel) = sum(_nstateshocks, _blocks(m.factorblocks); init=0)
@@ -382,6 +382,7 @@ end
 ############################################################################
 # Functions that enumerate DFMModel variables of every kind
 
+nfactors(fb::ARFactorBlock) = _nfactors(fb)
 factors(fb::FactorBlock) = ModelVariable[
     Symbol(fb.name, "_", i) for i = 1:_nfactors(fb)
 ]
@@ -438,8 +439,12 @@ function Base.getproperty(m::DFMModel, name::Symbol)
             return shocks(m)
         elseif name === :observed
             return observed(m)
+        elseif name === :nobserved
+            return nobserved(m)
         elseif name === :observedshocks
             return observedshocks(m)
+        elseif name === :nobservedshocks
+            return nobservedshocks(m)
         elseif name === :factorshocks
             return factorshocks(m)
         elseif name === :factors
@@ -459,6 +464,7 @@ function Base.propertynames(m::DFMModel)
     return tuple(fieldnames(typeof(m))...,
         :maxlag, :maxlead, :varshks,
         :observed, :observedshocks, 
+        :nobserved, :nobservedshocks, 
         :factors, :factroshocks, 
         :shocks,
         (v.name for v in m.variables)...,
@@ -490,6 +496,10 @@ function Base.getproperty(fb::ARFactorBlock, name::Symbol)
             return _arcoefs(fb)
         elseif name === :loadings
             return _loadings(fb)
+        elseif name === :observed
+            return observed(fb)
+        elseif name === :nobserved
+            return nobserved(fb)
         elseif name === :maxlead
             return 0
         # elseif name === :stateshks
