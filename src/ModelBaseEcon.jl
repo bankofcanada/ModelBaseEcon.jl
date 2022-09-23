@@ -78,5 +78,6 @@ export @using_example, @load_example
 ######################################################################
 
 include("dfm/dfmmodel.jl")
+include("dfm/dfmparams.jl")
 
 end # module
