@@ -239,7 +239,7 @@ isneglog(v::ModelVariable) = v.tr_type == :neglog
 export to_shock, to_exog, to_steady, to_lin, to_log, to_neglog
 export isshock, isexog, issteady, islin, islog, isneglog
 
-Symbol(v::ModelVariable) = v.name
+Core.Symbol(v::ModelVariable) = v.name
 Base.convert(::Type{Symbol}, v::ModelVariable) = v.name
 Base.convert(::Type{ModelVariable}, v::Symbol) = ModelVariable(v)
 Base.convert(::Type{ModelVariable}, v::Expr) = ModelVariable(v)
