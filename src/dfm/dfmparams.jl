@@ -5,6 +5,13 @@
 # All rights reserved.
 ##################################################################################
 
+
+###########
+#   TODO: 
+#      * provide user-friendly way to specify which means are known
+#      * provide user-friendly way to specify a pattern of known covariance entries
+#      * detect when estimate/known pattern changes and set .ready to false 
+#
 #########################################################################
 #  Declaration of API for working with model parameters 
 #  for the purpose of estimation
@@ -32,15 +39,17 @@ const _Inds = AbstractVector{Int}
 
 mutable struct FBEstimData
     ready::Bool
+    # loadings ignored for IdiosyncraticComponents
     loadings::Bool
+    # loadings_inds ignored for IdiosyncraticComponents
     loadings_inds::_Inds
     arcoefs::Bool
-    arcoefs_inds::Vector{_Inds}
+    arcoefs_inds::Vector{<:_Inds}
     covariance::Bool
     covariance_inds::_Inds
     FBEstimData(fb::ARFactorBlock) =
         new(false, !isa(fb, IdiosyncraticComponents), [],
-            true, [], true, [])
+            true, Vector{Int}[], true, [])
 end
 
 mutable struct DFMEstimData
@@ -51,25 +60,27 @@ mutable struct DFMEstimData
     covariance_inds::_Inds
     factorblocks::LittleDict{Symbol,FBEstimData}
     DFMEstimData(m::DFMModel) =
-        new(false, trues(nobserved(m)), [], trues(nobservedshocks(m)^2), [],
-            LittleDict(b.name => FBEstimData(b) for b in _blocks(m)))
+        new(false, trues(nobserved(m)), [],
+            m.covariance isa Diagonal ? BitVector(vec(I(nobservedshocks(m)))) : trues(nobservedshocks(m)^2),
+            [], LittleDict(b.name => FBEstimData(b) for b in _blocks(m)))
 end
 
 #= 
-function setproperty!(ed::DFMEstimData, name::Core.Symbol, value)
+function Base.setproperty!(ed::DFMEstimData, name::Core.Symbol, value)
     if name in (:mean, :covariance)
         setfield!(ed, :ready, false)
     end
     setfield!(ed, name, value)
 end
+ =#
 
-function setproperty!(ed::FBEstimData, name::Core.Symbol, value)
+# when fields change, we change .ready to false
+function Base.setproperty!(ed::FBEstimData, name::Core.Symbol, value)
     if name in (:loadings, :arcoefs, :covariance)
         setfield!(ed, :ready, false)
     end
     setfield!(ed, name, value)
 end
-=#
 
 function Base.getproperty(ed::DFMEstimData, name::Symbol)
     if !hasfield(typeof(ed), name)
@@ -79,6 +90,10 @@ function Base.getproperty(ed::DFMEstimData, name::Symbol)
         end
     end
     return getfield(ed, name)
+end
+
+function Base.propertynames(ed::DFMEstimData)
+    return (fieldnames(typeof(ed))..., keys(ed.factorblocks)...)
 end
 
 export new_estimdata
@@ -100,16 +115,18 @@ nparams(ed::FBEstimData, fb::FactorBlock) =
 _new_inds(num, offset) = (ret = offset[] .+ (1:num); offset[] += num; ret)
 
 function prepare_estimdata!(ed::FBEstimData, fb::IdiosyncraticComponents, offset=Ref(0))
-    ed.arcoefs_inds = ed.arcoefs ? [_new_inds(fb.nfactors, offset) for _ = 1:fb.order] : []
-    ed.covariance_inds = ed.covariance ? _new_inds(fb.nfactors, offset) : []
+    ed.loadings_inds = Int[]
+    ed.arcoefs_inds = ed.arcoefs ? [_new_inds(fb.nfactors, offset) for _ = 1:fb.order] : Vector{Int}[]
+    ed.covariance_inds = ed.covariance ? _new_inds(fb.nfactors, offset) : Int[]
     ed.ready = true
     return ed
 end
 
 function prepare_estimdata!(ed::FBEstimData, fb::FactorBlock, offset=Ref(0))
-    ed.loadings_inds = ed.loadings ? _new_inds(fb.nobserved * fb.nfactors, offset) : []
-    ed.arcoefs_inds = ed.arcoefs ? [_new_inds(fb.nfactors^2, offset) for _ = 1:fb.order] : []
-    ed.covariance_inds = ed.covariance ? _new_inds(fb.nfactors^2, offset) : []
+    ed.loadings_inds = ed.loadings ? _new_inds(fb.nobserved * fb.nfactors, offset) : Int[]
+    ed.arcoefs_inds = ed.arcoefs ? [_new_inds(fb.nfactors^2, offset) for _ = 1:fb.order] : Vector{Int}[]
+    ed.covariance_inds = ed.covariance ? _new_inds(fb.nfactors^2, offset) : Int[]
+    ed.ready = true
     return ed
 end
 
@@ -126,27 +143,29 @@ function prepare_estimdata!(ed::DFMEstimData, m::DFMModel, offset=Ref(0))
 end
 
 function pack_params!(vec::AbstractVector{Float64}, ed::FBEstimData, fb::ARFactorBlock)
-    if !isempty(ed.loadings)
+    @assert ed.ready
+    if !isempty(ed.loadings_inds)
         vec[ed.loadings_inds] .= fb.loadings[:]
     end
-    if ed.arcoefs
+    if !isempty(ed.arcoefs_inds)
         for i = 1:fb.order
             vec[ed.arcoefs_inds[i]] .= fb.arcoefs[i][:]
         end
     end
-    if !isempty(ed.covariance)
+    if !isempty(ed.covariance_inds)
         vec[ed.covariance_inds] .= fb.covariance[:]
     end
     return vec
 end
 
 function pack_params!(vec::AbstractVector{Float64}, ed::FBEstimData, fb::IdiosyncraticComponents)
-    if ed.arcoefs
+    @assert ed.ready
+    if !isempty(ed.arcoefs_inds)
         for i = 1:fb.order
             vec[ed.arcoefs_inds[i]] .= fb.arcoefs[i].diag
         end
     end
-    if !isempty(ed.covariance)
+    if !isempty(ed.covariance_inds)
         vec[ed.covariance_inds] .= fb.covariance.diag
     end
     return vec
@@ -159,7 +178,7 @@ function pack_params!(vec::AbstractVector{Float64}, ed::DFMEstimData, m::DFMMode
     if !isempty(ed.mean_inds)
         vec[ed.mean_inds] .= m.mean[ed.mean]
     end
-    if !isempty(ed.covariance)
+    if !isempty(ed.covariance_inds)
         vec[ed.covariance_inds] .= m.covariance[][ed.covariance]
     end
     for (fed, fb) in zip(_blocks(ed), _blocks(m))
@@ -169,15 +188,16 @@ function pack_params!(vec::AbstractVector{Float64}, ed::DFMEstimData, m::DFMMode
 end
 
 function unpack_params!(fb::ARFactorBlock, ed::FBEstimData, vec::AbstractVector{Float64})
-    if !isempty(ed.loadings)
+    @assert ed.ready
+    if !isempty(ed.loadings_inds)
         fb.loadings[:] .= vec[ed.loadings_inds]
     end
-    if ed.arcoefs
+    if !isempty(ed.arcoefs_inds)
         for i = 1:fb.order
             fb.arcoefs[i][:] .= vec[ed.arcoefs_inds[i]]
         end
     end
-    if !isempty(ed.covariance)
+    if !isempty(ed.covariance_inds)
         fb.covariance[:] .= vec[ed.covariance_inds]
     end
     return fb
@@ -185,12 +205,13 @@ function unpack_params!(fb::ARFactorBlock, ed::FBEstimData, vec::AbstractVector{
 end
 
 function unpack_params!(fb::IdiosyncraticComponents, ed::FBEstimData, vec::AbstractVector{Float64})
-    if ed.arcoefs
+    @assert ed.ready
+    if !isempty(ed.arcoefs_inds)
         for i = 1:fb.order
             fb.arcoefs[i].diag .= vec[ed.arcoefs_inds[i]]
         end
     end
-    if !isempty(ed.covariance)
+    if !isempty(ed.covariance_inds)
         fb.covariance.diag .= vec[ed.covariance_inds]
     end
     return fb
@@ -198,10 +219,13 @@ function unpack_params!(fb::IdiosyncraticComponents, ed::FBEstimData, vec::Abstr
 end
 
 function unpack_params!(m::DFMModel, ed::DFMEstimData, vec::AbstractVector{Float64})
+    if !(ed.ready && all(x.ready for x in _blocks(ed)))
+        prepare_estimdata!(ed, m)
+    end
     if !isempty(ed.mean_inds)
         m.mean[ed.mean] .= vec[ed.mean_inds]
     end
-    if !isempty(ed.covariance)
+    if !isempty(ed.covariance_inds)
         m.covariance[][ed.covariance] .= vec[ed.covariance_inds]
     end
     for (fed, fb) in zip(_blocks(ed), _blocks(m))
