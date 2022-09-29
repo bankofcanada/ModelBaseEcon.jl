@@ -415,7 +415,7 @@ function SelectiveLinearizationMED(model::AbstractModel)
 
     sspt = Matrix{Float64}(undef, 1 + model.maxlag + model.maxlead, length(model.varshks))
     for (i, v) in enumerate(model.varshks)
-        sspt[:, i] = sstate[v][-model.maxlag:model.maxlead, ref = 0]
+        sspt[:, i] = transform(sstate[v][-model.maxlag:model.maxlead, ref = 0],v)
     end
     eedata = Vector{AbstractEqnEvalData}(undef, length(med.alleqns))
     num_lin = 0
