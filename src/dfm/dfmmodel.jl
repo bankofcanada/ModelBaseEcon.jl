@@ -9,6 +9,7 @@
 export DFMModel, AbstractFactorBlock,
     ARFactorBlock, FactorBlock, IdiosyncraticComponents,
     factors, factorshocks, observed, observedshocks,
+    nfactors, nfactorshocks, nobserved, nobservedshocks,
     add_icblock!, add_factorblock!,
     varshks
 
@@ -270,9 +271,9 @@ _get_block(m, name::Symbol) = m.factorblocks[name]
 # define exported UI for DFMModel
 nobserved(m) = length(observed(m))
 nobservedshocks(m) = length(observedshocks(m))
-nfactors(m::DFMModel) = sum(_nfactors, _blocks(m.factorblocks); init=0)
-nstates(m::DFMModel) = sum(_nstates, _blocks(m.factorblocks); init=0)
-nstateshocks(m::DFMModel) = sum(_nstateshocks, _blocks(m.factorblocks); init=0)
+nfactors(m::DFMModel) = sum(_nfactors, _blocks(m); init=0)
+nstates(m::DFMModel) = sum(_nstates, _blocks(m); init=0)
+nstateshocks(m::DFMModel) = sum(_nstateshocks, _blocks(m); init=0)
 
 
 ########################
@@ -400,13 +401,15 @@ factorshocks(fb::ARFactorBlock) = ModelVariable[
     to_shock(Symbol(f, "_shk")) for f in factors(fb)
 ]
 
-function factorshocks(model::DFMModel) 
+function factorshocks(model::DFMModel)
     return vcat(map(factorshocks, _blocks(model))...)
 end
 
 observed(fb::ARFactorBlock) = _observed(fb)
 observed(model::DFMModel) = model.variables
-observedshocks(model::DFMModel) = begin
+
+"Return variables that don't have idiosyncratic components."
+observed_no_ic(model::DFMModel) = begin
     # take all variables
     vars = copy(model.variables)
     # remove those that have idiosyncratic components
@@ -415,6 +418,11 @@ observedshocks(model::DFMModel) = begin
             setdiff!(vars, blk.variables)
         end
     end
+    return vars
+end
+
+observedshocks(model::DFMModel) = begin
+    vars = observed_no_ic(model)
     # make shocks for the remaining ones
     return [to_shock(Symbol(v, "_shk")) for v in vars]
 end
@@ -463,9 +471,9 @@ end
 function Base.propertynames(m::DFMModel)
     return tuple(fieldnames(typeof(m))...,
         :maxlag, :maxlead, :varshks,
-        :observed, :observedshocks, 
-        :nobserved, :nobservedshocks, 
-        :factors, :factroshocks, 
+        :observed, :observedshocks,
+        :nobserved, :nobservedshocks,
+        :factors, :factroshocks,
         :shocks,
         (v.name for v in m.variables)...,
         (keys(m.factorblocks))...
@@ -490,7 +498,7 @@ function Base.getproperty(fb::ARFactorBlock, name::Symbol)
             return _order(fb)
         elseif name === :order
             return _order(fb)
-        elseif name === :nfactors 
+        elseif name === :nfactors
             return _nfactors(fb)
         elseif name === :arcoefs
             return _arcoefs(fb)
@@ -500,10 +508,14 @@ function Base.getproperty(fb::ARFactorBlock, name::Symbol)
             return observed(fb)
         elseif name === :nobserved
             return nobserved(fb)
+        elseif name === :nstates
+            return _nstates(fb)
+        elseif name === :nstateshocks
+            return _nstateshocks(fb)
         elseif name === :maxlead
             return 0
-        # elseif name === :stateshks
-        #     return stateshks(fb)
+            # elseif name === :stateshks
+            #     return stateshks(fb)
         end
     end
     return getfield(fb, name)
@@ -512,6 +524,6 @@ end
 Base.propertynames(fb::ARFactorBlock) = tuple(
     fieldnames(typeof(fb))...,
     :maxlag, :maxlead, :order, :nfactors,
-    :arcoefs, :loadings, 
+    :arcoefs, :loadings,
 )
 
