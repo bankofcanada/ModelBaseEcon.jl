@@ -730,15 +730,20 @@ function assign_sstate!(ss::SteadyStateData, args)
             continue
         end
         var = getproperty(ss, sk)
+        var.data[:] .= 0
         if value isa Union{NamedTuple,AbstractDict}
             var.level = value.level
-            var.slope = get(value, :slope, 0)
+            slp = get(value, :slope, nothing)
+            if slp !== nothing
+                var.slope = slp
+            end
         elseif value isa Union{Tuple,Vector}
             var.level = value[1]
-            var.slope = length(value) > 1 ? value[2] : 0
+            if length(value) > 1
+                var.slope = value[2]
+            end
         else
             var.level = value
-            var.slope = 0
         end
         var.mask[:] .= true
     end
