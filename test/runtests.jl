@@ -998,5 +998,20 @@ end
     end
 end
 
+@testset "sel_lin" begin
+    let
+        m = Model()
+        @variables m (la; @log a)
+        @equations m begin
+            @lin a[t] = exp(la[t])
+            @lin la[t] = 2
+        end
+        @initialize m
+        assign_sstate!(m; a = exp(2), la = 2)
+        m.sstate.values[2:2:end] .= 0.0
+        @test_nowarn (selective_linearize!(m); true)
+    end
+end
+
 include("auxsubs.jl")
 include("sstate.jl")
