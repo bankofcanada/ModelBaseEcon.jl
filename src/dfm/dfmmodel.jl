@@ -275,6 +275,8 @@ nfactors(m::DFMModel) = sum(_nfactors, _blocks(m); init=0)
 nstates(m::DFMModel) = sum(_nstates, _blocks(m); init=0)
 nstateshocks(m::DFMModel) = sum(_nstateshocks, _blocks(m); init=0)
 
+nstates(fb::AbstractFactorBlock) = _nstates(fb)
+nstateshocks(fb::AbstractFactorBlock) = _nstateshocks(fb)
 
 ########################
 #  Functions that create factor blocks and add them to a DFMModel instance
