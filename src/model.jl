@@ -941,6 +941,10 @@ function initialize!(model::Model, modelmodule::Module)
         error("Model already initialized.")
     end
     initfuncs(modelmodule)
+    samename = Symbol[intersect(model.allvars, keys(model.parameters))...]
+    if !isempty(samename)
+        error("Found $(length(samename)) names that are both variables and parameters: $(join(samename, ", "))")
+    end
     model.parameters.mod[] = modelmodule
     varshks = model.varshks
     model.variables = varshks[.!isshock.(varshks)]
