@@ -32,12 +32,12 @@ function precompilefuncs(resid, RJ, ::Val{N}, tag) where {N}
     precompile(resid, (duals,)) || error("precompile")
     precompile(RJ, (Array{Float64,1},)) || error("precompile")
 
-    for pred in (ForwardDiff.UNARY_PREDICATES ∪ Symbol[:-, :+, :log, :exp])
+    for pred in Symbol[:isinf, :isnan, :isfinite, :iseven, :isodd, :isreal, :isinteger, :-, :+, :log, :exp]
         pred ∈ (:iseven, :isodd) || precompile(getfield(Base, pred), (Float64,)) || error("precompile")
         precompile(getfield(Base, pred), (dual,)) || error("precompile")
     end
 
-    for pred in ForwardDiff.BINARY_PREDICATES ∪ Symbol[:+, :-, :*, :/, :^]
+    for pred in Symbol[:isequal, :isless, :<, :>, :(==), :(!=), :(<=), :(>=), :+, :-, :*, :/, :^]
         precompile(getfield(Base, pred), (Float64, Float64)) || error("precompile")
         precompile(getfield(Base, pred), (dual, Float64)) || error("precompile")
         precompile(getfield(Base, pred), (Float64, dual)) || error("precompile")
@@ -415,7 +415,7 @@ function SelectiveLinearizationMED(model::AbstractModel)
 
     sspt = Matrix{Float64}(undef, 1 + model.maxlag + model.maxlead, length(model.varshks))
     for (i, v) in enumerate(model.varshks)
-        sspt[:, i] = transform(sstate[v][-model.maxlag:model.maxlead, ref = 0],v)
+        sspt[:, i] = transform(sstate[v][-model.maxlag:model.maxlead, ref = 0], v)
     end
     eedata = Vector{AbstractEqnEvalData}(undef, length(med.alleqns))
     num_lin = 0
