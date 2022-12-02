@@ -171,6 +171,8 @@ function initfuncs(mod::Module)
     return nothing
 end
 
+_index_of_var(var, allvars) = indexin([var], allvars)[1]
+
 ###########################################################
 # Part 2: Evaluation data for models and equations
 
@@ -310,8 +312,6 @@ struct ModelEvaluationData{E<:AbstractEquation,I,D<:DynEqnEvalData} <: AbstractM
     R::Vector{Float64}
     rowinds::Vector{Vector{Int64}}
 end
-
-_index_of_var(var, allvars) = indexin([var], allvars)[1]
 
 @inline function _update_eqn_params!(ee, params)
     if ee.rev[] !== params.rev[]
@@ -490,10 +490,10 @@ function refresh_med! end
 export refresh_med!
 
 # dispatcher
-refresh_med!(m::AbstractModel) = refresh_med!(m, typeof(m.evaldata))
+refresh_med!(m::AbstractModel) = m.dynss ? refresh_med!(m, typeof(m.evaldata)) : m
 # catch all and issue a meaningful error message
 refresh_med!(::AbstractModel, T::Type{<:AbstractModelEvaluationData}) = error("Missing method to update MED of type $T")
 # specific cases
 refresh_med!(m::AbstractModel, ::Type{NoModelEvaluationData}) = (m.evaldata = ModelEvaluationData(m); m)
-refresh_med!(m::AbstractModel, ::Type{<:ModelEvaluationData}) = (m.evaldata = ModelEvaluationData(m); m)
+refresh_med!(m::AbstractModel, ::Type{ModelEvaluationData}) = (m.evaldata = ModelEvaluationData(m); m)
 refresh_med!(m::AbstractModel, ::Type{SelectiveLinearizationMED}) = selective_linearize!(m)
