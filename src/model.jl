@@ -154,8 +154,8 @@ function Base.getproperty(model::Model, name::Symbol)
         if ind !== nothing
             return getindex(getfield(model, :auxvars), ind)
         end
-        error("This Model doesn't have property $name")
     end
+    return getfield(model, name)
 end
 
 function Base.propertynames(model::Model, private::Bool=false)
@@ -178,22 +178,31 @@ function Base.setproperty!(model::Model, name::Symbol, val::Any)
     else
         ind = indexin([name], getfield(model, :variables))[1]
         if ind !== nothing
+            if !isa(val, Union{Symbol, ModelVariable})
+                error("Cannot assign a $(typeof(val)) as a model variable. Use `m.var = update(m.var, ...)` to update a variable.")
+            end
             if getindex(getfield(model, :variables), ind) != val
-                throw(ArgumentError("Cannot replace variable with a different name. Use `m.var = update(m.var, ...)` to update variable."))
+                error("Cannot replace a variable with a different name. Use `m.var = update(m.var, ...)` to update a variable.")
             end
             return setindex!(getfield(model, :variables), val, ind)
         end
         ind = indexin([name], getfield(model, :shocks))[1]
         if ind !== nothing
+            if !isa(val, Union{Symbol, ModelVariable})
+                error("Cannot assign a $(typeof(val)) as a model shock. Use `m.shk = update(m.shk, ...)` to update a shock.")
+            end
             if getindex(getfield(model, :shocks), ind) != val
-                throw(ArgumentError("Cannot replace shock with a different name. Use `m.shk = update(m.shk, ...)` to update shock."))
+                error("Cannot replace a shock with a different name. Use `m.shk = update(m.shk, ...)` to update a shock.")
             end
             return setindex!(getfield(model, :shocks), val, ind)
         end
         ind = indexin([name], getfield(model, :auxvars))[1]
         if ind !== nothing
+            if !isa(val, Union{Symbol, ModelVariable})
+                error("Cannot assign a $(typeof(val)) as an aux variable. Use `m.aux = update(m.aux, ...)` to update an aux variable.")
+            end
             if getindex(getfield(model, :auxvars), ind) != val
-                throw(ArgumentError("Cannot replace aux variable with a different name. Use `m.aux = update(m.aux, ...)` to update aux variable."))
+                error("Cannot replace an aux variable with a different name. Use `m.aux = update(m.aux, ...)` to update an aux variable.")
             end
             return setindex!(getfield(model, :auxvars), val, ind)
         end

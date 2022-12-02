@@ -35,14 +35,13 @@ using Test
         @test y.tr_type === :none
         @logvariables m lmy
         @neglogvariables m ly
-        @test_throws ArgumentError m.ly = 25
-        @test_throws ArgumentError m.lmy = -25
-        @test_throws ArgumentError m.ly = ModelVariable(:lmy)
-        @test_throws ErrorException update(m.ly, tr_type=:log, transformation=NoTransform)
-        m.ly = update(m.ly, transformation=LogTransform)
-        m.lmy = update(m.lmy, tr_type=:neglog, transformation=NegLogTransform)
-        @test m.ly.tr_type === :log
-        @test m.lmy.tr_type === :neglog
+        @test_throws ErrorException m.ly = 25
+        @test_throws ErrorException m.lmy = -25
+        @test_throws ErrorException m.ly = ModelVariable(:lmy)
+        @test_logs (:warn, r".*do not specify transformation directly.*"i) @test_throws ArgumentError update(m.ly, tr_type=:log, transformation=NoTransform)
+        @test_logs (:warn, r".*do not specify transformation directly.*"i) update(m.ly, tr_type=:log, transformation=LogTransform)
+        @test_logs (:warn, r".*do not specify transformation directly.*"i) @test update(m.ly, transformation=LogTransform).tr_type == :log
+        @test_logs (:warn, r".*do not specify transformation directly.*"i) @test update(m.lmy, tr_type=:neglog, transformation=NegLogTransform).tr_type == :neglog
         
         @test_throws ErrorException m.dummy = nothing
         
@@ -82,7 +81,7 @@ end
     @test getoption!(m, "substitutions", true) == getoption!(m, :substitutions, true) == false
     @test getoption(setoption!(m, "maxiter", 25), maxiter = 0) == 25
     @test getoption(setoption!(m, verbose = true), "verbose", false) == true
-    @test typeof(setoption!(println, m)) == Options
+    @test typeof(setoption!(identity, m)) == Options
 end
 
 @testset "Vars" begin
@@ -284,7 +283,7 @@ end
     for s in (:p, :q, :r)
         @test m.:($s) isa ModelSymbol && issteady(m.:($s))
     end
-    @test_throws ArgumentError m.a = 1
+    @test_throws ErrorException m.a = 1
     @test_throws ModelBaseEcon.EqnNotReadyError ModelBaseEcon.eqnnotready()
     sprint(showerror, ModelBaseEcon.EqnNotReadyError())
 
@@ -511,7 +510,7 @@ end
     end)) isa Equation
     @test ModelBaseEcon.process_equation(m, :(x[t] = ifelse(false, 2, 0))) isa Equation
     p = 0
-    @test ModelBaseEcon.process_equation(m, "x=$p") isa Equation
+    @test_logs (:warn, r"Variable or shock .* without `t` reference.*"i) @assert ModelBaseEcon.process_equation(m, "x=$p") isa Equation
 end
 
 @testset "Meta" begin
@@ -621,12 +620,13 @@ end
         @test export_parameters!(Dict{Symbol,Any}(), TestModel.model) == export_parameters(TestModel.model.parameters)
 
         p = deepcopy(parameters(m))
-        @test_throws BoundsError assign_parameters!(TestModel.model, d=2.0)
+        # link c expects d to be a vector - it'll fail to update with a BoundsError if d is just a number
+        @test_throws ModelBaseEcon.ParamUpdateError assign_parameters!(TestModel.model, d=2.0)
         map!(x->ModelParam(), values(TestModel.model.parameters.contents))
         @test parameters(assign_parameters!(TestModel.model, p)) == p
 
         ss = Dict(:x => 0.0, :sx => 0.0)
-        assign_sstate!(TestModel.model, y = 0.0)
+        @test_logs (:warn, r"Model does not have the following variables:.*"i) assign_sstate!(TestModel.model, y = 0.0)
         @test export_sstate(assign_sstate!(TestModel.model,ss)) == ss
         @test export_sstate!(Dict(),TestModel.model.sstate, ssZeroSlope=true) == ss
 
@@ -730,7 +730,6 @@ end
     @test !islinearized(m)
     linearize!(m)
     @test islinearized(m)
-    @test_throws ArgumentError refresh_med!(Model())
 end
 
 @testset "E1.params" begin
@@ -769,7 +768,7 @@ end
         @test m.nvars == 2
         @test m.nshks == 0
         @test m.nauxs == 2
-        @test_throws ArgumentError m.aux1 = 1
+        @test_throws ErrorException m.aux1 = 1
         @test (m.aux1 = update(m.aux1; doc = "aux1")) == :aux1
         @test length(m.auxeqns) == ModelBaseEcon.nauxvars(m) == 2
         x = ones(2, 2)

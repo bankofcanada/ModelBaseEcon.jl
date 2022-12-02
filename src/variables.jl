@@ -121,6 +121,7 @@ function update(v::ModelVariable; doc = v.doc,
     vr_type::Symbol = v.vr_type, tr_type::Symbol = v.tr_type, ss_type::Symbol = v.ss_type,
     transformation = nothing)
     if transformation !== nothing
+        @warn "Deprecation: do not specify transformation directly, specify `tr_type` instead."
         trsym = _trans2sym(transformation)
         if (tr_type == v.tr_type)
             # only transformation is explicitly given
@@ -130,7 +131,7 @@ function update(v::ModelVariable; doc = v.doc,
             tr_type = trsym
         else
             # both given and don't match
-            error("Given `transformation` is incompatible with the given `tr_type`.")
+            throw(ArgumentError("The given `transformation` $transformation is incompatible with the given `tr_type` :$tr_type."))
         end
     end
     ModelVariable(string(doc), v.name, vr_type, tr_type, ss_type, )

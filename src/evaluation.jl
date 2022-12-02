@@ -495,5 +495,5 @@ refresh_med!(m::AbstractModel) = m.dynss ? refresh_med!(m, typeof(m.evaldata)) :
 refresh_med!(::AbstractModel, T::Type{<:AbstractModelEvaluationData}) = error("Missing method to update MED of type $T")
 # specific cases
 refresh_med!(m::AbstractModel, ::Type{NoModelEvaluationData}) = (m.evaldata = ModelEvaluationData(m); m)
-refresh_med!(m::AbstractModel, ::Type{ModelEvaluationData}) = (m.evaldata = ModelEvaluationData(m); m)
+refresh_med!(m::AbstractModel, ::Type{<:ModelEvaluationData}) = (m.evaldata = ModelEvaluationData(m); m)
 refresh_med!(m::AbstractModel, ::Type{SelectiveLinearizationMED}) = selective_linearize!(m)
