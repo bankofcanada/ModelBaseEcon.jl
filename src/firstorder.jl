@@ -106,6 +106,7 @@ function FirstOrderMED(m::Model)
                 BCK[eqind, fwd_i] = val
             end
         end
+        nothing
     end
     # add links
     eqn = length(m.alleqns)
@@ -125,6 +126,7 @@ function FirstOrderMED(m::Model)
             FWD[eqn, fwd_inds[(var, tt - 1)]] = 1
             BCK[eqn, fwd_inds[(var, tt)]] = -1
         end
+        nothing
     end
     for (var, tt) in bck_vars
         if tt == 0
@@ -136,6 +138,7 @@ function FirstOrderMED(m::Model)
             FWD[eqn, bck_inds[(var, tt)]] = 1
             BCK[eqn, bck_inds[(var, tt + 1)]] = -1
         end
+        nothing
     end
     return FirstOrderMED(
         fwd_vars, bck_vars, ex_vars,
