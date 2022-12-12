@@ -68,7 +68,7 @@ function Base.getproperty(v::SteadyStateVariable, name::Symbol)
            getfield(v, name)
 end
 
-Base.setproperty!(v::SteadyStateVariable, name::Symbol, val) = begin
+function Base.setproperty!(v::SteadyStateVariable, name::Symbol, val)
     data = getfield(v, :data)
     # we store transformed data, must transform user input
     if name == :level
@@ -86,9 +86,15 @@ function Base.getindex(v::SteadyStateVariable, t; ref=first(t))
     if eltype(t) != eltype(ref)
         throw(ArgumentError("Must provide reference time of the same type as the time index"))
     end
-    int_t = convert(Int, first(t) - ref):convert(Int, last(t) - ref)
+    if t isa Number
+        int_t = convert(Int, t - ref)
+        result = v.data[1] + v.data[2] * int_t
+    else
+        int_t = convert(Int, first(t) - ref):convert(Int, last(t) - ref)
+        result = v.data[1] .+ v.data[2] .* int_t
+    end
     # we must inverse transform internal data before returning to user
-    return inverse_transform(v.data[1] .+ v.data[2] .* int_t, v)
+    return inverse_transform(result, v)
 end
 
 #################################

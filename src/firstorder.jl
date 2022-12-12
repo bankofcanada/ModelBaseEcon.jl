@@ -154,3 +154,6 @@ end
 refresh_med!(m::AbstractModel, ::Type{FirstOrderMED}) = firstorder!(m)
 eval_R!(RES::AbstractVector{Float64}, point::AbstractMatrix{Float64}, fomed::FirstOrderMED) = eval_R!(RES, point, fomed.lmed)
 eval_RJ(point::AbstractMatrix{Float64}, fomed::FirstOrderMED) = eval_RJ(point, fomed.lmed)
+
+export isfirstorder
+isfirstorder(m::Model) = m.evaldata isa FirstOrderMED

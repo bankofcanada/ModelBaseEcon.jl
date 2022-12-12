@@ -74,14 +74,16 @@ mutable struct Model <: AbstractModel
     auxvars::Vector{ModelVariable}
     # auxiliary equations
     auxeqns::Vector{Equation}
-    # ssdata::SteadyStateData
+    # data related to evaluating residuals and Jacobian of the model equations
     evaldata::AbstractModelEvaluationData
+    # data slot to be used by the solver (in StateSpaceEcon)
+    solverdata::Any
     # 
     # constructor of an empty model
     Model(opts::Options) = new(merge(defaultoptions, opts),
-        ModelFlags(), SteadyStateData(), false, [], [], [], Parameters(), Dict(), 0, 0, [], [], NoMED)
+        ModelFlags(), SteadyStateData(), false, [], [], [], Parameters(), Dict(), 0, 0, [], [], NoMED, nothing)
     Model() = new(deepcopy(defaultoptions),
-        ModelFlags(), SteadyStateData(), false, [], [], [], Parameters(), Dict(), 0, 0, [], [], NoMED)
+        ModelFlags(), SteadyStateData(), false, [], [], [], Parameters(), Dict(), 0, 0, [], [], NoMED, nothing)
 end
 
 auxvars(m::Model) = getfield(m, :auxvars)
