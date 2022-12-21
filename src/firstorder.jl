@@ -98,10 +98,10 @@ function FirstOrderMED(m::Model)
             # could be either or both; 
             bck_i = get(bck_inds, (var, 0), nothing)
             if bck_i !== nothing
-                # prefer to treat it as x, if both
+                # prefer to treat it as bck_var, if both
                 FWD[eqind, bck_i] = val
             else
-                # not bck, must be fwd
+                # not bck_fwd, must be fwd_fwd
                 fwd_i = get(fwd_inds, (var, 0), nothing)
                 BCK[eqind, fwd_i] = val
             end

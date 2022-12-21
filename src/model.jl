@@ -129,6 +129,8 @@ function Base.getproperty(model::Model, name::Symbol)
         return length(getfield(model, :auxvars))
     elseif name == :allvars
         return vcat(getfield(model, :variables), getfield(model, :shocks), getfield(model, :auxvars))
+    elseif name == :nvarshks
+        return length(getfield(model, :shocks)) + length(getfield(model, :variables))
     elseif name == :varshks
         return vcat(getfield(model, :variables), getfield(model, :shocks))
     elseif name == :exogenous
