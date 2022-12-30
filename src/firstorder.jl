@@ -19,12 +19,12 @@ struct FirstOrderMED <: AbstractModelEvaluationData
     lmed::LinearizedModelEvaluationData
 end
 
-function FirstOrderMED(m::Model)
+function FirstOrderMED(model::Model)
     #
     # we need a linearized model
     #
-    linearize!(m)
-    lmed = m.evaldata
+    linearize!(model)
+    lmed = model.evaldata
     #
     # define variables for lags and leads more than 1 
     # also categorize variables as fwd, bck, and ex
@@ -32,9 +32,9 @@ function FirstOrderMED(m::Model)
     fwd_vars = Tuple{Symbol,Int}[]
     bck_vars = Tuple{Symbol,Int}[]
     ex_vars = Tuple{Symbol,Int}[]
-    for mvar in m.allvars
+    for mvar in model.allvars
         var = mvar.name
-        lags, leads = extrema(lag for eqn in m.equations
+        lags, leads = extrema(lag for eqn in model.equations
                               for (name, lag) in keys(eqn.tsrefs)
                               if name == var)
         if isexog(mvar) || isshock(mvar)
@@ -65,22 +65,36 @@ function FirstOrderMED(m::Model)
     ex_inds = LittleDict{Tuple{Symbol,Int},Int}(
         key => index for (index, key) in enumerate(ex_vars)
     )
-    #
-    # build the three matrices that define the system: FWD, BCK, EX
-    #
     FWD = zeros(nbck + nfwd, nbck + nfwd)
     BCK = zeros(nbck + nfwd, nbck + nfwd)
     EX = zeros(nbck + nfwd, nex)
-    for (eqind, col, val) in zip(findnz(lmed.med.J)...)
+    ed = FirstOrderMED(
+        fwd_vars, bck_vars, ex_vars,
+        fwd_inds, bck_inds, ex_inds,
+        FWD, BCK, EX,
+        lmed,
+    )
+    fill_fo_matrices!(FWD, BCK, EX, lmed.med.J, model, ed)
+    return ed
+end
+
+function fill_fo_matrices!(FWD::Matrix{Float64}, BCK::Matrix{Float64}, EX::Matrix{Float64}, JAC::SparseMatrixCSC, model::Model, ed::FirstOrderMED)
+    #
+    # build the three matrices that define the system: FWD, BCK, EX
+    #
+    fill!(FWD, 0.0)
+    fill!(BCK, 0.0)
+    fill!(EX, 0.0)
+    for (eqind, col, val) in zip(findnz(JAC)...)
         # translate Jacobian column index `col` to variable index (in m.allvars) and time offset
-        (vno, tt) = divrem(col - 1, 1 + m.maxlag + m.maxlead)
+        (vno, tt) = divrem(col - 1, 1 + model.maxlag + model.maxlead)
         vno += 1
-        tt -= m.maxlag
+        tt -= model.maxlag
         # obtain the variable name given its index
-        var = m.allvars[vno].name
+        var = model.allvars[vno].name
         var_tt = (var, tt)
         # is it in ex_vars
-        ex_i = get(ex_inds, var_tt, nothing)
+        ex_i = get(ed.ex_inds, var_tt, nothing)
         if ex_i !== nothing
             EX[eqind, ex_i] = val
             continue
@@ -88,15 +102,15 @@ function FirstOrderMED(m::Model)
         # not in ex_vars. It's fwd_vars or bck_vars or both.
         if tt < 0
             # definitely bck_var
-            bck_i = get(bck_inds, (var, tt + 1), nothing)
+            bck_i = get(ed.bck_inds, (var, tt + 1), nothing)
             BCK[eqind, bck_i] = val
         elseif tt > 0
             # definitely fwd_var
-            fwd_i = get(fwd_inds, (var, tt - 1), nothing)
+            fwd_i = get(ed.fwd_inds, (var, tt - 1), nothing)
             FWD[eqind, fwd_i] = val
         else # tt == 0
             # could be either or both; 
-            bck_i = get(bck_inds, (var, 0), nothing)
+            bck_i = get(ed.bck_inds, (var, 0), nothing)
             if bck_i !== nothing
                 # prefer to treat it as bck_var, if both
                 FWD[eqind, bck_i] = val
@@ -109,43 +123,38 @@ function FirstOrderMED(m::Model)
         nothing
     end
     # add links
-    eqn = length(m.alleqns)
-    for (var, tt) in fwd_vars
+    eqn = length(model.alleqns)
+    for (var, tt) in ed.fwd_vars
         if tt == 0
             # add a fwd-bck cross link, if it's both fwd and bck variable
-            b_i = get(bck_inds, (var, 0), nothing)
+            b_i = get(ed.bck_inds, (var, 0), nothing)
             if b_i !== nothing
                 eqn += 1
-                f_i = fwd_inds[(var, 0)]
+                f_i = ed.fwd_inds[(var, 0)]
                 FWD[eqn, b_i] = 1
                 BCK[eqn, f_i] = -1
             end
         else
             # add a fwd-fwd link
             eqn += 1
-            FWD[eqn, fwd_inds[(var, tt - 1)]] = 1
-            BCK[eqn, fwd_inds[(var, tt)]] = -1
+            FWD[eqn, ed.fwd_inds[(var, tt - 1)]] = 1
+            BCK[eqn, ed.fwd_inds[(var, tt)]] = -1
         end
         nothing
     end
-    for (var, tt) in bck_vars
+    for (var, tt) in ed.bck_vars
         if tt == 0
             # cross links already done above
             continue
         else
             # add a fwd-fwd link
             eqn += 1
-            FWD[eqn, bck_inds[(var, tt)]] = 1
-            BCK[eqn, bck_inds[(var, tt + 1)]] = -1
+            FWD[eqn, ed.bck_inds[(var, tt)]] = 1
+            BCK[eqn, ed.bck_inds[(var, tt + 1)]] = -1
         end
         nothing
     end
-    return FirstOrderMED(
-        fwd_vars, bck_vars, ex_vars,
-        fwd_inds, bck_inds, ex_inds,
-        FWD, BCK, EX,
-        lmed,
-    )
+return nothing
 end
 
 export firstorder!
