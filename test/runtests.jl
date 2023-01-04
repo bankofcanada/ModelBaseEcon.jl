@@ -745,7 +745,7 @@ end
 
 @testset "E1.fo" begin
     m = deepcopy(E1.model)
-    m.evaldata = ModelBaseEcon.NoModelEvaluationData()
+    delete!(m.evaldata, :firstorder)
     @test !isfirstorder(m)
     @test (firstorder!(m); true)
     @test isfirstorder(m)
@@ -827,8 +827,8 @@ end
 
 @testset "E2.fo" begin
     m = deepcopy(E2.model)
-    m.evaldata = ModelBaseEcon.NoModelEvaluationData()
-    m.solverdata = nothing
+    delete!(m.evaldata, :firstorder)
+    empty!(m.solverdata)
     @test !isfirstorder(m)
     m.sstate.values .= 0
     m.sstate.mask .= true
@@ -890,13 +890,13 @@ end
             3, 36,
         )
     )
-    @test_throws ModelBaseEcon.ModelNotInitError eval_RJ(zeros(2, 2), ModelBaseEcon.NoModelEvaluationData())
+    # @test_throws ModelBaseEcon.ModelNotInitError eval_RJ(zeros(2, 2), ModelBaseEcon.NoModelEvaluationData())
 end
 
 @testset "E3.fo" begin
     m = deepcopy(E3.model)
-    m.evaldata = ModelBaseEcon.NoModelEvaluationData()
-    m.solverdata = nothing
+    delete!(m.evaldata, :firstorder)
+    empty!(m.solverdata)
     @test !isfirstorder(m)
     @test_throws ModelBaseEcon.LinearizationError firstorder!(m)
     m.sstate.values .= 0

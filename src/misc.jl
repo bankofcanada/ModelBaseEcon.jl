@@ -48,14 +48,20 @@ function Base.showerror(io::IO, me::ME) where ME <: ModelErrorBase
     end
 end
 
+struct ModelError <: ModelErrorBase
+    msg
+    ModelError() = new("Unknown error")
+end
+msg(e::ModelError) = e.msg
+
 
 """
     struct ModelError <: ModelErrorBase
     
 Concrete error type used when no specific error description is available.
 """
-struct ModelError <: ModelErrorBase end
-# export ModelError
+struct UnknownModelError <: ModelErrorBase end
+# export UnknownModelError
 
 """
     modelerror(ME::Type{<:ModelErrorBase}, args...; kwargs...)
@@ -63,7 +69,7 @@ struct ModelError <: ModelErrorBase end
 Raise an exception derived from [`ModelErrorBase`](@ref).
 """
 modelerror(ME::Type{<:ModelErrorBase}=ModelError, args...; kwargs...) = throw(ME(args...; kwargs...))
-
+modelerror(msg::AbstractString) = modelerror(ModelError, msg)
 
 """
     struct ModelNotInitError <: ModelErrorBase
@@ -86,3 +92,13 @@ struct NotImplementedError <: ModelErrorBase
 end
 msg(fe::NotImplementedError) = "Feature not implemented: $(fe.descr)."
 # export NotImplementedError
+
+"""
+    struct Model
+"""
+struct EvalDataNotFound <: ModelErrorBase 
+    which::Symbol
+end
+msg(e::EvalDataNotFound) = "Evaluation data for :$(e.which) not found."
+hint(e::EvalDataNotFound) = "Try calling $(e.which)!(model)."
+

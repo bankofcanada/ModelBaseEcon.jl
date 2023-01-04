@@ -24,7 +24,7 @@ function FirstOrderMED(model::Model)
     # we need a linearized model
     #
     linearize!(model)
-    lmed = model.evaldata
+    lmed = getevaldata(model, :linearize)
     #
     # define variables for lags and leads more than 1 
     # also categorize variables as fwd, bck, and ex
@@ -154,18 +154,18 @@ function fill_fo_matrices!(FWD::Matrix{Float64}, BCK::Matrix{Float64}, EX::Matri
         end
         nothing
     end
-return nothing
+    return nothing
 end
 
 export firstorder!
 function firstorder!(m::Model)
-    m.evaldata = FirstOrderMED(m)
+    setevaldata!(m, firstorder=FirstOrderMED(m))
     return m
 end
 
-refresh_med!(m::AbstractModel, ::Type{FirstOrderMED}) = firstorder!(m)
-eval_R!(RES::AbstractVector{Float64}, point::AbstractMatrix{Float64}, fomed::FirstOrderMED) = eval_R!(RES, point, fomed.lmed)
+refresh_med!(m::AbstractModel, ::Val{:firstorder}) = firstorder!(m)
+eval_R!(res::AbstractVector{Float64}, point::AbstractMatrix{Float64}, fomed::FirstOrderMED) = eval_R!(res, point, fomed.lmed)
 eval_RJ(point::AbstractMatrix{Float64}, fomed::FirstOrderMED) = eval_RJ(point, fomed.lmed)
 
 export isfirstorder
-isfirstorder(m::Model) = m.evaldata isa FirstOrderMED
+isfirstorder(m::Model) = hasevaldata(m, :firstorder)

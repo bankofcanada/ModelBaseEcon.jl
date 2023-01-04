@@ -75,15 +75,17 @@ mutable struct Model <: AbstractModel
     # auxiliary equations
     auxeqns::Vector{Equation}
     # data related to evaluating residuals and Jacobian of the model equations
-    evaldata::AbstractModelEvaluationData
+    evaldata::LittleDict{Symbol, AbstractModelEvaluationData}
     # data slot to be used by the solver (in StateSpaceEcon)
-    solverdata::Any
+    solverdata::LittleDict{Symbol, Any}
     # 
     # constructor of an empty model
     Model(opts::Options) = new(merge(defaultoptions, opts),
-        ModelFlags(), SteadyStateData(), false, [], [], [], Parameters(), Dict(), 0, 0, [], [], NoMED, nothing)
+        ModelFlags(), SteadyStateData(), false, [], [], [], Parameters(), Dict(), 0, 0, [], [], 
+        LittleDict{Symbol, AbstractModelEvaluationData}(), LittleDict{Symbol, Any}())
     Model() = new(deepcopy(defaultoptions),
-        ModelFlags(), SteadyStateData(), false, [], [], [], Parameters(), Dict(), 0, 0, [], [], NoMED, nothing)
+        ModelFlags(), SteadyStateData(), false, [], [], [], Parameters(), Dict(), 0, 0, [], [],
+        LittleDict{Symbol, AbstractModelEvaluationData}(), LittleDict{Symbol, Any}())
 end
 
 auxvars(m::Model) = getfield(m, :auxvars)
@@ -96,6 +98,16 @@ nallvars(m::Model) = length(variables(m)) + length(shocks(m)) + length(auxvars(m
 alleqns(m::Model) = vcat(equations(m), getfield(m, :auxeqns))
 nalleqns(m::Model) = length(equations(m)) + length(getfield(m, :auxeqns))
 
+hasevaldata(m::Model, which::Symbol) = haskey(m.evaldata, which)
+function getevaldata(m::Model, which::Symbol, errorwhenmissing::Bool=true) 
+    ed = get(m.evaldata, which, missing)
+    if errorwhenmissing && ed === missing
+        which === :med && modelerror(ModelNotInitError)
+        modelerror(EvalDataNotFound, which)
+    end
+    return ed
+end
+setevaldata!(m::Model; kwargs...) = push!(m.evaldata, (key => value for (key, value) in kwargs)...)
 
 ################################################################
 # Specialize Options methods to the Model type
@@ -927,7 +939,7 @@ function add_equation!(model::Model, expr::Expr; modelmodule::Module=moduleof(mo
         model.maxlag = max(model.maxlag, eqn.maxlag)
         model.maxlead = max(model.maxlead, eqn.maxlead)
     end
-    model.evaldata = NoMED
+    empty!(model.evaldata)
     return model
 end
 @assert precompile(add_equation!, (Model, Expr))
@@ -950,7 +962,7 @@ macro.
 """
 function initialize!(model::Model, modelmodule::Module)
     # Note: we cannot use moduleof here, because the equations are not initialized yet.
-    if model.evaldata !== NoMED
+    if !isempty(model.evaldata)
         error("Model already initialized.")
     end
     initfuncs(modelmodule)
@@ -975,7 +987,7 @@ function initialize!(model::Model, modelmodule::Module)
     if !model.dynss
         # Note: we cannot set any other evaluation method yet - they require steady
         # state solution and we don't have that yet.
-        model.evaldata = ModelEvaluationData(model)
+        model.evaldata[:med] = ModelEvaluationData(model)
     else
         # if dynss is true, then we need the steady state even for the standard MED
         nothing
@@ -999,8 +1011,8 @@ end
 
 ##########################
 
-eval_RJ(x::AbstractMatrix{Float64}, m::Model) = eval_RJ(x, m.evaldata)
-eval_R!(r::AbstractVector{Float64}, x::AbstractMatrix{Float64}, m::Model) = eval_R!(r, x, m.evaldata)
+eval_RJ(point::AbstractMatrix{Float64}, m::Model, which::Symbol=:med) = eval_RJ(point, getevaldata(m, which))
+eval_R!(res::AbstractVector{Float64}, point::AbstractMatrix{Float64}, m::Model, which::Symbol=:med) = eval_R!(res, point, getevaldata(m, which))
 @inline issssolved(m::Model) = issssolved(m.sstate)
 
 ##########################
