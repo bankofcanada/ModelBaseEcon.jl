@@ -490,10 +490,10 @@ function refresh_med! end
 export refresh_med!
 
 # dispatcher
-refresh_med!(m::AbstractModel, which::Symbol=:med) = m.dynss ? refresh_med!(m, Val(which)) : m
+refresh_med!(model::AbstractModel, which::Symbol=model.options.which) = model.dynss ? refresh_med!(model, Val(which)) : model
 # catch all and issue a meaningful error message
-refresh_med!(::AbstractModel, V::Val{S}) where S = modelerror("Missing method to update MED of type $S")
+refresh_med!(::AbstractModel, V::Val{WHICH}) where WHICH = modelerror("Missing method to update model variant: $WHICH")
 # specific cases
 # refresh_med!(m::AbstractModel, ::Type{NoModelEvaluationData}) = (m.evaldata = ModelEvaluationData(m); m)
-refresh_med!(m::AbstractModel, ::Val{:med}) = (setevaldata!(m, med = ModelEvaluationData(m)); m)
-refresh_med!(m::AbstractModel, ::Val{:selective_linearize}) = selective_linearize!(m)
+refresh_med!(model::AbstractModel, ::Val{:default}) = (setevaldata!(model, default = ModelEvaluationData(model)); model)
+refresh_med!(model::AbstractModel, ::Val{:selective_linearize}) = selective_linearize!(model)

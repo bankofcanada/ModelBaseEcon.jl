@@ -158,9 +158,9 @@ function fill_fo_matrices!(FWD::Matrix{Float64}, BCK::Matrix{Float64}, EX::Matri
 end
 
 export firstorder!
-function firstorder!(m::Model)
-    setevaldata!(m, firstorder=FirstOrderMED(m))
-    return m
+function firstorder!(model::Model)
+    setevaldata!(model, firstorder=FirstOrderMED(model))
+    return model
 end
 
 refresh_med!(m::AbstractModel, ::Val{:firstorder}) = firstorder!(m)
@@ -168,4 +168,4 @@ eval_R!(res::AbstractVector{Float64}, point::AbstractMatrix{Float64}, fomed::Fir
 eval_RJ(point::AbstractMatrix{Float64}, fomed::FirstOrderMED) = eval_RJ(point, fomed.lmed)
 
 export isfirstorder
-isfirstorder(m::Model) = hasevaldata(m, :firstorder)
+isfirstorder(model::Model) = hasevaldata(model, :firstorder)

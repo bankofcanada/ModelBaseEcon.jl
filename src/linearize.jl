@@ -33,11 +33,11 @@ struct LinearizedModelEvaluationData <: AbstractModelEvaluationData
 end
 
 """
-    islinearized(m::Model)
+    islinearized(model::Model)
 
 Return `true` if the given model is linearized and `false` otherwise.
 """
-islinearized(m::Model) = hasevaldata(m, :linearize)
+islinearized(model::Model) = hasevaldata(model, :linearize)
 export islinearized
 
 # Specialize eval_R! for the new model evaluation type
@@ -138,7 +138,7 @@ to is as deviation from the steady state
 
 See also: [`linearize!`](@ref) and [`with_linearized`](@ref)
 """
-linearized(model::Model; kwargs...) =     linearize!(deepcopy(model); kwargs...)
+linearized(model::Model; kwargs...) = linearize!(deepcopy(model); kwargs...)
 
 export with_linearized
 """
@@ -166,6 +166,7 @@ end
 """
 function with_linearized(F::Function, model::Model; kwargs...)
     # store the evaluation data
+    which = model.options.which
     lmed = get(model.evaldata, :linearize, nothing)
     ret = try
         # linearize 
@@ -177,15 +178,17 @@ function with_linearized(F::Function, model::Model; kwargs...)
         if lmed === nothing
             delete!(model.evaldata, :linearize)
         else
-            setevaldata!(model, linearize=ed)
+            setevaldata!(model, linearize=lmed)
         end
+        model.options.which = which
         rethrow()
     end
     if lmed === nothing
         delete!(model.evaldata, :linearize)
     else
-        setevaldata!(model, linearize=ed)
+        setevaldata!(model, linearize=lmed)
     end
+    model.options.which = which
     return ret
 end
 

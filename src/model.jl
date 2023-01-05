@@ -13,6 +13,7 @@ const defaultoptions = Options(
     tol=1e-10,
     maxiter=20,
     verbose=false,
+    which=:default,
     warn=Options(no_t=true)
 )
 
@@ -75,39 +76,55 @@ mutable struct Model <: AbstractModel
     # auxiliary equations
     auxeqns::Vector{Equation}
     # data related to evaluating residuals and Jacobian of the model equations
-    evaldata::LittleDict{Symbol, AbstractModelEvaluationData}
+    evaldata::LittleDict{Symbol,AbstractModelEvaluationData}
     # data slot to be used by the solver (in StateSpaceEcon)
-    solverdata::LittleDict{Symbol, Any}
+    solverdata::LittleDict{Symbol,Any}
     # 
     # constructor of an empty model
     Model(opts::Options) = new(merge(defaultoptions, opts),
-        ModelFlags(), SteadyStateData(), false, [], [], [], Parameters(), Dict(), 0, 0, [], [], 
-        LittleDict{Symbol, AbstractModelEvaluationData}(), LittleDict{Symbol, Any}())
+        ModelFlags(), SteadyStateData(), false, [], [], [], Parameters(), Dict(), 0, 0, [], [],
+        LittleDict{Symbol,AbstractModelEvaluationData}(), LittleDict{Symbol,Any}())
     Model() = new(deepcopy(defaultoptions),
         ModelFlags(), SteadyStateData(), false, [], [], [], Parameters(), Dict(), 0, 0, [], [],
-        LittleDict{Symbol, AbstractModelEvaluationData}(), LittleDict{Symbol, Any}())
+        LittleDict{Symbol,AbstractModelEvaluationData}(), LittleDict{Symbol,Any}())
 end
 
-auxvars(m::Model) = getfield(m, :auxvars)
-nauxvars(m::Model) = length(auxvars(m))
+auxvars(model::Model) = getfield(model, :auxvars)
+nauxvars(model::Model) = length(auxvars(model))
 
 # We have to specialize allvars() nallvars() because we have auxvars here
-allvars(m::Model) = vcat(variables(m), shocks(m), auxvars(m))
-nallvars(m::Model) = length(variables(m)) + length(shocks(m)) + length(auxvars(m))
+allvars(model::Model) = vcat(variables(model), shocks(model), auxvars(model))
+nallvars(model::Model) = length(variables(model)) + length(shocks(model)) + length(auxvars(model))
 
-alleqns(m::Model) = vcat(equations(m), getfield(m, :auxeqns))
-nalleqns(m::Model) = length(equations(m)) + length(getfield(m, :auxeqns))
+alleqns(model::Model) = vcat(equations(model), getfield(model, :auxeqns))
+nalleqns(model::Model) = length(equations(model)) + length(getfield(model, :auxeqns))
 
-hasevaldata(m::Model, which::Symbol) = haskey(m.evaldata, which)
-function getevaldata(m::Model, which::Symbol, errorwhenmissing::Bool=true) 
-    ed = get(m.evaldata, which, missing)
+hasevaldata(model::Model, which::Symbol) = haskey(model.evaldata, which)
+function getevaldata(model::Model, which::Symbol=model.options.which, errorwhenmissing::Bool=true)
+    ed = get(model.evaldata, which, missing)
     if errorwhenmissing && ed === missing
-        which === :med && modelerror(ModelNotInitError)
+        which === :default && modelerror(ModelNotInitError)
         modelerror(EvalDataNotFound, which)
     end
     return ed
 end
-setevaldata!(m::Model; kwargs...) = push!(m.evaldata, (key => value for (key, value) in kwargs)...)
+function setevaldata!(model::Model; kwargs...)
+    for (key, value) in kwargs
+        push!(model.evaldata, key => value)
+        model.options.which = key
+    end
+    return nothing
+end
+
+hassolverdata(model::Model, which::Symbol) = haskey(model.solverdata, which)
+function getsolverdata(model::Model, which::Symbol, errorwhenmissing::Bool=true)
+    sd = get(model.solverdata, which, missing)
+    if errorwhenmissing && sd === missing
+        modelerror(SolverDataNotFound, which)
+    end
+    return sd
+end
+setsolverdata!(model::Model; kwargs...) = push!(model.solverdata, (key => value for (key, value) in kwargs)...)
 
 ################################################################
 # Specialize Options methods to the Model type
@@ -194,7 +211,7 @@ function Base.setproperty!(model::Model, name::Symbol, val::Any)
     else
         ind = indexin([name], getfield(model, :variables))[1]
         if ind !== nothing
-            if !isa(val, Union{Symbol, ModelVariable})
+            if !isa(val, Union{Symbol,ModelVariable})
                 error("Cannot assign a $(typeof(val)) as a model variable. Use `m.var = update(m.var, ...)` to update a variable.")
             end
             if getindex(getfield(model, :variables), ind) != val
@@ -204,7 +221,7 @@ function Base.setproperty!(model::Model, name::Symbol, val::Any)
         end
         ind = indexin([name], getfield(model, :shocks))[1]
         if ind !== nothing
-            if !isa(val, Union{Symbol, ModelVariable})
+            if !isa(val, Union{Symbol,ModelVariable})
                 error("Cannot assign a $(typeof(val)) as a model shock. Use `m.shk = update(m.shk, ...)` to update a shock.")
             end
             if getindex(getfield(model, :shocks), ind) != val
@@ -214,7 +231,7 @@ function Base.setproperty!(model::Model, name::Symbol, val::Any)
         end
         ind = indexin([name], getfield(model, :auxvars))[1]
         if ind !== nothing
-            if !isa(val, Union{Symbol, ModelVariable})
+            if !isa(val, Union{Symbol,ModelVariable})
                 error("Cannot assign a $(typeof(val)) as an aux variable. Use `m.aux = update(m.aux, ...)` to update an aux variable.")
             end
             if getindex(getfield(model, :auxvars), ind) != val
@@ -294,7 +311,7 @@ function fullprint(io::IO, model::Model)
         print(io, " with ", length(model.auxeqns), " auxiliary equations")
     end
     print(io, ": \n")
-    function print_aux_eq(bi) 
+    function print_aux_eq(bi)
         v = model.auxeqns[bi]
         for (var, ti) in keys(v.tsrefs)
             ai = _index_of_var(var, model.allvars)
@@ -987,7 +1004,7 @@ function initialize!(model::Model, modelmodule::Module)
     if !model.dynss
         # Note: we cannot set any other evaluation method yet - they require steady
         # state solution and we don't have that yet.
-        model.evaldata[:med] = ModelEvaluationData(model)
+        setevaldata!(model; default=ModelEvaluationData(model))
     else
         # if dynss is true, then we need the steady state even for the standard MED
         nothing
@@ -1011,9 +1028,9 @@ end
 
 ##########################
 
-eval_RJ(point::AbstractMatrix{Float64}, m::Model, which::Symbol=:med) = eval_RJ(point, getevaldata(m, which))
-eval_R!(res::AbstractVector{Float64}, point::AbstractMatrix{Float64}, m::Model, which::Symbol=:med) = eval_R!(res, point, getevaldata(m, which))
-@inline issssolved(m::Model) = issssolved(m.sstate)
+eval_RJ(point::AbstractMatrix{Float64}, model::Model, which::Symbol=model.options.which) = eval_RJ(point, getevaldata(model, which))
+eval_R!(res::AbstractVector{Float64}, point::AbstractMatrix{Float64}, model::Model, which::Symbol=model.options.which) = eval_R!(res, point, getevaldata(model, which))
+@inline issssolved(model::Model) = issssolved(model.sstate)
 
 ##########################
 
