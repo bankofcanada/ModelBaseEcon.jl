@@ -162,7 +162,7 @@ end
         @steady ly
     end)
     push!(lvars, ModelSymbol(:ly, :lin))
-    for i in eachinedx(lvars)
+    for i in eachindex(lvars)
         for j = i+1:length(lvars)
             @test lvars[i] == lvars[j]
         end
