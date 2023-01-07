@@ -44,7 +44,6 @@ include("metafuncs.jl")
 include("model.jl")
 include("export_model.jl")
 include("linearize.jl")
-include("firstorder.jl")
 
 """
     @using_example name

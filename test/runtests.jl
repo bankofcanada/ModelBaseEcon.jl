@@ -162,7 +162,7 @@ end
         @steady ly
     end)
     push!(lvars, ModelSymbol(:ly, :lin))
-    for i = 1:length(lvars)
+    for i in eachinedx(lvars)
         for j = i+1:length(lvars)
             @test lvars[i] == lvars[j]
         end
@@ -177,7 +177,7 @@ end
     @test lvars[7].var_type == :steady
     @test lvars[8].var_type == :steady
     @test lvars[9].var_type == :lin
-    for i = 1:length(lvars)
+    for i in eachindex(lvars)
         @test sprint(print, lvars[i], context=IOContext(stdout, :compact => true)) == "ly"
     end
     @test sprint(print, lvars[1], context=IOContext(stdout, :compact => false)) == "ly"
@@ -743,15 +743,6 @@ end
     @test islinearized(m)
 end
 
-@testset "E1.fo" begin
-    m = deepcopy(E1.model)
-    delete!(m.evaldata, :firstorder)
-    @test !isfirstorder(m)
-    @test (firstorder!(m); true)
-    @test isfirstorder(m)
-    test_eval_RJ(m, [0.0], [-0.5 1.0 -0.5 0.0 -1.0 0.0])
-    compare_RJ_R!_(m)
-end
 
 @testset "E1.params" begin
     let m = E1.model
@@ -825,21 +816,6 @@ end
     compare_RJ_R!_(E2.model)
 end
 
-@testset "E2.fo" begin
-    m = deepcopy(E2.model)
-    delete!(m.evaldata, :firstorder)
-    empty!(m.solverdata)
-    @test !isfirstorder(m)
-    m.sstate.values .= 0
-    m.sstate.mask .= true
-    @test (firstorder!(m); true)
-    @test isfirstorder(m)
-    test_eval_RJ(m, [0.0, 0.0, 0.0],
-        [-0.5 1 -0.48 0 0 0 0 -0.02 0 0 -1 0 0 0 0 0 0 0
-            0 -0.375 0 -0.75 1 0 0 -0.125 0 0 0 0 0 -1 0 0 0 0
-            0 0 -0.02 0 0.02 0 -0.5 1 -0.48 0 0 0 0 0 0 0 -1 0])
-    compare_RJ_R!_(m)
-end
 
 @testset "E2.sstate" begin
     m = E2.model
@@ -893,26 +869,6 @@ end
     # @test_throws ModelBaseEcon.ModelNotInitError eval_RJ(zeros(2, 2), ModelBaseEcon.NoModelEvaluationData())
 end
 
-@testset "E3.fo" begin
-    m = deepcopy(E3.model)
-    delete!(m.evaldata, :firstorder)
-    empty!(m.solverdata)
-    @test !isfirstorder(m)
-    @test_throws ModelBaseEcon.LinearizationError firstorder!(m)
-    m.sstate.values .= 0
-    m.sstate.mask .= true
-    @test (firstorder!(m); true)
-    @test isfirstorder(m)
-    test_eval_RJ(m, [0.0, 0.0, 0.0],
-        sparse(
-            [1, 1, 2, 1, 3, 1, 1, 2, 2, 3, 3, 3, 1, 2, 3, 3, 1, 2, 3],
-            [2, 3, 3, 4, 4, 5, 6, 8, 9, 9, 13, 14, 15, 15, 15, 16, 21, 27, 33],
-            [-0.5, 1.0, -0.375, -0.3, -0.02, -0.05, -0.05, -0.75, 1.0, 0.02, -0.25,
-                -0.25, -0.02, -0.125, 1.0, -0.48, -1.0, -1.0, -1.0],
-            3, 36,
-        ))
-    compare_RJ_R!_(m)
-end
 
 @using_example E6
 @testset "E6" begin
@@ -934,30 +890,6 @@ end
         ))
 end
 
-#= 
-@testset "E6.fo" begin
-    m = deepcopy(E6.model)
-    m.evaldata = ModelBaseEcon.NoModelEvaluationData()
-    m.solverdata = nothing
-    @test !isfirstorder(m)
-    copyto!(m.sstate.values, [0.005, 0.0, 0.0045, 0.0, 0.0095, 0.0, 1.3, 0.005, 1.1, 0.0045, 0.9, 0.0095, 0.0, 0.0, 0.0, 0.0])
-    fill!(m.sstate.mask, true)
-    m.sstate.dly.level = m.p_dly
-    m.sstate.dlp.level = m.p_dlp
-    @test (firstorder!(m); true)
-    @test isfirstorder(m)
-    test_eval_RJ(m, [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-        sparse(
-            [2, 2, 2, 3, 5, 2, 2, 2, 1, 1, 3, 4, 1, 3, 6, 5, 5, 4, 4, 6, 6, 2, 1],
-            [1, 2, 3, 3, 3, 4, 5, 6, 8, 9, 9, 9, 10, 15, 15, 20, 21, 26, 27, 32, 33, 39, 45],
-            [-0.1, -0.1, 1.0, -1.0, -1.0, -0.1, -0.1, -0.1, -0.2, 1.0, -1.0, -1.0, -0.2, 1.0,
-                -1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0, -1.0],
-            6, 6 * 8),
-        pt=hcat((m.sstate[var][-m.maxlag:m.maxlead] for var in m.allvars)...)
-    )
-    compare_RJ_R!_(m)
-end 
-=#
 
 @testset "VarTypesSS" begin
     let m = Model()
