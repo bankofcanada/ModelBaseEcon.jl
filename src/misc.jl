@@ -29,7 +29,7 @@ abstract type ModelErrorBase <: Exception end
 
 Return the error message - a description of what went wrong.
 """
-msg(::ModelErrorBase) = "Unknown error"
+function msg end
 
 """
     hint(::ModelErrorBase)
@@ -38,7 +38,7 @@ Return the hint message - a suggestion of how the problem might be fixed.
 """
 hint(::ModelErrorBase) = ""
 
-function Base.showerror(io::IO, me::ME) where ME <: ModelErrorBase
+function Base.showerror(io::IO, me::ME) where {ME<:ModelErrorBase}
     # MEstr = split("$(ME)", ".")[end]
     # println(io, MEstr, ": ", msg(me))
     println(io, ME, ": ", msg(me))
@@ -54,14 +54,6 @@ end
 ModelError() = ModelError("Unknown error")
 msg(e::ModelError) = e.msg
 
-
-"""
-    struct ModelError <: ModelErrorBase
-    
-Concrete error type used when no specific error description is available.
-"""
-struct UnknownModelError <: ModelErrorBase end
-# export UnknownModelError
 
 """
     modelerror(ME::Type{<:ModelErrorBase}, args...; kwargs...)
@@ -87,18 +79,22 @@ hint(::ModelNotInitError) = "Call `@initialize model` first."
 
 Specific error type used when a feature is planned but not yet implemented. 
 """
-struct NotImplementedError <: ModelErrorBase 
+struct NotImplementedError <: ModelErrorBase
     descr
 end
 msg(fe::NotImplementedError) = "Feature not implemented: $(fe.descr)."
 # export NotImplementedError
 
-"""
-    struct Model
-"""
-struct EvalDataNotFound <: ModelErrorBase 
+struct EvalDataNotFound <: ModelErrorBase
     which::Symbol
 end
 msg(e::EvalDataNotFound) = "Evaluation data for :$(e.which) not found."
 hint(e::EvalDataNotFound) = "Try calling $(e.which)!(model)."
+
+struct SolverDataNotFound <: ModelErrorBase
+    which::Symbol
+end
+msg(e::SolverDataNotFound) = "Solver data for :$(e.which) not found."
+# hint(e::EvalDataNotFound) = "Try calling $(e.which)!(model)."
+
 

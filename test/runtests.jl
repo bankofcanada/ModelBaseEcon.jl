@@ -287,13 +287,19 @@ end
     @test_throws ModelBaseEcon.EqnNotReadyError ModelBaseEcon.eqnnotready()
     sprint(showerror, ModelBaseEcon.EqnNotReadyError())
 
-    @test_throws ModelBaseEcon.ModelError @equations m p[t] = 0
+    @test_throws ModelBaseEcon.ModelError @macroexpand @equations m p[t] = 0
 
     @equations m begin
         p[t] = 0
     end
+    @test_throws ModelBaseEcon.ModelNotInitError ModelBaseEcon.getevaldata(m, :default)
     @initialize m
+    @test ModelBaseEcon.hasevaldata(m, :default)
     @test_throws ModelBaseEcon.ModelError @initialize m
+    @test_throws ModelBaseEcon.EvalDataNotFound ModelBaseEcon.getevaldata(m, :nosuchevaldata)
+
+    @test_throws ModelBaseEcon.SolverDataNotFound ModelBaseEcon.getsolverdata(m, :testdata)
+    @test (ModelBaseEcon.setsolverdata!(m, testdata=nothing); ModelBaseEcon.hassolverdata(m, :testdata))
 
     @test Symbol(m.variables[1]) == m.variables[1]
 
@@ -311,6 +317,9 @@ end
         (l, s) = m.sstate.k.data
         exp(l) == m.sstate.k.level && exp(s) == m.sstate.k.slope
     end
+
+    @test_throws ArgumentError m.sstate.x[1:8, ref=3.0]
+    @test m.sstate.x[2, ref=3] ≈ m.sstate.x.level - m.sstate.x.slope
 
     xdata = m.sstate.x[1:8, ref=3]
     @test xdata[3] ≈ m.sstate.x.level
@@ -377,6 +386,15 @@ end
         @test_throws ErrorException m.dummy
 
         @test show(IOBuffer(), MIME"text/plain"(), m.flags) === nothing
+    end
+
+    @test_throws ModelBaseEcon.ModelError let m = Model()
+        @parameters m a = 5
+        @variables m a
+        @equations m begin
+            a[t] = 5
+        end
+        @initialize m
     end
 end
 
@@ -493,6 +511,21 @@ end
 
     @test_throws ArgumentError params[:contents] = 5
     @test_throws ArgumentError params.abc
+
+    @test_logs (:error, r"While updating value for parameter b:*"i) begin
+        try
+            params.a = [1, 2, 3]
+        catch E
+            if E isa ModelBaseEcon.ParamUpdateError
+                io = IOBuffer()
+                showerror(io,E)
+                seekstart(io)
+                @error read(io, String)
+            else
+                rethrow(E)
+            end
+        end
+    end
 end
 
 @testset "ifelse" begin
@@ -1027,6 +1060,32 @@ end
         @test m.sstate.a.slope == 1.0
         @test m.sstate.la.level ≈ log(20) atol = 1e-14
         @test m.sstate.la.slope == 0.0
+    end
+end
+
+@testset "lin" begin
+    let m = Model()
+        @variables m a
+        @equations m begin
+            a[t] = 0
+        end
+        @initialize m
+        # steady state not solved
+        fill!(m.sstate.mask, false)
+        @test_throws ModelBaseEcon.LinearizationError linearize!(m)
+        m.sstate.values .= rand(2)
+        # steady state with non-zero slope
+        fill!(m.sstate.mask, true)
+        m.sstate.values .= 1.0
+        @test_throws ModelBaseEcon.LinearizationError linearize!(m)
+        # succeed
+        m.sstate.values .= 0.0
+        @test (linearize!(m); islinearized(m))
+        delete!(m.evaldata, :linearize)
+        @test_throws ErrorException with_linearized(m) do m
+            error("hello")
+        end
+        @test !ModelBaseEcon.hasevaldata(m, :linearize)
     end
 end
 
