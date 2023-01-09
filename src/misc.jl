@@ -50,8 +50,8 @@ end
 
 struct ModelError <: ModelErrorBase
     msg
-    ModelError() = new("Unknown error")
 end
+ModelError() = ModelError("Unknown error")
 msg(e::ModelError) = e.msg
 
 

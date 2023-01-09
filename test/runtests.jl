@@ -287,17 +287,13 @@ end
     @test_throws ModelBaseEcon.EqnNotReadyError ModelBaseEcon.eqnnotready()
     sprint(showerror, ModelBaseEcon.EqnNotReadyError())
 
-    @test_throws ErrorException try
-        @eval @equations m :(p[t] = 0)
-    catch err
-        throw(ErrorException(err.msg))
-    end
+    @test_throws ModelBaseEcon.ModelError @equations m p[t] = 0
 
     @equations m begin
         p[t] = 0
     end
     @initialize m
-    @test_throws ErrorException @initialize m
+    @test_throws ModelBaseEcon.ModelError @initialize m
 
     @test Symbol(m.variables[1]) == m.variables[1]
 
@@ -784,9 +780,9 @@ end
         @test (m.aux1 = update(m.aux1; doc="aux1")) == :aux1
         @test length(m.auxeqns) == ModelBaseEcon.nauxvars(m) == 2
         x = ones(2, 2)
-        @test_throws ErrorException ModelBaseEcon.update_auxvars(x, m)
+        @test_throws ModelBaseEcon.ModelError ModelBaseEcon.update_auxvars(x, m)
         x = ones(4, 3)
-        @test_throws ErrorException ModelBaseEcon.update_auxvars(x, m)
+        @test_throws ModelBaseEcon.ModelError ModelBaseEcon.update_auxvars(x, m)
         x = 2 .* ones(4, 2)
         ax = ModelBaseEcon.update_auxvars(x, m; default=0.1)
         @test size(ax) == (4, 4)

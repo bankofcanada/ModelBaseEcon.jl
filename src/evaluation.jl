@@ -281,20 +281,6 @@ function eval_RJ end
 export eval_RJ
 eval_RJ(point::AbstractMatrix{Float64}, ::AMED) where {AMED<:AbstractModelEvaluationData} = modelerror(NotImplementedError, AMED)
 
-
-# ##### Model Evaluation Data that doesn't exist.
-# """
-#     struct NoModelEvaluationData <: AbstractModelEvaluationData
-
-# Specific type that indicates that the model cannot be evaluated. This is used as
-# a placeholder while the model is being defined. During initialization, the
-# actual model evaluation data is created.
-# """
-# struct NoModelEvaluationData <: AbstractModelEvaluationData end
-# const NoMED = NoModelEvaluationData()
-# eval_R!(res::AbstractVector{Float64}, point::AbstractMatrix{Float64}, ::NoModelEvaluationData) = throw(ModelNotInitError())
-# eval_RJ(point::AbstractMatrix{Float64}, ::NoModelEvaluationData) = throw(ModelNotInitError())
-
 ##### The standard Model Evaluation Data used in the general case.
 """
     ModelEvaluationData <: AbstractModelEvaluationData
@@ -405,10 +391,10 @@ function SelectiveLinearizationMED(model::AbstractModel)
 
     sstate = model.sstate
     if !issssolved(sstate)
-        error("Steady state solution is not available.")
+        linearizationerror("Steady state solution is not available.")
     end
     if maximum(abs, sstate.values[2:2:end]) > getoption(model, :tol, 1e-12)
-        error("Steady state solution has non-zero slope. Not yet implemented.")
+        linearizationerror("Steady state solution has non-zero slope. Not yet implemented.")
     end
 
     med = ModelEvaluationData(model)

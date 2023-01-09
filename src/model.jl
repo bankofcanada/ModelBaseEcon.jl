@@ -544,7 +544,9 @@ Define model equations. See [`Equation`](@ref).
 """
 macro equations(model, block::Expr)
     if block.head != :block
-        error("A list of equations mush be within a begin-end block")
+        return quote
+            modelerror("A list of equations mush be within a begin-end block")
+        end
     end
     ret = Expr(:block)
     eqn = Expr(:block)
@@ -980,12 +982,12 @@ macro.
 function initialize!(model::Model, modelmodule::Module)
     # Note: we cannot use moduleof here, because the equations are not initialized yet.
     if !isempty(model.evaldata)
-        error("Model already initialized.")
+        modelerror("Model already initialized.")
     end
     initfuncs(modelmodule)
     samename = Symbol[intersect(model.allvars, keys(model.parameters))...]
     if !isempty(samename)
-        error("Found $(length(samename)) names that are both variables and parameters: $(join(samename, ", "))")
+        modelerror("Found $(length(samename)) names that are both variables and parameters: $(join(samename, ", "))")
     end
     model.parameters.mod[] = modelmodule
     varshks = model.varshks
@@ -1070,11 +1072,11 @@ function update_auxvars(data::AbstractArray{Float64,2}, model::Model;
     (nt, nv) = size(data)
     nvarshk = length(model.variables) + length(model.shocks)
     if nv ∉ (nvarshk, nvarshk + nauxs)
-        error("Incorrect number of columns $nv. Expected $nvarshk or $(nvarshk + nauxs).")
+        modelerror("Incorrect number of columns $nv. Expected $nvarshk or $(nvarshk + nauxs).")
     end
     mintimes = 1 + model.maxlag + model.maxlead
     if nt < mintimes
-        error("Insufficient time periods $nt. Expected $mintimes or more.")
+        modelerror("Insufficient time periods $nt. Expected $mintimes or more.")
     end
     allvars = model.allvars
     result = [data[:, 1:nvarshk] zeros(nt, nauxs)]
