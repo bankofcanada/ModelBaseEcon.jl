@@ -298,8 +298,40 @@ end
     @test_throws ModelBaseEcon.ModelError @initialize m
     @test_throws ModelBaseEcon.EvalDataNotFound ModelBaseEcon.getevaldata(m, :nosuchevaldata)
 
+    @test_logs (:error, r"Evaluation data for .* not found\..*"i) begin
+        try
+            ModelBaseEcon.getevaldata(m, :nosuchevaldata)
+        catch E
+            if E isa ModelBaseEcon.EvalDataNotFound
+                @test true
+                io = IOBuffer()
+                showerror(io, E)
+                seekstart(io)
+                @error read(io, String)
+            else
+                rethrow(E)
+            end
+        end
+    end
+    @test_logs (:error, r"Solver data for .* not found\..*"i) begin
+        try
+            ModelBaseEcon.getsolverdata(m, :nosuchsolverdata)
+        catch E
+            if E isa ModelBaseEcon.SolverDataNotFound
+                @test true
+                io = IOBuffer()
+                showerror(io, E)
+                seekstart(io)
+                @error read(io, String)
+            else
+                rethrow(E)
+            end
+        end
+    end
+
     @test_throws ModelBaseEcon.SolverDataNotFound ModelBaseEcon.getsolverdata(m, :testdata)
     @test (ModelBaseEcon.setsolverdata!(m, testdata=nothing); ModelBaseEcon.hassolverdata(m, :testdata))
+    @test ModelBaseEcon.getsolverdata(m, :testdata) === nothing
 
     @test Symbol(m.variables[1]) == m.variables[1]
 
@@ -518,7 +550,7 @@ end
         catch E
             if E isa ModelBaseEcon.ParamUpdateError
                 io = IOBuffer()
-                showerror(io,E)
+                showerror(io, E)
                 seekstart(io)
                 @error read(io, String)
             else
