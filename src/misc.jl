@@ -89,11 +89,12 @@ struct EvalDataNotFound <: ModelErrorBase
     which::Symbol
 end
 msg(e::EvalDataNotFound) = "Evaluation data for :$(e.which) not found."
-hint(e::EvalDataNotFound) = "Try calling $(e.which)!(model)."
+hint(e::EvalDataNotFound) = "Try calling `$(e.which)!(model)`."
 
 struct SolverDataNotFound <: ModelErrorBase
     which::Symbol
 end
 msg(e::SolverDataNotFound) = "Solver data for :$(e.which) not found."
+hint(e::SolverDataNotFound) = "Try calling `solve!(model, :$(e.which))`."
 
 

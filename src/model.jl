@@ -544,7 +544,7 @@ Define model equations. See [`Equation`](@ref).
 """
 macro equations(model, block::Expr)
     if block.head != :block
-        modelerror("A list of equations mush be within a begin-end block")
+        modelerror("A list of equations must be within a begin-end block")
     end
     ret = Expr(:block)
     eqn = Expr(:block)
