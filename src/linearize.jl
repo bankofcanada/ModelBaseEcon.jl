@@ -193,3 +193,59 @@ function with_linearized(F::Function, model::Model; kwargs...)
 end
 
 refresh_med!(m::AbstractModel, ::Val{:linearize}) = linearize!(m; deviation=getevaldata(m, :linearize).deviation)
+
+"""
+    print_linearized(io, model)
+    print_linearized(model)
+
+Write the system of equations of the linearized model.
+"""
+function print_linearized end
+export print_linearized
+@inline print_linearized(model::Model; compact::Bool=true) = print_linearized(Base.stdout, model; compact)
+function print_linearized(io::IO, model::Model; compact::Bool=true)
+
+    if !islinearized(model)
+        throw(ArgumentError("Model not linearized"))
+    end
+
+    # Jacobian matrix of the linearized model
+    ed = getevaldata(model, :linearize)::LinearizedModelEvaluationData
+    jay = ed.med.J
+
+    # sort the non-zero entries of J by equation and by variable within each equation
+    base = size(jay, 2)
+    nonzerosofjay = [zip(findnz(jay)...)...]
+    sort!(nonzerosofjay, by=x -> x[1] * base^2 + x[2])
+
+    # names of variables corresponding to columns of J
+    var_from_col = map(string, (
+        ModelBaseEcon.normal_ref(var.name, lag) for var in model.varshks for lag in -model.maxlag:model.maxlead
+    ))
+
+    io = IOContext(io, :compact=>get(io, :compact, compact))
+
+    # loop over the non-zeros of J and print
+    this_r = 0
+    for (r, c, v) in nonzerosofjay
+        @assert r ∈ (this_r, this_r + 1) "r=$r, this_r=$this_r"
+        if r == this_r + 1
+            # finish printing current equation
+            this_r > 0 && println(io)
+            # start printing next equation
+            print(io, " 0 =")
+            this_r = r
+        end
+        if v == 1
+            print(io, " +", var_from_col[c])
+        elseif v == -1
+            print(io, " -", var_from_col[c])
+        elseif v < 0
+            print(io, " ", v, "*", var_from_col[c])
+        else
+            print(io, " +", v, "*", var_from_col[c])
+        end
+    end
+    println(io)
+    return
+end

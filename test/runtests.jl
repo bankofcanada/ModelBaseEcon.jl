@@ -264,9 +264,15 @@ end
     end
     @test fullprint(IOBuffer(), m) === nothing
     @test_throws ModelBaseEcon.ModelError ModelBaseEcon.modelerror()
-    sprint(showerror, ModelBaseEcon.ModelError())
-    sprint(showerror, ModelBaseEcon.ModelNotInitError())
-    sprint(showerror, ModelBaseEcon.NotImplementedError(""))
+    @test contains(
+        sprint(showerror, ModelBaseEcon.ModelError()),
+        r"unknown error"i)
+    @test contains(
+        sprint(showerror, ModelBaseEcon.ModelNotInitError()),
+        r"model not ready to use"i)
+    @test contains(
+        sprint(showerror, ModelBaseEcon.NotImplementedError("foobar")),
+        r"feature not implemented: foobar"i)
     @variables m x y z
     @logvariables m k l m
     @steadyvariables m p q r
@@ -1137,3 +1143,24 @@ end
 
 include("auxsubs.jl")
 include("sstate.jl")
+
+@using_example E3
+@testset "print_linearized" begin
+    m = E3.model
+    m.cp[1] = 0.9383860755808812
+    fill!(m.sstate.values, 0)
+    fill!(m.sstate.mask, true)
+    delete!(m.evaldata, :linearize)
+    @test_throws ArgumentError print_linearized(m)
+    linearize!(m)
+    io = IOBuffer()
+    print_linearized(io, m, compact = false)
+    seekstart(io)
+    lines = readlines(io)
+    @test length(lines) == 3
+    @test lines[1] == " 0 = -0.9383860755808812*pinf[t - 1] +pinf[t] -0.3*pinf[t + 1] -0.05*pinf[t + 2] -0.05*pinf[t + 3] -0.02*ygap[t] -pinf_shk[t]"
+    @test lines[2] == " 0 = -0.375*pinf[t] -0.75*rate[t - 1] +rate[t] -0.125*ygap[t] -rate_shk[t]"
+    @test lines[3] == " 0 = -0.02*pinf[t + 1] +0.02*rate[t] -0.25*ygap[t - 2] -0.25*ygap[t - 1] +ygap[t] -0.48*ygap[t + 1] -ygap_shk[t]"
+    out = sprint(print_linearized, m)
+    @test startswith(out, " 0 = -0.938386*pinf[t - 1] +")
+end
