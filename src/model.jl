@@ -13,7 +13,7 @@ const defaultoptions = Options(
     tol=1e-10,
     maxiter=20,
     verbose=false,
-    which=:default,
+    variant=:default,
     warn=Options(no_t=true)
 )
 
@@ -99,28 +99,28 @@ nallvars(model::Model) = length(variables(model)) + length(shocks(model)) + leng
 alleqns(model::Model) = vcat(equations(model), getfield(model, :auxeqns))
 nalleqns(model::Model) = length(equations(model)) + length(getfield(model, :auxeqns))
 
-hasevaldata(model::Model, which::Symbol) = haskey(model.evaldata, which)
-function getevaldata(model::Model, which::Symbol=model.options.which, errorwhenmissing::Bool=true)
-    ed = get(model.evaldata, which, missing)
+hasevaldata(model::Model, variant::Symbol) = haskey(model.evaldata, variant)
+function getevaldata(model::Model, variant::Symbol=model.options.variant, errorwhenmissing::Bool=true)
+    ed = get(model.evaldata, variant, missing)
     if errorwhenmissing && ed === missing
-        which === :default && modelerror(ModelNotInitError)
-        modelerror(EvalDataNotFound, which)
+        variant === :default && modelerror(ModelNotInitError)
+        modelerror(EvalDataNotFound, variant)
     end
     return ed
 end
 function setevaldata!(model::Model; kwargs...)
     for (key, value) in kwargs
         push!(model.evaldata, key => value)
-        model.options.which = key
+        model.options.variant = key
     end
     return nothing
 end
 
-hassolverdata(model::Model, which::Symbol) = haskey(model.solverdata, which)
-function getsolverdata(model::Model, which::Symbol, errorwhenmissing::Bool=true)
-    sd = get(model.solverdata, which, missing)
+hassolverdata(model::Model, solver::Symbol) = haskey(model.solverdata, solver)
+function getsolverdata(model::Model, solver::Symbol, errorwhenmissing::Bool=true)
+    sd = get(model.solverdata, solver, missing)
     if errorwhenmissing && sd === missing
-        modelerror(SolverDataNotFound, which)
+        modelerror(SolverDataNotFound, solver)
     end
     return sd
 end
@@ -1028,8 +1028,8 @@ end
 
 ##########################
 
-eval_RJ(point::AbstractMatrix{Float64}, model::Model, which::Symbol=model.options.which) = eval_RJ(point, getevaldata(model, which))
-eval_R!(res::AbstractVector{Float64}, point::AbstractMatrix{Float64}, model::Model, which::Symbol=model.options.which) = eval_R!(res, point, getevaldata(model, which))
+eval_RJ(point::AbstractMatrix{Float64}, model::Model, variant::Symbol=model.options.variant) = eval_RJ(point, getevaldata(model, variant))
+eval_R!(res::AbstractVector{Float64}, point::AbstractMatrix{Float64}, model::Model, variant::Symbol=model.options.variant) = eval_R!(res, point, getevaldata(model, variant))
 @inline issssolved(model::Model) = issssolved(model.sstate)
 
 ##########################

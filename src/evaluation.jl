@@ -476,9 +476,9 @@ function refresh_med! end
 export refresh_med!
 
 # dispatcher
-refresh_med!(model::AbstractModel, which::Symbol=model.options.which) = model.dynss ? refresh_med!(model, Val(which)) : model
+refresh_med!(model::AbstractModel, variant::Symbol=model.options.variant) = model.dynss ? refresh_med!(model, Val(variant)) : model
 # catch all and issue a meaningful error message
-refresh_med!(::AbstractModel, V::Val{WHICH}) where WHICH = modelerror("Missing method to update model variant: $WHICH")
+refresh_med!(::AbstractModel, V::Val{VARIANT}) where VARIANT = modelerror("Missing method to update model variant: $VARIANT")
 # specific cases
 # refresh_med!(m::AbstractModel, ::Type{NoModelEvaluationData}) = (m.evaldata = ModelEvaluationData(m); m)
 refresh_med!(model::AbstractModel, ::Val{:default}) = (setevaldata!(model, default = ModelEvaluationData(model)); model)

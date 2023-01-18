@@ -166,7 +166,7 @@ end
 """
 function with_linearized(F::Function, model::Model; kwargs...)
     # store the evaluation data
-    which = model.options.which
+    variant = model.options.variant
     lmed = get(model.evaldata, :linearize, nothing)
     ret = try
         # linearize 
@@ -180,7 +180,7 @@ function with_linearized(F::Function, model::Model; kwargs...)
         else
             setevaldata!(model, linearize=lmed)
         end
-        model.options.which = which
+        model.options.variant = variant
         rethrow()
     end
     if lmed === nothing
@@ -188,7 +188,7 @@ function with_linearized(F::Function, model::Model; kwargs...)
     else
         setevaldata!(model, linearize=lmed)
     end
-    model.options.which = which
+    model.options.variant = variant
     return ret
 end
 
