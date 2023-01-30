@@ -253,16 +253,37 @@ macro peval(par, what)
     return esc(:(peval($par, $qwhat)))
 end
 
+struct ParamUpdateError <: Exception
+    key::Symbol
+    except::Exception
+end
+
+function Base.showerror(io::IO, ex::ParamUpdateError)
+    println(io, "While updating value for parameter ", ex.key, ":")
+    print(io, "       ")
+    showerror(io, ex.except)
+end
+
+function _update_val(params, p, key)
+    try
+        p.value = peval(params, p.link)
+    catch except
+        throw(ParamUpdateError(key, except))
+    end
+    return
+end
+
 function _update_values(params, p, key)
     # update my own value
     if p.link !== nothing
-        p.value = peval(params, p.link)
+        _update_val(params, p, key)
     end
     # update values that depend on me
     deps = copy(p.depends)
     while !isempty(deps)
-        pk = params.contents[pop!(deps)]
-        pk.value = peval(params, pk.link)
+        pk_key = pop!(deps)
+        pk = params.contents[pk_key]
+        _update_val(params, pk, pk_key)
         if !isempty(pk.depends)
             push!(deps, pk.depends...)
         end
@@ -320,7 +341,7 @@ function update_links!(params::Parameters)
     updated = false
     for (k, v) in params
         if v.link !== nothing
-            v.value = peval(params, v.link)
+            _update_val(params, v, k)
             updated = true
         end
     end
