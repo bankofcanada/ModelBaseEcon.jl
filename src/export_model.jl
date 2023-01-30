@@ -17,17 +17,17 @@ Export the model into a module file. The `name` parameter is used for the name
 of the module as well as the module file. The module file is created in the
 directory specified by the optional third argument.
 """
-function export_model(m::Model, name::AbstractString, path::AbstractString=".")
+function export_model(model::Model, name::AbstractString, path::AbstractString=".")
     if !endswith(path, ".jl")
         path = joinpath(path, name * ".jl")
     end
     open(path, "w") do fd
-        export_model(m, name, IOContext(fd, :compact => false, :limit => false))
+        export_model(model, name, IOContext(fd, :compact => false, :limit => false))
     end
     return nothing
 end
 
-function export_model(m::Model, name::AbstractString, fio::IO)
+function export_model(model::Model, name::AbstractString, fio::IO)
     _check_name(name)
     println(fio, "module ", name)
     println(fio)
@@ -48,28 +48,28 @@ function export_model(m::Model, name::AbstractString, fio::IO)
     end
 
     println(fio, "# options")
-    _print_modified_options(m.options, defaultoptions, "model.")
+    _print_modified_options(model.options, defaultoptions, "model.")
     println(fio)
 
     println(fio, "# flags")
     for fld in fieldnames(ModelFlags)
-        fval = getfield(m.flags, fld)
+        fval = getfield(model.flags, fld)
         if fval != getfield(ModelFlags(), fld)
             println(fio, "model.", fld, " = ", fval)
         end
     end
     println(fio)
 
-    if !isempty(parameters(m))
+    if !isempty(parameters(model))
         println(fio, "@parameters model begin")
-        for (n, p) in m.parameters
+        for (n, p) in model.parameters
             println(fio, "    ", n, " = ", p)
         end
         println(fio, "end # parameters")
         println(fio)
     end
 
-    allvars = m.allvars
+    allvars = model.allvars
     if !isempty(allvars)
         println(fio, "@variables model begin")
         has_exog = false
@@ -108,16 +108,16 @@ function export_model(m::Model, name::AbstractString, fio::IO)
         end
     end
 
-    if !isempty(m.autoexogenize)
+    if !isempty(model.autoexogenize)
         println(fio, "@autoexogenize model begin")
-        for (k, v) in pairs(m.autoexogenize)
+        for (k, v) in pairs(model.autoexogenize)
             println(fio, "    ", k, " = ", v)
         end
         println(fio, "end # autoexogenize")
         println(fio)
     end
 
-    alleqns = m.alleqns
+    alleqns = model.alleqns
     if !isempty(alleqns)
         println(fio, "@equations model begin")
         for eqn in alleqns
@@ -131,7 +131,7 @@ function export_model(m::Model, name::AbstractString, fio::IO)
 
     println(fio, "@initialize model")
 
-    sd = sstate(m)
+    sd = sstate(model)
     for cons in sd.constraints
         println(fio)
         println(fio, "@steadystate model ", cons)

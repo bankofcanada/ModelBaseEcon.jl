@@ -5,6 +5,7 @@ module S1
 
 using ModelBaseEcon
 model = Model()
+model.flags.linear = true
 
 @variables model a b c
 

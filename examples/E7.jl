@@ -7,6 +7,7 @@ module E7
 using ModelBaseEcon
 
 model = Model()
+model.flags.linear = false
 model.substitutions = true
 
 @parameters model begin

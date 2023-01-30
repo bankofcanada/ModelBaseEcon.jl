@@ -121,6 +121,7 @@ function update(v::ModelVariable; doc = v.doc,
     vr_type::Symbol = v.vr_type, tr_type::Symbol = v.tr_type, ss_type::Symbol = v.ss_type,
     transformation = nothing)
     if transformation !== nothing
+        @warn "Deprecation: do not specify transformation directly, specify `tr_type` instead."
         trsym = _trans2sym(transformation)
         if (tr_type == v.tr_type)
             # only transformation is explicitly given
@@ -130,7 +131,7 @@ function update(v::ModelVariable; doc = v.doc,
             tr_type = trsym
         else
             # both given and don't match
-            error("Given `transformation` is incompatible with the given `tr_type`.")
+            throw(ArgumentError("The given `transformation` $transformation is incompatible with the given `tr_type` :$tr_type."))
         end
     end
     ModelVariable(string(doc), v.name, vr_type, tr_type, ss_type, )
@@ -266,7 +267,7 @@ end
 # Transformations stuff
 
 """
-    transform(x, m::ModelVariable)
+    transform(x, var::ModelVariable)
 
 Apply the transformation associated with model variable `m` to data `x`.
 
@@ -276,7 +277,7 @@ function transform end
 export transform
 
 """
-    inverse_transform(x, m::ModelVariable)
+    inverse_transform(x, var::ModelVariable)
 
 Apply the inverse transformation associated with model variable `m` to data `x`.
 
@@ -289,8 +290,8 @@ transformation(v::ModelVariable) = transformation(_sym2trans(v.tr_type))
 inverse_transformation(v::ModelVariable) = inverse_transformation(_sym2trans(v.tr_type))
 
 # redirect to the stored transform
-transform(x, m::ModelVariable) = broadcast(transformation(m), x)
-inverse_transform(x, m::ModelVariable) = broadcast(inverse_transformation(m), x)
+transform(x, var::ModelVariable) = broadcast(transformation(var), x)
+inverse_transform(x, var::ModelVariable) = broadcast(inverse_transformation(var), x)
 
 """
     need_transform(v)

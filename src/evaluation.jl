@@ -32,12 +32,12 @@ function precompilefuncs(resid, RJ, ::Val{N}, tag) where {N}
     precompile(resid, (duals,)) || error("precompile")
     precompile(RJ, (Array{Float64,1},)) || error("precompile")
 
-    for pred in (ForwardDiff.UNARY_PREDICATES ∪ Symbol[:-, :+, :log, :exp])
+    for pred in Symbol[:isinf, :isnan, :isfinite, :iseven, :isodd, :isreal, :isinteger, :-, :+, :log, :exp]
         pred ∈ (:iseven, :isodd) || precompile(getfield(Base, pred), (Float64,)) || error("precompile")
         precompile(getfield(Base, pred), (dual,)) || error("precompile")
     end
 
-    for pred in ForwardDiff.BINARY_PREDICATES ∪ Symbol[:+, :-, :*, :/, :^]
+    for pred in Symbol[:isequal, :isless, :<, :>, :(==), :(!=), :(<=), :(>=), :+, :-, :*, :/, :^]
         precompile(getfield(Base, pred), (Float64, Float64)) || error("precompile")
         precompile(getfield(Base, pred), (dual, Float64)) || error("precompile")
         precompile(getfield(Base, pred), (Float64, dual)) || error("precompile")
@@ -75,7 +75,7 @@ let funcsyms_state = 0
 end
 function funcsyms(mod::Module)
     fn1, fn2 = mod.eval(quote
-        let nms = names(@__MODULE__; all = true)
+        let nms = names(@__MODULE__; all=true)
             num = $(@__MODULE__).funcsyms_counter()
             local fn1 = Symbol("resid_", num)
             local fn2 = Symbol("RJ_", num)
@@ -147,7 +147,7 @@ together with a `DiffResult` and a `GradientConfig` used by `ForwardDiff`. Its
 call is defined here and computes the residual and the gradient.
 """
 function initfuncs(mod::Module)
-    if :MyTag ∉ names(mod; all = true)
+    if :MyTag ∉ names(mod; all=true)
         mod.eval(quote
             struct MyTag end
             struct EquationEvaluator{FN} <: Function
@@ -171,6 +171,8 @@ function initfuncs(mod::Module)
     return nothing
 end
 
+_index_of_var(var, allvars) = indexin([var], allvars)[1]
+
 ###########################################################
 # Part 2: Evaluation data for models and equations
 
@@ -180,8 +182,8 @@ end
 # selectively linearized equations.
 
 abstract type AbstractEqnEvalData end
-eval_RJ(eqn, x) = eqn.eval_RJ(x)
-eval_resid(eqn, x) = eqn.eval_resid(x)
+eval_RJ(eqn::AbstractEquation, x) = eqn.eval_RJ(x)
+eval_resid(eqn::AbstractEquation, x) = eqn.eval_resid(x)
 
 abstract type DynEqnEvalData <: AbstractEqnEvalData end
 struct DynEqnEvalData0 <: DynEqnEvalData end
@@ -195,7 +197,7 @@ function _fill_ss_values(eqn, ssvals, allvars)
     for (i, v) in enumerate(keys(eqn.ssrefs))
         vi = _index_of_var(v, allvars)
         ret[i] = ssvals[2vi-1]
-        if !isapprox(ssvals[2vi], 0, atol = 1e-12)
+        if !isapprox(ssvals[2vi], 0, atol=1e-12)
             push!(bad, v)
         end
     end
@@ -211,13 +213,13 @@ function DynEqnEvalData(eqn, model)
     )
 end
 
-eval_resid(eqn, x, ed::DynEqnEvalDataN) = eqn.eval_resid(vcat(x, ed.ss))
-@inline function eval_RJ(eqn, x, ed::DynEqnEvalDataN)
+eval_resid(eqn::AbstractEquation, x, ed::DynEqnEvalDataN) = eqn.eval_resid(vcat(x, ed.ss))
+@inline function eval_RJ(eqn::AbstractEquation, x, ed::DynEqnEvalDataN)
     R, J = eqn.eval_RJ(vcat(x, ed.ss))
     return (R, J[1:length(x)])
 end
-eval_resid(eqn, x, ::DynEqnEvalData0) = eqn.eval_resid(x)
-eval_RJ(eqn, x, ::DynEqnEvalData0) = eqn.eval_RJ(x)
+eval_resid(eqn::AbstractEquation, x, ::DynEqnEvalData0) = eqn.eval_resid(x)
+eval_RJ(eqn::AbstractEquation, x, ::DynEqnEvalData0) = eqn.eval_RJ(x)
 
 
 """
@@ -253,7 +255,7 @@ See also: [`eval_RJ`](@ref)
 """
 function eval_R! end
 export eval_R!
-eval_R!(res::AbstractVector{Float64}, point::AbstractMatrix{Float64}, ::AMED) where {AMED<:AbstractModelEvaluationData} = throw(NotImplementedError(AMED))
+eval_R!(res::AbstractVector{Float64}, point::AbstractMatrix{Float64}, ::AMED) where {AMED<:AbstractModelEvaluationData} = modelerror(NotImplementedError, AMED)
 
 """
     eval_RJ(point::AbstractArray{Float64, 2}, ::MED) where MED <: AbstractModelEvaluationData
@@ -277,21 +279,7 @@ See also: [`eval_R!`](@ref)
 """
 function eval_RJ end
 export eval_RJ
-eval_RJ(point::AbstractMatrix{Float64}, ::AMED) where {AMED<:AbstractModelEvaluationData} = throw(NotImplementedError(AMED))
-
-
-##### Model Evaluation Data that doesn't exist.
-"""
-    struct NoModelEvaluationData <: AbstractModelEvaluationData
-
-Specific type that indicates that the model cannot be evaluated. This is used as
-a placeholder while the model is being defined. During initialization, the
-actual model evaluation data is created.
-"""
-struct NoModelEvaluationData <: AbstractModelEvaluationData end
-const NoMED = NoModelEvaluationData()
-eval_R!(res::AbstractVector{Float64}, point::AbstractMatrix{Float64}, ::NoModelEvaluationData) = throw(ModelNotInitError())
-eval_RJ(point::AbstractMatrix{Float64}, ::NoModelEvaluationData) = throw(ModelNotInitError())
+eval_RJ(point::AbstractMatrix{Float64}, ::AMED) where {AMED<:AbstractModelEvaluationData} = modelerror(NotImplementedError, AMED)
 
 ##### The standard Model Evaluation Data used in the general case.
 """
@@ -310,8 +298,6 @@ struct ModelEvaluationData{E<:AbstractEquation,I,D<:DynEqnEvalData} <: AbstractM
     R::Vector{Float64}
     rowinds::Vector{Vector{Int64}}
 end
-
-_index_of_var(var, allvars) = indexin([var], allvars)[1]
 
 @inline function _update_eqn_params!(ee, params)
     if ee.rev[] !== params.rev[]
@@ -349,7 +335,7 @@ function ModelEvaluationData(model::AbstractModel)
         alleqns, allinds, similar(M, Float64), Vector{Float64}(undef, neqns), rowinds)
 end
 
-function eval_R!(res::AbstractVector{Float64}, point::Matrix{Float64}, med::ModelEvaluationData)
+function eval_R!(res::AbstractVector{Float64}, point::AbstractMatrix{Float64}, med::ModelEvaluationData)
     for (i, eqn, inds, ed) in zip(1:length(med.alleqns), med.alleqns, med.allinds, med.eedata)
         _update_eqn_params!(eqn.eval_resid, med.params[])
         res[i] = eval_resid(eqn, point[inds], ed)
@@ -388,8 +374,8 @@ mutable struct LinEqnEvalData <: AbstractEqnEvalData
     LinEqnEvalData(r, g, s) = new(Float64(r), Float64[g...], Float64[s...])
 end
 
-eval_resid(eqn, x, led::LinEqnEvalData) = led.resid + sum(led.grad .* (x - led.sspt))
-eval_RJ(eqn, x, led::LinEqnEvalData) = (eval_resid(eqn, x, led), led.grad)
+eval_resid(eqn::AbstractEquation, x, led::LinEqnEvalData) = led.resid + sum(led.grad .* (x - led.sspt))
+eval_RJ(eqn::AbstractEquation, x, led::LinEqnEvalData) = (eval_resid(eqn, x, led), led.grad)
 
 function LinEqnEvalData(eqn, sspt, ed::DynEqnEvalData)
     return LinEqnEvalData(eval_RJ(eqn, sspt, ed)..., sspt)
@@ -405,17 +391,17 @@ function SelectiveLinearizationMED(model::AbstractModel)
 
     sstate = model.sstate
     if !issssolved(sstate)
-        error("Steady state solution is not available.")
+        linearizationerror("Steady state solution is not available.")
     end
     if maximum(abs, sstate.values[2:2:end]) > getoption(model, :tol, 1e-12)
-        error("Steady state solution has non-zero slope. Not yet implemented.")
+        linearizationerror("Steady state solution has non-zero slope. Not yet implemented.")
     end
 
     med = ModelEvaluationData(model)
 
     sspt = Matrix{Float64}(undef, 1 + model.maxlag + model.maxlead, length(model.varshks))
     for (i, v) in enumerate(model.varshks)
-        sspt[:, i] = sstate[v][-model.maxlag:model.maxlead, ref = 0]
+        sspt[:, i] = transform(sstate[v][-model.maxlag:model.maxlead, ref=0], v)
     end
     eedata = Vector{AbstractEqnEvalData}(undef, length(med.alleqns))
     num_lin = 0
@@ -440,7 +426,7 @@ function SelectiveLinearizationMED(model::AbstractModel)
 end
 
 
-function eval_R!(res::AbstractVector{Float64}, point::Matrix{Float64}, slmed::SelectiveLinearizationMED)
+function eval_R!(res::AbstractVector{Float64}, point::AbstractMatrix{Float64}, slmed::SelectiveLinearizationMED)
     med = slmed.med
     for (i, eqn, inds, eed) in zip(1:length(med.alleqns), med.alleqns, med.allinds, slmed.eedata)
         islin(eqn) || _update_eqn_params!(eqn.eval_resid, med.params[])
@@ -470,7 +456,7 @@ current steady state solution while the rest of the eq
     
 """
 function selective_linearize!(model::AbstractModel)
-    model.evaldata = SelectiveLinearizationMED(model)
+    setevaldata!(model, selective_linearize=SelectiveLinearizationMED(model))
     return model
 end
 export selective_linearize!
@@ -490,10 +476,10 @@ function refresh_med! end
 export refresh_med!
 
 # dispatcher
-refresh_med!(m::AbstractModel) = refresh_med!(m, typeof(m.evaldata))
+refresh_med!(model::AbstractModel, variant::Symbol=model.options.variant) = model.dynss ? refresh_med!(model, Val(variant)) : model
 # catch all and issue a meaningful error message
-refresh_med!(::AbstractModel, T::Type{<:AbstractModelEvaluationData}) = error("Missing method to update MED of type $T")
+refresh_med!(::AbstractModel, V::Val{VARIANT}) where VARIANT = modelerror("Missing method to update model variant: $VARIANT")
 # specific cases
-refresh_med!(m::AbstractModel, ::Type{NoModelEvaluationData}) = (m.evaldata = ModelEvaluationData(m); m)
-refresh_med!(m::AbstractModel, ::Type{<:ModelEvaluationData}) = (m.evaldata = ModelEvaluationData(m); m)
-refresh_med!(m::AbstractModel, ::Type{SelectiveLinearizationMED}) = selective_linearize!(m)
+# refresh_med!(m::AbstractModel, ::Type{NoModelEvaluationData}) = (m.evaldata = ModelEvaluationData(m); m)
+refresh_med!(model::AbstractModel, ::Val{:default}) = (setevaldata!(model, default = ModelEvaluationData(model)); model)
+refresh_med!(model::AbstractModel, ::Val{:selective_linearize}) = selective_linearize!(model)

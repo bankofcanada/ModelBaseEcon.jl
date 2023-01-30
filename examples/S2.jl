@@ -5,6 +5,7 @@ module S2
 using ModelBaseEcon
 
 model = Model()
+model.flags.linear = false
 
 @parameters model begin
     α = 0.5

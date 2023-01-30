@@ -13,6 +13,7 @@ const defaultoptions = Options(
     tol=1e-10,
     maxiter=20,
     verbose=false,
+    variant=:default,
     warn=Options(no_t=true)
 )
 
@@ -74,26 +75,56 @@ mutable struct Model <: AbstractModel
     auxvars::Vector{ModelVariable}
     # auxiliary equations
     auxeqns::Vector{Equation}
-    # ssdata::SteadyStateData
-    evaldata::AbstractModelEvaluationData
+    # data related to evaluating residuals and Jacobian of the model equations
+    evaldata::LittleDict{Symbol,AbstractModelEvaluationData}
+    # data slot to be used by the solver (in StateSpaceEcon)
+    solverdata::LittleDict{Symbol,Any}
     # 
     # constructor of an empty model
     Model(opts::Options) = new(merge(defaultoptions, opts),
-        ModelFlags(), SteadyStateData(), false, [], [], [], Parameters(), Dict(), 0, 0, [], [], NoMED)
+        ModelFlags(), SteadyStateData(), false, [], [], [], Parameters(), Dict(), 0, 0, [], [],
+        LittleDict{Symbol,AbstractModelEvaluationData}(), LittleDict{Symbol,Any}())
     Model() = new(deepcopy(defaultoptions),
-        ModelFlags(), SteadyStateData(), false, [], [], [], Parameters(), Dict(), 0, 0, [], [], NoMED)
+        ModelFlags(), SteadyStateData(), false, [], [], [], Parameters(), Dict(), 0, 0, [], [],
+        LittleDict{Symbol,AbstractModelEvaluationData}(), LittleDict{Symbol,Any}())
 end
 
-auxvars(m::Model) = getfield(m, :auxvars)
-nauxvars(m::Model) = length(auxvars(m))
+auxvars(model::Model) = getfield(model, :auxvars)
+nauxvars(model::Model) = length(auxvars(model))
 
 # We have to specialize allvars() nallvars() because we have auxvars here
-allvars(m::Model) = vcat(variables(m), shocks(m), auxvars(m))
-nallvars(m::Model) = length(variables(m)) + length(shocks(m)) + length(auxvars(m))
+allvars(model::Model) = vcat(variables(model), shocks(model), auxvars(model))
+nallvars(model::Model) = length(variables(model)) + length(shocks(model)) + length(auxvars(model))
 
-alleqns(m::Model) = vcat(equations(m), getfield(m, :auxeqns))
-nalleqns(m::Model) = length(equations(m)) + length(getfield(m, :auxeqns))
+alleqns(model::Model) = vcat(equations(model), getfield(model, :auxeqns))
+nalleqns(model::Model) = length(equations(model)) + length(getfield(model, :auxeqns))
 
+hasevaldata(model::Model, variant::Symbol) = haskey(model.evaldata, variant)
+function getevaldata(model::Model, variant::Symbol=model.options.variant, errorwhenmissing::Bool=true)
+    ed = get(model.evaldata, variant, missing)
+    if errorwhenmissing && ed === missing
+        variant === :default && modelerror(ModelNotInitError)
+        modelerror(EvalDataNotFound, variant)
+    end
+    return ed
+end
+function setevaldata!(model::Model; kwargs...)
+    for (key, value) in kwargs
+        push!(model.evaldata, key => value)
+        model.options.variant = key
+    end
+    return nothing
+end
+
+hassolverdata(model::Model, solver::Symbol) = haskey(model.solverdata, solver)
+function getsolverdata(model::Model, solver::Symbol, errorwhenmissing::Bool=true)
+    sd = get(model.solverdata, solver, missing)
+    if errorwhenmissing && sd === missing
+        modelerror(SolverDataNotFound, solver)
+    end
+    return sd
+end
+setsolverdata!(model::Model; kwargs...) = push!(model.solverdata, (key => value for (key, value) in kwargs)...)
 
 ################################################################
 # Specialize Options methods to the Model type
@@ -127,6 +158,8 @@ function Base.getproperty(model::Model, name::Symbol)
         return length(getfield(model, :auxvars))
     elseif name == :allvars
         return vcat(getfield(model, :variables), getfield(model, :shocks), getfield(model, :auxvars))
+    elseif name == :nvarshks
+        return length(getfield(model, :shocks)) + length(getfield(model, :variables))
     elseif name == :varshks
         return vcat(getfield(model, :variables), getfield(model, :shocks))
     elseif name == :exogenous
@@ -154,8 +187,8 @@ function Base.getproperty(model::Model, name::Symbol)
         if ind !== nothing
             return getindex(getfield(model, :auxvars), ind)
         end
-        error("This Model doesn't have property $name")
     end
+    return getfield(model, name)
 end
 
 function Base.propertynames(model::Model, private::Bool=false)
@@ -178,22 +211,31 @@ function Base.setproperty!(model::Model, name::Symbol, val::Any)
     else
         ind = indexin([name], getfield(model, :variables))[1]
         if ind !== nothing
+            if !isa(val, Union{Symbol,ModelVariable})
+                error("Cannot assign a $(typeof(val)) as a model variable. Use `m.var = update(m.var, ...)` to update a variable.")
+            end
             if getindex(getfield(model, :variables), ind) != val
-                throw(ArgumentError("Cannot replace variable with a different name. Use `m.var = update(m.var, ...)` to update variable."))
+                error("Cannot replace a variable with a different name. Use `m.var = update(m.var, ...)` to update a variable.")
             end
             return setindex!(getfield(model, :variables), val, ind)
         end
         ind = indexin([name], getfield(model, :shocks))[1]
         if ind !== nothing
+            if !isa(val, Union{Symbol,ModelVariable})
+                error("Cannot assign a $(typeof(val)) as a model shock. Use `m.shk = update(m.shk, ...)` to update a shock.")
+            end
             if getindex(getfield(model, :shocks), ind) != val
-                throw(ArgumentError("Cannot replace shock with a different name. Use `m.shk = update(m.shk, ...)` to update shock."))
+                error("Cannot replace a shock with a different name. Use `m.shk = update(m.shk, ...)` to update a shock.")
             end
             return setindex!(getfield(model, :shocks), val, ind)
         end
         ind = indexin([name], getfield(model, :auxvars))[1]
         if ind !== nothing
+            if !isa(val, Union{Symbol,ModelVariable})
+                error("Cannot assign a $(typeof(val)) as an aux variable. Use `m.aux = update(m.aux, ...)` to update an aux variable.")
+            end
             if getindex(getfield(model, :auxvars), ind) != val
-                throw(ArgumentError("Cannot replace aux variable with a different name. Use `m.aux = update(m.aux, ...)` to update aux variable."))
+                error("Cannot replace an aux variable with a different name. Use `m.aux = update(m.aux, ...)` to update an aux variable.")
             end
             return setindex!(getfield(model, :auxvars), val, ind)
         end
@@ -269,7 +311,7 @@ function fullprint(io::IO, model::Model)
         print(io, " with ", length(model.auxeqns), " auxiliary equations")
     end
     print(io, ": \n")
-    function print_aux_eq(bi) 
+    function print_aux_eq(bi)
         v = model.auxeqns[bi]
         for (var, ti) in keys(v.tsrefs)
             ai = _index_of_var(var, model.allvars)
@@ -502,7 +544,7 @@ Define model equations. See [`Equation`](@ref).
 """
 macro equations(model, block::Expr)
     if block.head != :block
-        error("A list of equations mush be within a begin-end block")
+        modelerror("A list of equations must be within a begin-end block")
     end
     ret = Expr(:block)
     eqn = Expr(:block)
@@ -914,7 +956,7 @@ function add_equation!(model::Model, expr::Expr; modelmodule::Module=moduleof(mo
         model.maxlag = max(model.maxlag, eqn.maxlag)
         model.maxlead = max(model.maxlead, eqn.maxlead)
     end
-    model.evaldata = NoMED
+    empty!(model.evaldata)
     return model
 end
 @assert precompile(add_equation!, (Model, Expr))
@@ -937,10 +979,14 @@ macro.
 """
 function initialize!(model::Model, modelmodule::Module)
     # Note: we cannot use moduleof here, because the equations are not initialized yet.
-    if model.evaldata !== NoMED
-        error("Model already initialized.")
+    if !isempty(model.evaldata)
+        modelerror("Model already initialized.")
     end
     initfuncs(modelmodule)
+    samename = Symbol[intersect(model.allvars, keys(model.parameters))...]
+    if !isempty(samename)
+        modelerror("Found $(length(samename)) names that are both variables and parameters: $(join(samename, ", "))")
+    end
     model.parameters.mod[] = modelmodule
     varshks = model.varshks
     model.variables = varshks[.!isshock.(varshks)]
@@ -958,7 +1004,7 @@ function initialize!(model::Model, modelmodule::Module)
     if !model.dynss
         # Note: we cannot set any other evaluation method yet - they require steady
         # state solution and we don't have that yet.
-        model.evaldata = ModelEvaluationData(model)
+        setevaldata!(model; default=ModelEvaluationData(model))
     else
         # if dynss is true, then we need the steady state even for the standard MED
         nothing
@@ -982,9 +1028,9 @@ end
 
 ##########################
 
-eval_RJ(x::AbstractMatrix{Float64}, m::Model) = eval_RJ(x, m.evaldata)
-eval_R!(r::AbstractVector{Float64}, x::AbstractMatrix{Float64}, m::Model) = eval_R!(r, x, m.evaldata)
-@inline issssolved(m::Model) = issssolved(m.sstate)
+eval_RJ(point::AbstractMatrix{Float64}, model::Model, variant::Symbol=model.options.variant) = eval_RJ(point, getevaldata(model, variant))
+eval_R!(res::AbstractVector{Float64}, point::AbstractMatrix{Float64}, model::Model, variant::Symbol=model.options.variant) = eval_R!(res, point, getevaldata(model, variant))
+@inline issssolved(model::Model) = issssolved(model.sstate)
 
 ##########################
 
@@ -1024,11 +1070,11 @@ function update_auxvars(data::AbstractArray{Float64,2}, model::Model;
     (nt, nv) = size(data)
     nvarshk = length(model.variables) + length(model.shocks)
     if nv ∉ (nvarshk, nvarshk + nauxs)
-        error("Incorrect number of columns $nv. Expected $nvarshk or $(nvarshk + nauxs).")
+        modelerror("Incorrect number of columns $nv. Expected $nvarshk or $(nvarshk + nauxs).")
     end
     mintimes = 1 + model.maxlag + model.maxlead
     if nt < mintimes
-        error("Insufficient time periods $nt. Expected $mintimes or more.")
+        modelerror("Insufficient time periods $nt. Expected $mintimes or more.")
     end
     allvars = model.allvars
     result = [data[:, 1:nvarshk] zeros(nt, nauxs)]
