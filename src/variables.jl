@@ -6,7 +6,6 @@
 ##################################################################################
 
 export ModelVariable, ModelSymbol
-export update
 
 const doc_macro = MacroTools.unblock(quote
     "hello"
