@@ -1,11 +1,11 @@
 
 @using_example S1
 @testset "dynss" begin
-    m = S1.model
+    m = deepcopy(S1.model)
     @test m.dynss
-    @test isempty(m.equations[1].ssrefs)
-    @test !isempty(m.equations[2].ssrefs)
-    @test !isempty(m.equations[3].ssrefs)
+    @test isempty(m.equations[:_EQ1].ssrefs)
+    @test !isempty(m.equations[:_EQ2].ssrefs)
+    @test !isempty(m.equations[:_EQ3].ssrefs)
     @test_logs (:warn, r".*steady\s+state.*"i) refresh_med!(m)
     ss = m.sstate
     fill!(ss.values, 0)
@@ -64,9 +64,9 @@ end
 
 @using_example S2
 @testset "dynss2" begin
-    m = S2.model
+    m = deepcopy(S2.model)
     # make sure @sstate(x) was transformed
-    @test m.equations[1].ssrefs[:x] === Symbol("#log#x#ss#")
+    @test m.equations[:_EQ1].ssrefs[:x] === Symbol("#log#x#ss#")
 
     xi = ModelBaseEcon._index_of_var(:x, m.variables)
     for i = 1:10

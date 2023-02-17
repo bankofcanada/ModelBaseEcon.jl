@@ -63,7 +63,7 @@ mutable struct Model <: AbstractModel
     # shock variables
     shocks::Vector{ModelVariable}
     # transition equations
-    equations::Vector{Equation}
+    equations::OrderedDict{Symbol,Equation}
     # parameters 
     parameters::Parameters
     # auto-exogenize mapping of variables and shocks
@@ -74,7 +74,7 @@ mutable struct Model <: AbstractModel
     # auxiliary variables
     auxvars::Vector{ModelVariable}
     # auxiliary equations
-    auxeqns::Vector{Equation}
+    auxeqns::OrderedDict{Symbol,Equation}
     # data related to evaluating residuals and Jacobian of the model equations
     evaldata::LittleDict{Symbol,AbstractModelEvaluationData}
     # data slot to be used by the solver (in StateSpaceEcon)
@@ -82,10 +82,10 @@ mutable struct Model <: AbstractModel
     # 
     # constructor of an empty model
     Model(opts::Options) = new(merge(defaultoptions, opts),
-        ModelFlags(), SteadyStateData(), false, [], [], [], Parameters(), Dict(), 0, 0, [], [],
+        ModelFlags(), SteadyStateData(), false, [], [], OrderedDict{Symbol,Equation}(), Parameters(), Dict(), 0, 0, [], OrderedDict{Symbol,Equation}(),
         LittleDict{Symbol,AbstractModelEvaluationData}(), LittleDict{Symbol,Any}())
     Model() = new(deepcopy(defaultoptions),
-        ModelFlags(), SteadyStateData(), false, [], [], [], Parameters(), Dict(), 0, 0, [], [],
+        ModelFlags(), SteadyStateData(), false, [], [], OrderedDict{Symbol,Equation}(), Parameters(), Dict(), 0, 0, [], OrderedDict{Symbol,Equation}(),
         LittleDict{Symbol,AbstractModelEvaluationData}(), LittleDict{Symbol,Any}())
 end
 
@@ -96,7 +96,8 @@ nauxvars(model::Model) = length(auxvars(model))
 allvars(model::Model) = vcat(variables(model), shocks(model), auxvars(model))
 nallvars(model::Model) = length(variables(model)) + length(shocks(model)) + length(auxvars(model))
 
-alleqns(model::Model) = vcat(equations(model), getfield(model, :auxeqns))
+# alleqns(model::Model) = vcat(collect(values(equations(model))), collect(values(getfield(model, :auxeqns))))
+alleqns(model::Model) = OrderedDict{Symbol,Equation}(key => eqn for (key, eqn) in vcat(pairs(equations(model))..., pairs(getfield(model, :auxeqns))...))
 nalleqns(model::Model) = length(equations(model)) + length(getfield(model, :auxeqns))
 
 hasevaldata(model::Model, variant::Symbol) = haskey(model.evaldata, variant)
@@ -167,7 +168,7 @@ function Base.getproperty(model::Model, name::Symbol)
     elseif name == :nexog
         return sum(isexog, getfield(model, :variables))
     elseif name == :alleqns
-        return vcat(getfield(model, :equations), getfield(model, :auxeqns))
+        return OrderedDict{Symbol,Equation}(key => eqn for (key, eqn) in vcat(pairs(equations(model))..., pairs(getfield(model, :auxeqns))...))
     elseif haskey(getfield(model, :parameters), name)
         return getproperty(getfield(model, :parameters), name)
     elseif name ∈ getfield(model, :options)
@@ -311,23 +312,15 @@ function fullprint(io::IO, model::Model)
         print(io, " with ", length(model.auxeqns), " auxiliary equations")
     end
     print(io, ": \n")
-    function print_aux_eq(bi)
-        v = model.auxeqns[bi]
-        for (var, ti) in keys(v.tsrefs)
-            ai = _index_of_var(var, model.allvars)
-            ci = ai - nvarshk
-            (1 <= ci < bi) && print_aux_eq(ci)
-        end
-        println(io, "   |->A$bi:   ", v)
+    function print_aux_eq(k)
+        v = model.auxeqns[k]
+        println(io, "   \t|->:\t", v.expr)
     end
-    for (i, v) in enumerate(model.equations)
-        println(io, "   E$i:   ", v)
+    for (key, eq) in model.equations
+        println(io, "   $key:\t", eq)
         allvars = model.allvars
-        for (var, ti) in keys(v.tsrefs)
-            ai = _index_of_var(var, allvars)
-            if ai > nvarshk
-                print_aux_eq(ai - nvarshk)
-            end
+        for aux_key in get_aux_equation_keys(model, key)
+            print_aux_eq(aux_key)
         end
     end
 end
@@ -553,7 +546,7 @@ macro equations(model, block::Expr)
             push!(eqn.args, expr)
         else
             push!(eqn.args, expr)
-            push!(ret.args, :(push!($model.equations, $(Meta.quot(eqn)))))
+            push!(ret.args, :(push!($model.equations, Symbol("_EQ"*string(length(keys($model.equations))+1)) => $(Meta.quot(eqn)))))
             eqn = Expr(:block)
         end
     end
@@ -593,7 +586,8 @@ function process_equation(model::Model, expr::Expr;
     modelmodule::Module=moduleof(model),
     line=LineNumberNode(0),
     flags=EqnFlags(),
-    doc="")
+    doc="",
+    eqn_name=:_unnamed_equation_)
 
     # a list of all known time series 
     allvars = model.allvars
@@ -815,10 +809,15 @@ function process_equation(model::Model, expr::Expr;
     tssyms = values(tsrefs)
     sssyms = values(ssrefs)
     psyms = values(prefs)
+    # name
+    if eqn_name == :_unnamed_equation_
+        throw(error("No equation name specified"))
+        # eqn_name = get_next_equation_name(model)
+    end
     funcs_expr = makefuncs(residual, tssyms, sssyms, psyms, modelmodule)
     resid, RJ = modelmodule.eval(funcs_expr)
     _update_eqn_params!(resid, model.parameters)
-    return Equation(doc, flags, expr, residual, tsrefs, ssrefs, prefs, resid, RJ)
+    return Equation(doc, eqn_name, flags, expr, residual, tsrefs, ssrefs, prefs, resid, RJ)
 end
 
 
@@ -834,9 +833,9 @@ Equation() instance for it, and add it to the model instance.
 Usually there's no need to call this function directly. It is called during
 [`@initialize`](@ref).
 """
-function add_equation!(model::Model, expr::Expr; modelmodule::Module=moduleof(model))
+function add_equation!(model::Model, eqn_key::Symbol, expr::Expr; modelmodule::Module=moduleof(model))
     source = LineNumberNode[]
-    auxeqns = Expr[]
+    auxeqns = OrderedDict{Symbol, Expr}()
     flags = EqnFlags()
     doc = ""
 
@@ -889,6 +888,10 @@ function add_equation!(model::Model, expr::Expr; modelmodule::Module=moduleof(mo
             rhs = preprocess(rhs)
             return Expr(:(=), lhs, rhs)
         end
+        if ex.head == :call && ex.args[1] == :(=>)
+            eqn_key = ex.args[2].value
+            return preprocess(ex.args[3])
+        end
         # recursively preprocess all arguments
         ret = Expr(ex.head)
         for i in eachindex(ex.args)
@@ -924,7 +927,8 @@ function add_equation!(model::Model, expr::Expr; modelmodule::Module=moduleof(mo
                         @goto skip_substitution
                     end
                 end
-                aux_expr = process_equation(model, Expr(:(=), arg, 0); modelmodule=modelmodule)
+                aux_name = Symbol("$(eqn_key)_AUX$(length(auxeqns)+1)")
+                aux_expr = process_equation(model, Expr(:(=), arg, 0); modelmodule=modelmodule, eqn_name=aux_name)
                 if isempty(aux_expr.tsrefs)
                     # arg doesn't contain any variables, no need for substitution
                     @goto skip_substitution
@@ -932,7 +936,7 @@ function add_equation!(model::Model, expr::Expr; modelmodule::Module=moduleof(mo
                 # substitute log(something) with auxN and add equation exp(auxN) = something
                 push!(model.auxvars, :new)
                 model.auxvars[end] = auxs = Symbol("aux", model.nauxs)
-                push!(auxeqns, Expr(:(=), Expr(:call, :exp, Expr(:ref, auxs, :t)), arg))
+                push!(auxeqns, aux_name => Expr(:(=), Expr(:call, :exp, Expr(:ref, auxs, :t)), arg))
                 return Expr(:ref, auxs, :t)
                 @label skip_substitution
                 nothing
@@ -945,27 +949,27 @@ function add_equation!(model::Model, expr::Expr; modelmodule::Module=moduleof(mo
     if isempty(source)
         push!(source, LineNumberNode(0))
     end
-    eqn = process_equation(model, new_expr; modelmodule=modelmodule, line=source[1], flags=flags, doc=doc)
-    push!(model.equations, eqn)
+    eqn = process_equation(model, new_expr; modelmodule=modelmodule, line=source[1], flags=flags, doc=doc, eqn_name=eqn_key)
+    push!(model.equations, eqn.name => eqn)
     model.maxlag = max(model.maxlag, eqn.maxlag)
     model.maxlead = max(model.maxlead, eqn.maxlead)
     model.dynss = model.dynss || !isempty(eqn.ssrefs)
-    for i ∈ eachindex(auxeqns)
-        eqn = process_equation(model, auxeqns[i]; modelmodule=modelmodule, line=source[1])
-        push!(model.auxeqns, eqn)
+    for (k, eq) ∈ auxeqns
+        eqn = process_equation(model, eq; modelmodule=modelmodule, line=source[1], eqn_name=k)
+        push!(model.auxeqns, eqn.name => eqn)
         model.maxlag = max(model.maxlag, eqn.maxlag)
         model.maxlead = max(model.maxlead, eqn.maxlead)
     end
     empty!(model.evaldata)
     return model
 end
-@assert precompile(add_equation!, (Model, Expr))
+@assert precompile(add_equation!, (Model, Symbol, Expr))
 
 
 ############################
 ### Initialization routines
 
-export @initialize
+export @initialize, @reinitialize
 
 """
     initialize!(model, modelmodule)
@@ -992,12 +996,12 @@ function initialize!(model::Model, modelmodule::Module)
     model.variables = varshks[.!isshock.(varshks)]
     model.shocks = varshks[isshock.(varshks)]
     empty!(model.auxvars)
-    eqns = [e.expr for e in model.equations]
+    eqns = deepcopy(model.equations)
     empty!(model.equations)
     empty!(model.auxeqns)
     model.dynss = false
-    for e in eqns
-        add_equation!(model, e; modelmodule=modelmodule)
+    for (key, e) in eqns
+        add_equation!(model, key, e.expr; modelmodule=modelmodule)
     end
     initssdata!(model)
     update_links!(model.parameters)
@@ -1012,6 +1016,37 @@ function initialize!(model::Model, modelmodule::Module)
     return nothing
 end
 
+function reinitialize!(model::Model, modelmodule::Module)
+    initfuncs(modelmodule)
+    # stoptimer()
+    # inittimer()
+    model.dynss = false
+    for (key, e) in model.equations
+        # println(e.eval_resid)
+        if e.eval_resid == eqnnotready
+            remove_aux_equations!(model, key)
+            remove_sstate_equations!(model, key)
+            # remove!(model.equations, e)
+            # println("Adding equation")
+            # @timer "add_equation" 
+            add_equation!(model, key, e.expr; modelmodule=modelmodule)
+        end
+    end
+    updatessdata!(model)
+    update_links!(model.parameters)
+    if !model.dynss
+        # Note: we cannot set any other evaluation method yet - they require steady
+        # state solution and we don't have that yet.
+        setevaldata!(model; default=ModelEvaluationData(model))
+    else
+        # if dynss is true, then we need the steady state even for the standard MED
+        nothing
+    end
+    # stoptimer()
+    # printtimer()
+    return nothing
+end
+
 """
     @initialize model
 
@@ -1023,6 +1058,13 @@ macro initialize(model::Symbol)
     # __module__ is the module where this macro is called (the module where the model exists)
     return quote
         $(@__MODULE__).initialize!($(model), $(__module__))
+    end |> esc
+end
+macro reinitialize(model::Symbol)
+    # @__MODULE__ is this module (ModelBaseEcon)
+    # __module__ is the module where this macro is called (the module where the model exists)
+    return quote
+        $(@__MODULE__).reinitialize!($(model), $(__module__))
     end |> esc
 end
 
@@ -1078,16 +1120,38 @@ function update_auxvars(data::AbstractArray{Float64,2}, model::Model;
     end
     allvars = model.allvars
     result = [data[:, 1:nvarshk] zeros(nt, nauxs)]
-    for (i, eqn) in enumerate(model.auxeqns)
+    aux_eqn_count = 0
+    for (k, eqn) in model.auxeqns
+        aux_eqn_count += 1
         for t in (eqn.maxlag+1):(nt-eqn.maxlead)
             idx = [CartesianIndex((t + ti, _index_of_var(var, allvars))) for (var, ti) in keys(eqn.tsrefs)]
             res = eqn.eval_resid(result[idx])
+            # TODO: what is this logic?
             if res < 1.0
-                result[t, nvarshk+i] = log(1.0 - res)
+                result[t, nvarshk+aux_eqn_count] = log(1.0 - res)
             else
-                result[t, nvarshk+i] = default
+                result[t, nvarshk+aux_eqn_count] = default
             end
         end
     end
     return result
+end
+
+function get_aux_equation_keys(model::Model, eqn_key::Symbol)
+    key_string = string(eqn_key)
+    aux_keys = filter(x -> contains(string(x), key_string), keys(model.auxeqns))
+    return aux_keys
+end
+
+function remove_aux_equations!(model::Model, key::Symbol)
+    for k in get_aux_equation_keys(model, key)
+        delete!(model.auxeqns, k)
+    end
+end
+
+function remove_sstate_equations!(model::Model, key::Symbol)
+    ss = sstate(model)
+    if key ∈ keys(ss.equations)
+        delete!(ss.equations, key)
+    end
 end

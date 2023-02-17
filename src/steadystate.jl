@@ -22,6 +22,7 @@ constraints.
 """
 struct SteadyStateEquation <: AbstractEquation
     type::Symbol
+    name::Symbol
     vinds::Vector{Int64}
     vsyms::Vector{Symbol}
     expr::ExtExpr
@@ -171,11 +172,11 @@ struct SteadyStateData
     "`mask[i] == true if and only if `values[i]` holds the steady state value."
     mask::BitArray{1}
     "Steady state equations derived from the dynamic system."
-    equations::Vector{SteadyStateEquation}
+    equations::LittleDict{Symbol,SteadyStateEquation}
     "Steady state equations explicitly added with @steadystate."
-    constraints::Vector{SteadyStateEquation}
+    constraints::LittleDict{Symbol,SteadyStateEquation}
     # default constructor
-    SteadyStateData() = new([], [], [], [], [])
+    SteadyStateData() = new([], [], [], LittleDict{Symbol,SteadyStateEquation}(), LittleDict{Symbol,SteadyStateEquation}())
 end
 
 @inline function Base.push!(ssd::SteadyStateData, var, vars...)
@@ -209,7 +210,7 @@ Return a list of all steady state equations.
 The list contains all explicitly added steady state constraints and all
 equations derived from the dynamic system.
 """
-alleqns(ssd::SteadyStateData) = vcat(ssd.constraints, ssd.equations,)
+alleqns(ssd::SteadyStateData) = LittleDict{Symbol, SteadyStateEquation}(key => eqn for (key, eqn) in vcat(pairs(ssd.constraints)..., pairs(ssd.equations)...))
 
 export neqns
 """
@@ -480,7 +481,7 @@ function make_sseqn(model::AbstractModel, eqn::Equation, shift::Bool)
     end
     type = shift == 0 ? :tzero : :tshift
     let sseqndata = SSEqnData(shift, Ref(model), JT, eqn)
-        return SteadyStateEquation(type, vinds, vsyms, eqn.expr, sseqn_resid_RJ(sseqndata)...)
+        return SteadyStateEquation(type, eqn.name, vinds, vsyms, eqn.expr, sseqn_resid_RJ(sseqndata)...)
     end
 end
 
@@ -499,7 +500,10 @@ addition to the equations generated automatically from the dynamic system.
     directly by users. Use [`@steadystate`](@ref) instead of calling this
     function.
 """
-function setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Module=moduleof(model))
+function setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Module=moduleof(model), eqn_key=:_undefined_)
+    if eqn_key == :_undefined_
+        eqn_key = Symbol("_SSEQ$(length(model.sstate.constraints)+1)")
+    end
 
     if expr.head != :(=)
         error("Expected an equation, not $(expr.head)")
@@ -602,6 +606,7 @@ function setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Mod
     # create the resid and RJ functions for the new equation
     # To do this, we use `makefuncs` from evaluation.jl
     residual = Expr(:block, source[1], :($(lhs) - $(rhs)))
+    println("residual\n", residual)
     funcs_expr = makefuncs(residual, vsyms, [], unique(val_params), modelmodule)
     resid, RJ = modelmodule.eval(funcs_expr)
     _update_eqn_params!(resid, model.parameters)
@@ -616,18 +621,18 @@ function setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Mod
             end
         end
     end
-    sscon = SteadyStateEquation(type, vinds, vsyms, expr, resid, RJ)
+    sscon = SteadyStateEquation(type, eqn_key, vinds, vsyms, expr, resid, RJ)
     if nargs == 1
         # The equation involves only one variable. See if there's already an equation
         # with just that variable and, if so, remove it.
-        for (i, ssc) in enumerate(ss.constraints)
+        for (k, ssc) in ss.constraints
             if ssc.type == type && length(ssc.vinds) == 1 && ssc.vinds[1] == sscon.vinds[1]
-                ss.constraints[i] = sscon
+                ss.constraints[k] = sscon
                 return sscon
             end
         end
     end
-    push!(ss.constraints, sscon)
+    push!(ss.constraints, sscon.name => sscon)
     return sscon
 end
 
@@ -681,15 +686,43 @@ function initssdata!(model::AbstractModel)
         push!(ss, var)
     end
     empty!(ss.equations)
-    for eqn in alleqns(model)
-        push!(ss.equations, make_sseqn(model, eqn, false))
+    for (key, eqn) in alleqns(model)
+        push!(ss.equations, eqn.name => make_sseqn(model, eqn, false))
     end
     if !model.flags.ssZeroSlope
-        for eqn in alleqns(model)
-            push!(ss.equations, make_sseqn(model, eqn, true))
+        for (key, eqn) in alleqns(model)
+            push!(ss.equations, eqn.name => make_sseqn(model, eqn, true))
         end
     end
     empty!(ss.constraints)
+    return nothing
+end
+
+function updatessdata!(model::AbstractModel)
+    ss = sstate(model)
+    # TODO: can we add variables?
+    # empty!(ss.vars)
+    # TODO: do the masks and values matter?
+    # empty!(ss.values)
+    # empty!(ss.mask)
+    # for var in model.allvars
+    #     push!(ss, var)
+    # end
+    # empty!(ss.equations)
+    for (key, eqn) in alleqns(model)
+        if eqn.name ∉ keys(ss.equations)
+            push!(ss.equations, eqn.name => make_sseqn(model, eqn, false))
+        end
+    end
+    if !model.flags.ssZeroSlope
+        for eqn in alleqns(model)
+            if eqn.name ∉ keys(ss.equations)
+                push!(ss.equations, eqn.name => make_sseqn(model, eqn, true))
+            end
+        end
+    end
+    # TODO: does it matter if constraints are changed/updated?
+    # empty!(ss.constraints)
     return nothing
 end
 

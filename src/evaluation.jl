@@ -315,7 +315,7 @@ Create the standard evaluation data structure for the given model.
 """
 function ModelEvaluationData(model::AbstractModel)
     time0 = 1 + model.maxlag
-    alleqns = model.alleqns
+    alleqns = collect(values(model.alleqns))
     neqns = length(alleqns)
     allvars = model.allvars
     nvars = length(allvars)

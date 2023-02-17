@@ -96,5 +96,5 @@ function moduleof(m::AbstractModel)
     if isempty(eqns)
         error("Unable to determine the module containing the given model. Try adding equations to it and call `@initialize`.")
     end
-    return moduleof(first(eqns))
+    return moduleof(first(eqns)[2])
 end

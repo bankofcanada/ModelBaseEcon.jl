@@ -582,10 +582,10 @@ end
         2
     else
         0
-    end)) isa Equation
-    @test ModelBaseEcon.process_equation(m, :(x[t] = ifelse(false, 2, 0))) isa Equation
+    end), eqn_name=:_EQ2) isa Equation
+    @test ModelBaseEcon.process_equation(m, :(x[t] = ifelse(false, 2, 0)), eqn_name=:_EQ3) isa Equation
     p = 0
-    @test_logs (:warn, r"Variable or shock .* without `t` reference.*"i) @assert ModelBaseEcon.process_equation(m, "x=$p") isa Equation
+    @test_logs (:warn, r"Variable or shock .* without `t` reference.*"i) @assert ModelBaseEcon.process_equation(m, "x=$p", eqn_name=:_EQ4) isa Equation
 end
 
 @testset "Meta" begin
@@ -637,19 +637,19 @@ end
     )
 
     for i = 2:2:length(mod.equations)
-        @test compare_resids(mod.equations[i-1], mod.equations[i])
+        @test compare_resids(mod.equations[collect(keys(mod.equations))[i-1]], mod.equations[collect(keys(mod.equations))[i]])
     end
     # test errors and warnings
     mod.warn.no_t = false
-    @test add_equation!(mod, :(x = sx[t])) isa Model
-    @test add_equation!(mod, :(x[t] = sx)) isa Model
-    @test add_equation!(mod, :(x[t] = sx[t])) isa Model
-    @test compare_resids(mod.equations[end], mod.equations[end-1])
-    @test compare_resids(mod.equations[end], mod.equations[end-2])
-    @test_throws ArgumentError add_equation!(mod, :(@notametafunction(x[t]) = 7))
-    @test_throws ArgumentError add_equation!(mod, :(x[t] = unknownsymbol))
-    @test_throws ArgumentError add_equation!(mod, :(x[t] = unknownseries[t]))
-    @test_throws ArgumentError add_equation!(mod, :(x[t] = let c = 5
+    @test add_equation!(mod, :EQ1, :(x = sx[t])) isa Model
+    @test add_equation!(mod, :EQ2, :(x[t] = sx)) isa Model
+    @test add_equation!(mod, :EQ3, :(x[t] = sx[t])) isa Model
+    @test compare_resids(mod.equations[:EQ3], mod.equations[:EQ2])
+    @test compare_resids(mod.equations[:EQ3], mod.equations[:EQ1])
+    @test_throws ArgumentError add_equation!(mod, :EQ4, :(@notametafunction(x[t]) = 7))
+    @test_throws ArgumentError add_equation!(mod, :EQ5, :(x[t] = unknownsymbol))
+    @test_throws ArgumentError add_equation!(mod, :EQ6, :(x[t] = unknownseries[t]))
+    @test_throws ArgumentError add_equation!(mod, :EQ7, :(x[t] = let c = 5
         sx[t+c]
     end))
     @test ModelBaseEcon.update_auxvars(ones(2, 2), mod) == ones(2, 2)
@@ -725,7 +725,7 @@ end
             @log X[t] = rho * X[t-1] + EX[t]
         end
         @initialize m
-        @test length(m.equations) == 1 && islog(m.equations[1])
+        @test length(m.equations) == 1 && islog(m.equations[:_EQ1])
     end
 end
 
