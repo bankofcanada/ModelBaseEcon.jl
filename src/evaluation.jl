@@ -70,23 +70,15 @@ equation and its gradient.
 """
 function funcsyms end
 
-let funcsyms_state = 0
-    global funcsyms_counter() = (funcsyms_state += 1)
-end
 function funcsyms(mod::Module)
-    fn1, fn2 = mod.eval(quote
-        let nms = names(@__MODULE__; all=true)
-            num = $(@__MODULE__).funcsyms_counter()
-            local fn1 = Symbol("resid_", num)
-            local fn2 = Symbol("RJ_", num)
-            while fn1 ∈ nms || fn2 ∈ nms
-                num = $(@__MODULE__).funcsyms_counter()
+    if !isdefined(mod, :__counter)
+        Base.eval(mod, :(__counter = Ref{Int}(1)))
+    end
+    num = mod.__counter[]
                 fn1 = Symbol("resid_", num)
                 fn2 = Symbol("RJ_", num)
-            end
-            fn1, fn2
-        end
-    end)
+    mod.__counter[] += 1
+    return fn1, fn2
 end
 
 """
