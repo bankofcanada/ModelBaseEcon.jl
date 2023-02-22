@@ -75,8 +75,8 @@ function funcsyms(mod::Module)
         Base.eval(mod, :(__counter = Ref{Int}(1)))
     end
     num = mod.__counter[]
-                fn1 = Symbol("resid_", num)
-                fn2 = Symbol("RJ_", num)
+    fn1 = Symbol("resid_", num)
+    fn2 = Symbol("RJ_", num)
     mod.__counter[] += 1
     return fn1, fn2
 end
