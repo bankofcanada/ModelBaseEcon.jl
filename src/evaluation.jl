@@ -57,7 +57,7 @@ end
     funcsyms(mod::Module)
 
 Create a pair of identifiers that does not conflict with existing identifiers in
-the given module. 
+the given module.
 
 !!! warning
     Internal function. Do not call directly.
@@ -121,7 +121,7 @@ function makefuncs(expr, tssyms, sssyms, psyms, mod)
             $expr
         end
         const $fn1 = EquationEvaluator{$(QuoteNode(fn1))}(UInt(0),
-            $(@__MODULE__).LittleDict(p => nothing for p in ($(QuoteNode.(psyms)...),)))
+            $(@__MODULE__).LittleDict(Symbol[$(QuoteNode.(psyms)...)], fill(nothing, $(length(psyms)))))
         const $fn2 = EquationGradient($fn1, Val($nargs))
         $(@__MODULE__).precompilefuncs($fn1, $fn2, Val($nargs), MyTag)
         ($fn1, $fn2)
@@ -176,7 +176,7 @@ _index_of_var(var, allvars) = indexin([var], allvars)[1]
 ###########################################################
 # Part 2: Evaluation data for models and equations
 
-#### Equation evaluation data 
+#### Equation evaluation data
 
 # It's not needed for the normal case. It'll be specialized later for
 # selectively linearized equations.
@@ -453,7 +453,7 @@ end
 Instruct the model instance to use selective linearization. Only equations
 annotated with `@lin` in the model definition will be linearized about the
 current steady state solution while the rest of the eq
-    
+
 """
 function selective_linearize!(model::AbstractModel)
     setevaldata!(model, selective_linearize=SelectiveLinearizationMED(model))
@@ -467,7 +467,7 @@ export selective_linearize!
 
 Refresh the model evaluation data stored within the given model instance. Most
 notably, this is necessary when the steady state is used in the dynamic
-equations. 
+equations.
 
 Normally there's no need for the end-used to call this function. It should be
 called when necessay by the solver.
