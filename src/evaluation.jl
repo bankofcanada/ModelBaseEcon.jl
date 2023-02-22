@@ -81,6 +81,10 @@ function funcsyms(mod::Module)
     return fn1, fn2
 end
 
+# Can be changed to MAX_CHUNK_SIZE::Bool = 4 when support for Julia 1.7
+# is dropped.
+const MAX_CHUNK_SIZE = Ref(4)
+
 """
     makefuncs(expr, tssyms, sssyms, psyms, mod)
 
@@ -106,6 +110,7 @@ function makefuncs(expr, tssyms, sssyms, psyms, mod)
     fn1, fn2 = funcsyms(mod)
     x = gensym("x")
     nargs = length(tssyms) + length(sssyms)
+    chunk = min(nargs, MAX_CHUNK_SIZE[])
     return quote
         function (ee::EquationEvaluator{$(QuoteNode(fn1))})($x::Vector{<:Real})
             ($(tssyms...), $(sssyms...),) = $x
@@ -114,8 +119,8 @@ function makefuncs(expr, tssyms, sssyms, psyms, mod)
         end
         const $fn1 = EquationEvaluator{$(QuoteNode(fn1))}(UInt(0),
             $(@__MODULE__).LittleDict(Symbol[$(QuoteNode.(psyms)...)], fill(nothing, $(length(psyms)))))
-        const $fn2 = EquationGradient($fn1, Val($nargs))
-        $(@__MODULE__).precompilefuncs($fn1, $fn2, Val($nargs), MyTag)
+        const $fn2 = EquationGradient($fn1, $nargs, Val($chunk))
+        $(@__MODULE__).precompilefuncs($fn1, $fn2, Val($chunk), MyTag)
         ($fn1, $fn2)
     end
 end
@@ -151,9 +156,9 @@ function initfuncs(mod::Module)
                 dr::DR
                 cfg::CFG
             end
-            EquationGradient(fn1::Function, ::Val{N}) where {N} = EquationGradient(fn1,
-                $(@__MODULE__).DiffResults.DiffResult(zero(Float64), zeros(Float64, N)),
-                $(@__MODULE__).ForwardDiff.GradientConfig(fn1, zeros(Float64, N), $(@__MODULE__).ForwardDiff.Chunk{N}(), MyTag))
+            EquationGradient(fn1::Function, nargs::Int, ::Val{N}) where {N} = EquationGradient(fn1,
+                $(@__MODULE__).DiffResults.DiffResult(zero(Float64), zeros(Float64, nargs)),
+                $(@__MODULE__).ForwardDiff.GradientConfig(fn1, zeros(Float64, nargs), $(@__MODULE__).ForwardDiff.Chunk{N}(), MyTag))
             function (s::EquationGradient)(x::Vector{Float64})
                 $(@__MODULE__).ForwardDiff.gradient!(s.dr, s.fn1, x, s.cfg)
                 return s.dr.value, s.dr.derivs[1]
