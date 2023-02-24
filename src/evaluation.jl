@@ -57,7 +57,7 @@ end
     funcsyms(mod::Module)
 
 Create a pair of identifiers that does not conflict with existing identifiers in
-the given module. 
+the given module.
 
 !!! warning
     Internal function. Do not call directly.
@@ -70,24 +70,20 @@ equation and its gradient.
 """
 function funcsyms end
 
-let funcsyms_state = 0
-    global funcsyms_counter() = (funcsyms_state += 1)
-end
 function funcsyms(mod::Module)
-    fn1, fn2 = mod.eval(quote
-        let nms = names(@__MODULE__; all=true)
-            num = $(@__MODULE__).funcsyms_counter()
-            local fn1 = Symbol("resid_", num)
-            local fn2 = Symbol("RJ_", num)
-            while fn1 ∈ nms || fn2 ∈ nms
-                num = $(@__MODULE__).funcsyms_counter()
-                fn1 = Symbol("resid_", num)
-                fn2 = Symbol("RJ_", num)
-            end
-            fn1, fn2
-        end
-    end)
+    if !isdefined(mod, :__counter)
+        Base.eval(mod, :(__counter = Ref{Int}(1)))
+    end
+    num = mod.__counter[]
+    fn1 = Symbol("resid_", num)
+    fn2 = Symbol("RJ_", num)
+    mod.__counter[] += 1
+    return fn1, fn2
 end
+
+# Can be changed to MAX_CHUNK_SIZE::Bool = 4 when support for Julia 1.7
+# is dropped.
+const MAX_CHUNK_SIZE = Ref(4)
 
 """
     makefuncs(expr, tssyms, sssyms, psyms, mod)
@@ -114,6 +110,7 @@ function makefuncs(expr, tssyms, sssyms, psyms, mod)
     fn1, fn2 = funcsyms(mod)
     x = gensym("x")
     nargs = length(tssyms) + length(sssyms)
+    chunk = min(nargs, MAX_CHUNK_SIZE[])
     return quote
         function (ee::EquationEvaluator{$(QuoteNode(fn1))})($x::Vector{<:Real})
             ($(tssyms...), $(sssyms...),) = $x
@@ -121,9 +118,9 @@ function makefuncs(expr, tssyms, sssyms, psyms, mod)
             $expr
         end
         const $fn1 = EquationEvaluator{$(QuoteNode(fn1))}(UInt(0),
-            $(@__MODULE__).LittleDict(p => nothing for p in ($(QuoteNode.(psyms)...),)))
-        const $fn2 = EquationGradient($fn1, Val($nargs))
-        $(@__MODULE__).precompilefuncs($fn1, $fn2, Val($nargs), MyTag)
+            $(@__MODULE__).LittleDict(Symbol[$(QuoteNode.(psyms)...)], fill(nothing, $(length(psyms)))))
+        const $fn2 = EquationGradient($fn1, $nargs, Val($chunk))
+        $(@__MODULE__).precompilefuncs($fn1, $fn2, Val($chunk), MyTag)
         ($fn1, $fn2)
     end
 end
@@ -159,9 +156,9 @@ function initfuncs(mod::Module)
                 dr::DR
                 cfg::CFG
             end
-            EquationGradient(fn1::Function, ::Val{N}) where {N} = EquationGradient(fn1,
-                $(@__MODULE__).DiffResults.DiffResult(zero(Float64), zeros(Float64, N)),
-                $(@__MODULE__).ForwardDiff.GradientConfig(fn1, zeros(Float64, N), $(@__MODULE__).ForwardDiff.Chunk{N}(), MyTag))
+            EquationGradient(fn1::Function, nargs::Int, ::Val{N}) where {N} = EquationGradient(fn1,
+                $(@__MODULE__).DiffResults.DiffResult(zero(Float64), zeros(Float64, nargs)),
+                $(@__MODULE__).ForwardDiff.GradientConfig(fn1, zeros(Float64, nargs), $(@__MODULE__).ForwardDiff.Chunk{N}(), MyTag))
             function (s::EquationGradient)(x::Vector{Float64})
                 $(@__MODULE__).ForwardDiff.gradient!(s.dr, s.fn1, x, s.cfg)
                 return s.dr.value, s.dr.derivs[1]
@@ -176,7 +173,7 @@ _index_of_var(var, allvars) = indexin([var], allvars)[1]
 ###########################################################
 # Part 2: Evaluation data for models and equations
 
-#### Equation evaluation data 
+#### Equation evaluation data
 
 # It's not needed for the normal case. It'll be specialized later for
 # selectively linearized equations.
@@ -453,7 +450,7 @@ end
 Instruct the model instance to use selective linearization. Only equations
 annotated with `@lin` in the model definition will be linearized about the
 current steady state solution while the rest of the eq
-    
+
 """
 function selective_linearize!(model::AbstractModel)
     setevaldata!(model, selective_linearize=SelectiveLinearizationMED(model))
@@ -467,7 +464,7 @@ export selective_linearize!
 
 Refresh the model evaluation data stored within the given model instance. Most
 notably, this is necessary when the steady state is used in the dynamic
-equations. 
+equations.
 
 Normally there's no need for the end-used to call this function. It should be
 called when necessay by the solver.

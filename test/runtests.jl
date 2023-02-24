@@ -9,6 +9,8 @@ using ModelBaseEcon
 using SparseArrays
 using Test
 
+import ModelBaseEcon.update
+
 @testset "Tranformations" begin
     @test_throws ErrorException transformation(Transformation)
     @test_throws ErrorException inverse_transformation(Transformation)
