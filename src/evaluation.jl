@@ -8,6 +8,7 @@
 ###########################################################
 # Part 1: Helper functions
 
+struct ModelBaseEconTag end
 
 """
     precompilefuncs(resid, RJ, ::Val{N}, tag) where N
@@ -19,36 +20,16 @@ with the dual-number arithmetic required by ForwardDiff.
     Internal function. Do not call directly
 
 """
-function precompilefuncs(resid, RJ, ::Val{N}, tag) where {N}
+function precompilefuncs(resid, RJ, ::Val{N}) where {N}
     ccall(:jl_generating_output, Cint, ()) == 1 || return nothing
 
-    # tag = MyTag # ForwardDiff.Tag{resid,Float64}
-    dual = ForwardDiff.Dual{tag,Float64,N}
-    duals = Array{dual,1}
-    cfg = ForwardDiff.GradientConfig{tag,Float64,N,duals}
-    mdr = DiffResults.MutableDiffResult{1,Float64,Tuple{Array{Float64,1}}}
+    tagtype = ModelBaseEconTag
+    dual = ForwardDiff.Dual{tagtype,Float64,N}
+    duals = Vector{dual}
 
-    precompile(resid, (Array{Float64,1},)) || error("precompile")
+    precompile(resid, (Vector{Float64},)) || error("precompile")
     precompile(resid, (duals,)) || error("precompile")
-    precompile(RJ, (Array{Float64,1},)) || error("precompile")
-
-    for pred in Symbol[:isinf, :isnan, :isfinite, :iseven, :isodd, :isreal, :isinteger, :-, :+, :log, :exp]
-        pred ∈ (:iseven, :isodd) || precompile(getfield(Base, pred), (Float64,)) || error("precompile")
-        precompile(getfield(Base, pred), (dual,)) || error("precompile")
-    end
-
-    for pred in Symbol[:isequal, :isless, :<, :>, :(==), :(!=), :(<=), :(>=), :+, :-, :*, :/, :^]
-        precompile(getfield(Base, pred), (Float64, Float64)) || error("precompile")
-        precompile(getfield(Base, pred), (dual, Float64)) || error("precompile")
-        precompile(getfield(Base, pred), (Float64, dual)) || error("precompile")
-        precompile(getfield(Base, pred), (dual, dual)) || error("precompile")
-    end
-
-    # precompile(ForwardDiff.extract_gradient!, (Type{tag}, mdr, dual)) || error("precompile")
-    # precompile(ForwardDiff.vector_mode_gradient!, (mdr, typeof(resid), Array{Float64,1}, cfg)) || error("precompile")
-
-    # precompile(Tuple{typeof(ForwardDiff.extract_gradient!), Type{tag}, mdr, dual}) || error("precompile")
-    # precompile(Tuple{typeof(ForwardDiff.vector_mode_gradient!), mdr, resid, Array{Float64, 1}, cfg}) || error("precompile")
+    precompile(RJ, (Vector{Float64},)) || error("precompile")
 
     return nothing
 end
@@ -81,9 +62,7 @@ function funcsyms(mod::Module)
     return fn1, fn2
 end
 
-# Can be changed to MAX_CHUNK_SIZE::Bool = 4 when support for Julia 1.7
-# is dropped.
-const MAX_CHUNK_SIZE = Ref(4)
+const MAX_CHUNK_SIZE = 4
 
 # Used to avoid specialzing the ForwardDiff functions on
 # every equation.
@@ -117,7 +96,7 @@ function makefuncs(expr, tssyms, sssyms, psyms, mod)
     fn1, fn2 = funcsyms(mod)
     x = gensym("x")
     nargs = length(tssyms) + length(sssyms)
-    chunk = min(nargs, MAX_CHUNK_SIZE[])
+    chunk = min(nargs, MAX_CHUNK_SIZE)
     return quote
         function (ee::EquationEvaluator{$(QuoteNode(fn1))})($x::Vector{<:Real})
             ($(tssyms...), $(sssyms...),) = $x
@@ -127,7 +106,7 @@ function makefuncs(expr, tssyms, sssyms, psyms, mod)
         const $fn1 = EquationEvaluator{$(QuoteNode(fn1))}(UInt(0),
             $(@__MODULE__).LittleDict(Symbol[$(QuoteNode.(psyms)...)], fill(nothing, $(length(psyms)))))
         const $fn2 = EquationGradient($FunctionWrapper($fn1), $nargs, Val($chunk))
-        $(@__MODULE__).precompilefuncs($fn1, $fn2, Val($chunk), MyTag)
+        $(@__MODULE__).precompilefuncs($fn1, $fn2, Val($chunk))
         ($fn1, $fn2)
     end
 end
@@ -151,9 +130,8 @@ together with a `DiffResult` and a `GradientConfig` used by `ForwardDiff`. Its
 call is defined here and computes the residual and the gradient.
 """
 function initfuncs(mod::Module)
-    if :MyTag ∉ names(mod; all=true)
+    if :EquationEvaluator ∉ names(mod; all=true)
         mod.eval(quote
-            struct MyTag end
             struct EquationEvaluator{FN} <: Function
                 rev::Ref{UInt}
                 params::$(@__MODULE__).LittleDict{Symbol,Any}
@@ -165,7 +143,7 @@ function initfuncs(mod::Module)
             end
             EquationGradient(fn1::Function, nargs::Int, ::Val{N}) where {N} = EquationGradient(fn1,
                 $(@__MODULE__).DiffResults.DiffResult(zero(Float64), zeros(Float64, nargs)),
-                $(@__MODULE__).ForwardDiff.GradientConfig(fn1, zeros(Float64, nargs), $(@__MODULE__).ForwardDiff.Chunk{N}(), MyTag))
+                $(@__MODULE__).ForwardDiff.GradientConfig(fn1, zeros(Float64, nargs), $(@__MODULE__).ForwardDiff.Chunk{N}(), $ModelBaseEconTag()))
             function (s::EquationGradient)(x::Vector{Float64})
                 $(@__MODULE__).ForwardDiff.gradient!(s.dr, s.fn1, x, s.cfg)
                 return s.dr.value, s.dr.derivs[1]
