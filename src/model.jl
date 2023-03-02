@@ -64,7 +64,7 @@ mutable struct Model <: AbstractModel
     shocks::Vector{ModelVariable}
     # transition equations
     equations::Vector{Equation}
-    # parameters 
+    # parameters
     parameters::Parameters
     # auto-exogenize mapping of variables and shocks
     autoexogenize::Dict{Symbol,Symbol}
@@ -79,7 +79,7 @@ mutable struct Model <: AbstractModel
     evaldata::LittleDict{Symbol,AbstractModelEvaluationData}
     # data slot to be used by the solver (in StateSpaceEcon)
     solverdata::LittleDict{Symbol,Any}
-    # 
+    #
     # constructor of an empty model
     Model(opts::Options) = new(merge(defaultoptions, opts),
         ModelFlags(), SteadyStateData(), false, [], [], [], Parameters(), Dict(), 0, 0, [], [],
@@ -362,7 +362,7 @@ end
 ################################################################
 # The macros used in the model definition.
 
-# Note: These macros simply store the information into the corresponding 
+# Note: These macros simply store the information into the corresponding
 # arrays within the model instance. The actual processing is done in @initialize
 
 export @variables, @logvariables, @neglogvariables, @steadyvariables, @exogenous, @shocks
@@ -376,7 +376,7 @@ export @parameters, @equations, @autoshocks, @autoexogenize
         ...
     end
 
-Declare the names of variables in the model. 
+Declare the names of variables in the model.
 
 In the `begin-end` version the variable names can be preceeded by a description
 (like a docstring) and flags like `@log`, `@steady`, `@exog`, etc. See
@@ -437,7 +437,7 @@ end
 """
     @exogenous
 
-Like [`@variables`](@ref), but the names declared with `@exogenous` are 
+Like [`@variables`](@ref), but the names declared with `@exogenous` are
 exogenous.
 """
 macro exogenous(model, block::Expr)
@@ -451,7 +451,7 @@ end
 """
     @shocks
 
-Like [`@variables`](@ref), but the names declared with `@shocks` are 
+Like [`@variables`](@ref), but the names declared with `@shocks` are
 shocks.
 """
 macro shocks(model, block::Expr)
@@ -487,7 +487,7 @@ end
         ...
     end
 
-Declare and define the model parameters. 
+Declare and define the model parameters.
 
 The parameters must have values. Provide the information in a series of
 assignment statements wrapped inside a begin-end block. Use `@link` and `@alias`
@@ -595,7 +595,7 @@ function process_equation(model::Model, expr::Expr;
     flags=EqnFlags(),
     doc="")
 
-    # a list of all known time series 
+    # a list of all known time series
     allvars = model.allvars
 
     # keep track of model parameters used in expression
@@ -629,12 +629,12 @@ function process_equation(model::Model, expr::Expr;
 
     ###################
     #    process(expr)
-    # 
+    #
     # Process the expression, performing various tasks.
     #  + keep track of mentions of parameters and variables (including shocks)
     #  + remove line numbers from expression, but keep track so we can insert it into the residual functions
     #  + for each time-referenece of variable, create a dummy symbol that will be used in constructing the residual functions
-    # 
+    #
     # leave numbers alone
     process(num::Number) = num
     # store line number and discard it from the expression
@@ -666,7 +666,7 @@ function process_equation(model::Model, expr::Expr;
     end
     # Main version of process() - it's recursive
     function process(ex::Expr)
-        # is this a docstring? 
+        # is this a docstring?
         if ex.head == :macrocall && ex.args[1] == doc_macro
             push!(source, ex.args[2])
             doc *= ex.args[3]
@@ -757,9 +757,9 @@ function process_equation(model::Model, expr::Expr;
 
     ##################
     #    make_residual_expression(expr)
-    # 
+    #
     # Convert a processed equation into an expression that evaluates the residual.
-    # 
+    #
     #  + each mention of a time-reference is replaced with its symbol
     make_residual_expression(any) = any
     make_residual_expression(name::Symbol) = haskey(model.parameters, name) ? prefs[name] : name
@@ -844,14 +844,14 @@ function add_equation!(model::Model, expr::Expr; modelmodule::Module=moduleof(mo
     done_equalsign = Ref(false)
 
     ##################################
-    # We preprocess() the expression looking for substitutions. 
+    # We preprocess() the expression looking for substitutions.
     # If we find one, we create an auxiliary variable and equation.
     # We also keep track of line number, so we can label the aux equation as
     # defined on the same line.
     # We also look for doc string and flags (@log, @lin)
-    # 
-    # We make sure to make a copy of the expression and not to overwrite it. 
-    # 
+    #
+    # We make sure to make a copy of the expression and not to overwrite it.
+    #
     preprocess(any) = any
     function preprocess(line::LineNumberNode)
         push!(source, line)
@@ -897,10 +897,10 @@ function add_equation!(model::Model, expr::Expr; modelmodule::Module=moduleof(mo
         if getoption!(model; substitutions=true)
             local arg
             matched = @capture(ret, log(arg_))
-            # is it log(arg) 
+            # is it log(arg)
             if matched && isa(arg, Expr)
                 local var1, var2, ind1, ind2
-                # is it log(x[t]) ? 
+                # is it log(x[t]) ?
                 matched = @capture(arg, var1_[ind1_])
                 if matched
                     mv = model.:($var1)
@@ -1077,10 +1077,16 @@ function update_auxvars(data::AbstractArray{Float64,2}, model::Model;
         modelerror("Insufficient time periods $nt. Expected $mintimes or more.")
     end
     allvars = model.allvars
+
+    # Precompute index lookup for variables
+    var_to_idx = Dict{ModelVariable, Int}()
+    for (idx, var) in enumerate(allvars)
+        var_to_idx[var] = idx
+    end
     result = [data[:, 1:nvarshk] zeros(nt, nauxs)]
     for (i, eqn) in enumerate(model.auxeqns)
         for t in (eqn.maxlag+1):(nt-eqn.maxlead)
-            idx = [CartesianIndex((t + ti, _index_of_var(var, allvars))) for (var, ti) in keys(eqn.tsrefs)]
+            idx = [CartesianIndex((t + ti, var_to_idx[var])) for (var, ti) in keys(eqn.tsrefs)]
             res = eqn.eval_resid(result[idx])
             if res < 1.0
                 result[t, nvarshk+i] = log(1.0 - res)
