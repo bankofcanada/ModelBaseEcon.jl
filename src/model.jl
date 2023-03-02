@@ -76,9 +76,9 @@ mutable struct Model <: AbstractModel
     # auxiliary equations
     auxeqns::Vector{Equation}
     # data related to evaluating residuals and Jacobian of the model equations
-    evaldata::LittleDict{Symbol,AbstractModelEvaluationData}
+    evaldata::LittleDictVec{Symbol,AbstractModelEvaluationData}
     # data slot to be used by the solver (in StateSpaceEcon)
-    solverdata::LittleDict{Symbol,Any}
+    solverdata::LittleDictVec{Symbol,Any}
     #
     # constructor of an empty model
     Model(opts::Options) = new(merge(defaultoptions, opts),
@@ -601,7 +601,7 @@ function process_equation(model::Model, expr::Expr;
     # keep track of model parameters used in expression
     prefs = LittleDict{Symbol,Symbol}()
     # keep track of references to known time series in the expression
-    tsrefs = LittleDict{Tuple{Symbol,Int64},Symbol}()
+    tsrefs = LittleDict{Tuple{Symbol,Int},Symbol}()
     # keep track of references to steady states of known time series in the expression
     ssrefs = LittleDict{Symbol,Symbol}()
     # keep track of the source code location where the equation was defined
@@ -818,7 +818,15 @@ function process_equation(model::Model, expr::Expr;
     funcs_expr = makefuncs(residual, tssyms, sssyms, psyms, modelmodule)
     resid, RJ = modelmodule.eval(funcs_expr)
     _update_eqn_params!(resid, model.parameters)
-    return Equation(doc, flags, expr, residual, tsrefs, ssrefs, prefs, resid, RJ)
+    tsrefs′ = LittleDict{Tuple{ModelSymbol,Int},Symbol}()
+    for ((modsym, i), sym) in tsrefs
+        tsrefs′[(ModelSymbol(modsym), i)] = sym
+    end
+    ssrefs′ = LittleDict{ModelSymbol,Symbol}()
+    for (modsym, sym) in ssrefs
+        ssrefs′[ModelSymbol(modsym)] = sym
+    end
+    return Equation(doc, flags, expr, residual, tsrefs′, ssrefs′, prefs, resid, RJ)
 end
 
 
