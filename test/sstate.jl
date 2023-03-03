@@ -1,7 +1,7 @@
 
 @using_example S1
 @testset "dynss" begin
-    m = deepcopy(S1.model)
+    m = S1.newmodel()
     @test m.dynss
     @test isempty(m.equations[:_EQ1].ssrefs)
     @test !isempty(m.equations[:_EQ2].ssrefs)
@@ -48,7 +48,7 @@
             0 0 0 0 -0.4 1 0 0 0 -1]
     end
     let
-        seq = ss.equations[3]
+        seq = ss.equations[:_EQ3]
         inds = indexin([Symbol("#c#lvl#"), Symbol("#c#slp#"), Symbol("#b#lvl#")], seq.vsyms)
         for i = 1:50
             m.β = β = rand()
@@ -64,7 +64,7 @@ end
 
 @using_example S2
 @testset "dynss2" begin
-    m = deepcopy(S2.model)
+    m = S2.newmodel()
     # make sure @sstate(x) was transformed
     @test m.equations[:_EQ1].ssrefs[:x] === Symbol("#log#x#ss#")
 

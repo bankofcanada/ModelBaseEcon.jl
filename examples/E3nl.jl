@@ -59,4 +59,6 @@ end
 # call initialize! to build internal structures
 @initialize model
 
+newmodel() = deepcopy(model)
+
 end
