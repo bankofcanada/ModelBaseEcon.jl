@@ -764,6 +764,12 @@ function compare_RJ_R!_(m::Model)
 end
 
 @using_example E1
+@testset "Deepcopy" begin
+    @test E1.model.evaldata[:default].params[] === E1.model.parameters
+    m1 = deepcopy(E1.model)
+    @test m1.evaldata[:default].params[] === m1.parameters
+end
+
 @testset "E1" begin
     mE1 = E1.newmodel()
     @test length(mE1.parameters) == 2
@@ -824,30 +830,6 @@ end
     @test islinearized(m)
 end
 
-
-# @testset "Fails" begin
-#     m = deepcopy(E1.model)
-#     m.β = @link 1.0 - α
-#     m.parameters.beta = @alias β
-#     m.α = 0.2
-#     test_eval_RJ(m, [0.0], [-0.2 1.0 -0.8 0.0 -1.0 0.0;])
-# end
-
-# @testset "Maybe?" begin
-#     m = E1.newmodel()
-#     m.β = @link 1.0 - α
-#     m.parameters.beta = @alias β
-#     m.α = 0.2
-#     test_eval_RJ(m, [0.0], [-0.2 1.0 -0.8 0.0 -1.0 0.0;])
-# end
-
-# @testset "Works" begin
-#     m = E1.model
-#     m.β = @link 1.0 - α
-#     m.parameters.beta = @alias β
-#     m.α = 0.1
-#     test_eval_RJ(m, [0.0], [-0.1 1.0 -0.9 0.0 -1.0 0.0;])
-# end
 @using_example E1
 @testset "E1.params" begin
     let m = E1.newmodel()
