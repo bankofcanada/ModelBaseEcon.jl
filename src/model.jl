@@ -87,6 +87,7 @@ mutable struct Model <: AbstractModel
     Model() = new(deepcopy(defaultoptions),
         ModelFlags(), SteadyStateData(), false, [], [], [], Parameters(), Dict(), 0, 0, [], [],
         LittleDict{Symbol,AbstractModelEvaluationData}(), LittleDict{Symbol,Any}())
+        Model(options, flags, sstate, dynss, variables, shocks, equations, parameters, autoexogenize, maxlag, maxlead, auxvars, auxeqns, evaldata, solverdata) = new(options, flags, sstate, dynss, variables, shocks, equations, parameters, autoexogenize, maxlag, maxlead, auxvars, auxeqns, evaldata, solverdata)
 end
 
 auxvars(model::Model) = getfield(model, :auxvars)
@@ -1104,11 +1105,38 @@ function Base.deepcopy(m::Model)
         m_copy.sstate.mask[key] = copy(m.sstate.mask[key])
     end
 
-    # clear out evaldata
-    if length(m_copy.evaldata) > 0
-        empty!(m_copy.evaldata)
-        setevaldata!(m_copy, default = ModelEvaluationData(m_copy))
+    return m_copy
+end
+
+function Base.deepcopy_internal(m::Model, stackdict::IdDict)
+    m_copy = Model(
+        Base.deepcopy_internal(m.options, stackdict),
+        Base.deepcopy_internal(m.flags, stackdict),
+        SteadyStateData(),
+        copy(m.dynss),
+        Base.deepcopy_internal(m.variables, stackdict),
+        Base.deepcopy_internal(m.shocks, stackdict),
+        Base.deepcopy_internal(m.equations, stackdict),
+        Base.deepcopy_internal(m.parameters, stackdict),
+        Base.deepcopy_internal(m.autoexogenize, stackdict),
+        copy(m.maxlag),
+        copy(m.maxlead),
+        Base.deepcopy_internal(m.auxvars, stackdict),
+        Base.deepcopy_internal(m.auxeqns, stackdict),
+        LittleDict{Symbol,AbstractModelEvaluationData}(),
+        Base.deepcopy_internal(m.solverdata, stackdict)
+    )
+    for key in keys(m.evaldata)
+        m_copy.evaldata[key] = ModelEvaluationData(
+            Ref(m_copy.parameters), 
+            Base.deepcopy_internal(m.evaldata[key].eedata, stackdict),
+            Base.deepcopy_internal(m.evaldata[key].alleqns, stackdict), 
+            Base.deepcopy_internal(m.evaldata[key].allinds, stackdict), 
+            Base.deepcopy_internal(m.evaldata[key].J, stackdict),
+            Base.deepcopy_internal(m.evaldata[key].R, stackdict), 
+            Base.deepcopy_internal(m.evaldata[key].rowinds, stackdict)
+        )
     end
-    
+
     return m_copy
 end

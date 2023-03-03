@@ -818,6 +818,25 @@ end
     @test islinearized(m)
 end
 
+@testset "E1.params (deepcopy)" begin
+    let m = deepcopy(E1.model)
+        @test propertynames(m.parameters) == (:α, :β)
+        @test peval(m, :α) == 0.5
+        m.β = @link 1.0 - α
+        m.parameters.beta = @alias β
+        for α = 0.0:0.1:1.0
+            m.α = α
+            test_eval_RJ(m, [0.0], [-α 1.0 -m.beta 0.0 -1.0 0.0;])
+        end
+        @test_logs (:warn, r"Model does not have parameters*"i) assign_parameters!(m, γ=0)
+    end
+    let io = IOBuffer(), m = deepcopy(E1.model)
+        show(io, m.parameters)
+        @test length(split(String(take!(io)), '\n')) == 1
+        show(io, MIME"text/plain"(), m.parameters)
+        @test length(split(String(take!(io)), '\n')) == 3
+    end
+end
 
 @testset "E1.params" begin
     let m = E1.model
