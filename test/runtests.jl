@@ -755,6 +755,12 @@ function compare_RJ_R!_(m::Model)
 end
 
 @using_example E1
+@testset "Deepcopy" begin
+    @test E1.model.evaldata[:default].params[] === E1.model.parameters
+    m1 = deepcopy(E1.model)
+    @test m1.evaldata[:default].params[] === m1.parameters
+end
+
 @testset "E1" begin
     @test length(E1.model.parameters) == 2
     @test length(E1.model.variables) == 1

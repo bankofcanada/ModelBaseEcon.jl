@@ -1091,3 +1091,24 @@ function update_auxvars(data::AbstractArray{Float64,2}, model::Model;
     end
     return result
 end
+
+# When copying a model we need to clear out the sstate and the modelevaldata
+# as they contain references which get broken in the process.
+function Base.deepcopy(m::Model)
+    m_copy = Base.deepcopy_internal(m, IdDict())::typeof(m)
+    
+    # clear sstate but restore values and mask
+    initssdata!(m_copy)
+    for key in keys(m.sstate.values)
+        m_copy.sstate.values[key] = copy(m.sstate.values[key])
+        m_copy.sstate.mask[key] = copy(m.sstate.mask[key])
+    end
+
+    # clear out evaldata
+    if length(m_copy.evaldata) > 0
+        empty!(m_copy.evaldata)
+        setevaldata!(m_copy, default = ModelEvaluationData(m_copy))
+    end
+    
+    return m_copy
+end
