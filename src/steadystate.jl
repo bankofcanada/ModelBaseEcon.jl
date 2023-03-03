@@ -241,10 +241,13 @@ end
 """
 function geteqn(i::Integer, ssd::SteadyStateData)
     ci = i - length(ssd.constraints)
-    return ci > 0 ? ssd.equations[ci] : ssd.constraints[i]
+    return ci > 0 ? get(ci, ssd.equations) : get(i, ssd.constraints)
 end
 geteqn(i::Integer, m::AbstractModel) = geteqn(i, m.sstate)
-
+function geteqn(key::Symbol, ssd::SteadyStateData)
+    return key ∈ collect(keys(ssd.equations))  ? ssd.equations[key] : ssd.constraints[key]
+end
+geteqn(key::Symbol, m::AbstractModel) = geteqn(i, m.sstate)
 
 Base.show(io::IO, ::MIME"text/plain", ssd::SteadyStateData) = show(io, ssd)
 Base.show(io::IO, ssd::SteadyStateData) = begin
@@ -436,7 +439,7 @@ model.
     This function is for internal use only and not intended to be called
     directly by users.
 """
-function make_sseqn(model::AbstractModel, eqn::Equation, shift::Bool)
+function make_sseqn(model::AbstractModel, eqn::Equation, shift::Bool, eqn_name::Symbol)
     local allvars = model.allvars
     tvalue(t) = shift ? t + model.shift : t
     # ssind converts the dynamic index (v, t) into
@@ -481,7 +484,7 @@ function make_sseqn(model::AbstractModel, eqn::Equation, shift::Bool)
     end
     type = shift == 0 ? :tzero : :tshift
     let sseqndata = SSEqnData(shift, Ref(model), JT, eqn)
-        return SteadyStateEquation(type, eqn.name, vinds, vsyms, eqn.expr, sseqn_resid_RJ(sseqndata)...)
+        return SteadyStateEquation(type, eqn_name, vinds, vsyms, eqn.expr, sseqn_resid_RJ(sseqndata)...)
     end
 end
 
@@ -606,7 +609,6 @@ function setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Mod
     # create the resid and RJ functions for the new equation
     # To do this, we use `makefuncs` from evaluation.jl
     residual = Expr(:block, source[1], :($(lhs) - $(rhs)))
-    println("residual\n", residual)
     funcs_expr = makefuncs(residual, vsyms, [], unique(val_params), modelmodule)
     resid, RJ = modelmodule.eval(funcs_expr)
     _update_eqn_params!(resid, model.parameters)
@@ -687,11 +689,13 @@ function initssdata!(model::AbstractModel)
     end
     empty!(ss.equations)
     for (key, eqn) in alleqns(model)
-        push!(ss.equations, eqn.name => make_sseqn(model, eqn, false))
+        eqn_name = eqn.name
+        push!(ss.equations, eqn_name => make_sseqn(model, eqn, false, eqn_name))
     end
     if !model.flags.ssZeroSlope
         for (key, eqn) in alleqns(model)
-            push!(ss.equations, eqn.name => make_sseqn(model, eqn, true))
+            eqn_name = Symbol("$(eqn.name)_tshift")
+            push!(ss.equations, eqn_name => make_sseqn(model, eqn, true, eqn_name))
         end
     end
     empty!(ss.constraints)
@@ -710,14 +714,16 @@ function updatessdata!(model::AbstractModel)
     # end
     # empty!(ss.equations)
     for (key, eqn) in alleqns(model)
-        if eqn.name ∉ keys(ss.equations)
-            push!(ss.equations, eqn.name => make_sseqn(model, eqn, false))
+        eqn_name = eqn.name
+        if eqn_name ∉ keys(ss.equations)
+            push!(ss.equations,eqn_name => make_sseqn(model, eqn, false, eqn_name))
         end
     end
     if !model.flags.ssZeroSlope
         for eqn in alleqns(model)
-            if eqn.name ∉ keys(ss.equations)
-                push!(ss.equations, eqn.name => make_sseqn(model, eqn, true))
+            eqn_name = Symbol("$(eqn.name)_tshift")
+            if eqn_name ∉ keys(ss.equations)
+                push!(ss.equations, eqn_name => make_sseqn(model, eqn, true, eqn_name))
             end
         end
     end

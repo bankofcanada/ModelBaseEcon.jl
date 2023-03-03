@@ -7,6 +7,29 @@
 
 export export_model
 
+function export_equation(eqn_pair::Pair{Symbol,<:AbstractEquation})
+    #need to move things around a little in the equation display to make it parseable
+    flagstr = ""
+    flgs = flags(eqn_pair[2])
+    for f in fieldnames(typeof(flgs))
+        if getfield(flgs, f)
+            flagstr *= "@$(f) "
+        end
+    end
+    keystr = ""
+    eqn_name = string(eqn_pair[2].name)
+    if match(r"^_S?S?EQ\d+(_AUX\d+)?$", eqn_name).match != eqn_name
+        keystr = ":$(eqn_pair[2].name) => "
+    end
+
+    docstr = ""
+    if !isempty(doc(eqn_pair[2]))
+        docstr = "\"$(doc(eqn_pair[2]))\" "
+    end
+    eqn_string = sprint(print, docstr, keystr, flagstr, expr(eqn_pair[2]))
+    return eqn_string
+end
+
 _check_name(name) = Base.isidentifier(name) ? true : throw(ArgumentError("Model name must be a valid Julia identifier."))
 
 """
@@ -120,8 +143,9 @@ function export_model(model::Model, name::AbstractString, fio::IO)
     alleqns = model.alleqns
     if !isempty(alleqns)
         println(fio, "@equations model begin")
-        for eqn in alleqns
-            str = sprint(print, eqn, context=fio, sizehint=0)
+        for eqn_pair in alleqns
+            eqn_string = export_equation(eqn_pair)
+            str = sprint(print, eqn_string, context=fio, sizehint=0)
             str = replace(str, r"(\s*\".*\"\s*)" => s"\1\\n    ")
             println(fio, "    ", unescape_string(str))
         end
@@ -134,12 +158,18 @@ function export_model(model::Model, name::AbstractString, fio::IO)
     sd = sstate(model)
     for cons in sd.constraints
         println(fio)
-        println(fio, "@steadystate model ", cons)
+        cons_string = export_equation(cons)
+        println(fio, "@steadystate model ", cons_string)
     end
 
     println(fio)
-    println(fio, "end # module ", name)
+    println(fio, "newmodel() = deepcopy(model)")
     println(fio)
+
+    println(fio)
+    println(fio, "end # module ", name)
 
     return nothing
 end
+
+    

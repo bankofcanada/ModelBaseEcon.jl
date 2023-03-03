@@ -93,7 +93,18 @@ macro parameters()
 end
 
 # To deepcopy() Parameters, we make a new Ref to the same module and a deepcopy of contents.
-Base.deepcopy_internal(p::Parameters, stackdict::IdDict) = Parameters(Ref(p.mod[]), Base.deepcopy_internal(p.contents, stackdict), Ref(p.rev[]))
+function Base.deepcopy_internal(p::Parameters, stackdict::IdDict) 
+    if haskey(stackdict, p)
+        return stackdict[p]::typeof(p)
+    end
+    p_copy = Parameters(
+        Ref(p.mod[]), 
+        Base.deepcopy_internal(p.contents, stackdict), 
+        Ref(p.rev[])
+    )
+    stackdict[p] = p_copy
+    return p_copy
+end
 
 # The following functionality is forwarded to the contents
 # iteration

@@ -811,8 +811,7 @@ function process_equation(model::Model, expr::Expr;
     psyms = values(prefs)
     # name
     if eqn_name == :_unnamed_equation_
-        throw(error("No equation name specified"))
-        # eqn_name = get_next_equation_name(model)
+        throw(ArgumentError("No equation name specified"))
     end
     funcs_expr = makefuncs(residual, tssyms, sssyms, psyms, modelmodule)
     resid, RJ = modelmodule.eval(funcs_expr)
