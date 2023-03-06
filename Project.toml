@@ -9,6 +9,7 @@ ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
 MacroTools = "1914dd2f-81c6-5fcd-8719-6d5c9610ff09"
 OrderedCollections = "bac558e1-5e72-5ebc-8fee-abe8a469f55d"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+Scratch = "6c6a2e73-6563-6170-7368-637461726353"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 
 [compat]
@@ -16,6 +17,7 @@ DiffResults = "1.0"
 ForwardDiff = "0.10"
 MacroTools = "0.5"
 OrderedCollections = "1.4"
+Scratch = "1"
 julia = "1.7"
 
 [extras]

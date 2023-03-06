@@ -8,7 +8,7 @@
 """
     ModelBaseEcon
 
-This package is part of the StateSpaceEcon ecosystem. 
+This package is part of the StateSpaceEcon ecosystem.
 It provides the basic elements needed for model definition.
 StateSpaceEcon works with model objects defined with ModelBaseEcon.
 """
@@ -16,6 +16,7 @@ module ModelBaseEcon
 
 using OrderedCollections
 using MacroTools
+using Scratch
 using SparseArrays
 using DiffResults
 using ForwardDiff
