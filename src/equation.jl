@@ -16,7 +16,7 @@ msg(::EqnNotReadyError) = "Equation not ready to use."
 hint(::EqnNotReadyError) = "Call `@initialize model` or `add_equation!()` first."
 
 ###############################################
-# 
+#
 
 # Equation expressions typed by the user are of course valid equations, however
 # during processing we use recursive algorithms, with the bottom of the recursion
@@ -70,7 +70,7 @@ there's no need to users to call these functions directly. They are used
 internally by the solvers.
 """
 struct Equation <: AbstractEquation
-    ### Implementation note 
+    ### Implementation note
     # During the phase of definition of the Model, this type simply stores the expression
     # entered by the user. During @initialize(), the full data structure is constructed.
     # We need this, because the construction of the equation requires information from
@@ -98,7 +98,7 @@ struct Equation <: AbstractEquation
     eval_RJ::Function     # Function evaluating the residual and its gradient
 end
 
-# 
+#
 # dummy constructor - just stores the expresstion without any processing
 Equation(expr::ExtExpr) = Equation("", EqnFlags(), expr, Expr(:block), LittleDict(), LittleDict(), LittleDict(), eqnnotready, eqnnotready)
 

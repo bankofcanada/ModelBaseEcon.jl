@@ -598,34 +598,34 @@ end
     @equations mod begin
         x[t-1] = sx[t+1]
         @lag(x[t]) = @lag(sx[t+2])
-        # 
+        #
         x[t-1] + a = sx[t+1] + 3
         @lag(x[t] + a) = @lag(sx[t+2] + 3)
-        # 
+        #
         x[t-2] = sx[t]
         @lag(x[t], 2) = @lead(sx[t-2], 2)
-        # 
+        #
         x[t] - x[t-1] = x[t+1] - x[t] + sx[t]
         @d(x[t]) = @d(x[t+1]) + sx[t]
-        # 
+        #
         (x[t] - x[t+1]) - (x[t-1] - x[t]) = sx[t]
         @d(x[t] - x[t+1]) = sx[t]
-        # 
+        #
         x[t] - x[t-2] = sx[t]
         @d(x[t], 0, 2) = sx[t]
-        # 
+        #
         x[t] - 2x[t-1] + x[t-2] = sx[t]
         @d(x[t], 2) = sx[t]
-        # 
+        #
         x[t] - x[t-1] - x[t-2] + x[t-3] = sx[t]
         @d(x[t], 1, 2) = sx[t]
-        # 
+        #
         log(x[t] - x[t-2]) - log(x[t-1] - x[t-3]) = sx[t]
         @dlog(@d(x[t], 0, 2)) = sx[t]
-        # 
+        #
         (x[t] + 0.3x[t+2]) + (x[t-1] + 0.3x[t+1]) + (x[t-2] + 0.3x[t]) = 0
         @movsum(x[t] + 0.3x[t+2], 3) = 0
-        # 
+        #
         ((x[t] + 0.3x[t+2]) + (x[t-1] + 0.3x[t+1]) + (x[t-2] + 0.3x[t])) / 3 = 0
         @movav(x[t] + 0.3x[t+2], 3) = 0
     end
@@ -927,7 +927,7 @@ end
     end
     @test length(out) == 3
     @test length(split(out[end], "=")) == 2
-    # 
+    #
     @test propertynames(ss) == tuple(m.allvars...)
     @test ss.pinf.level == ss.pinf.data[1]
     @test ss.pinf.slope == ss.pinf.data[2]
@@ -1042,7 +1042,7 @@ end
             log(x[t]) = lx[t] + s2[t+1]
         end
         @initialize m
-        # 
+        #
         @test nvariables(m) == 2
         @test nshocks(m) == 2
         @test nequations(m) == 2
@@ -1050,7 +1050,7 @@ end
         @test neqns(ss) == 4
         eq1, eq2, eq3, eq4 = ss.equations
         @test length(ss.values) == 2 * length(m.allvars)
-        # 
+        #
         # test with eq1
         ss.lx.data .= [1.5, 0.2]
         ss.x.data .= [0.0, 0.2]
