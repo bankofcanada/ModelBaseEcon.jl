@@ -77,7 +77,7 @@ hint(::ModelNotInitError) = "Call `@initialize model` first."
 """
     struct NotImplementedError <: ModelErrorBase
 
-Specific error type used when a feature is planned but not yet implemented. 
+Specific error type used when a feature is planned but not yet implemented.
 """
 struct NotImplementedError <: ModelErrorBase
     descr

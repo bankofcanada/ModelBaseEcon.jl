@@ -24,10 +24,10 @@ respects, but also holds meta-information about the variable, such as doc
 string, the variable type, transformation, steady state behaviour.
 
 Variable types include
- * `:var` - a regular variable is endogenous by default, but can be exogenized. 
+ * `:var` - a regular variable is endogenous by default, but can be exogenized.
  * `:shock` - a shock variable is exogenous by default, but can be endogenized.
    Steady state is 0.
- * `:exog` - an exogenous variable is always exogenous. 
+ * `:exog` - an exogenous variable is always exogenous.
 
  These can be declared with [`@variables`](@ref), [`@shocks`](@ref), and
  [`@exogenous`](@ref) blocks. You can also use `@exog` within an
@@ -40,7 +40,7 @@ Variable types include
    positive. Internally the solver work with the logarithm of the variable. in
    steady state these variables exhibit exponential growth (the log variable
    grows linearly).
-* `:neglog` - same as `:log` but for variables that are strictly negative. 
+* `:neglog` - same as `:log` but for variables that are strictly negative.
 
 These can be declared with [`@logvariables`](@ref), [`@neglogvariables`](@ref),
 `@log`, `@neglog`.
@@ -51,11 +51,11 @@ Steady state behaviours include
 * `:growth` - these variables have constant slope in steady state and final
   conditions. The meaning of "slope" changes depending on the transformation.
   For `:log` and `:neglog` variables this is the growth rate, while for `:none`
-  variables it is the usual slope of linear growth. 
+  variables it is the usual slope of linear growth.
 
 Shock variables are always `:const` while regular variables are assumed
 `:growth`. They can be declared `:const` using `@steady`.
- 
+
 """
 struct ModelVariable
     doc::String
@@ -79,7 +79,7 @@ function Base.getproperty(v::ModelVariable, s::Symbol)
             return vt
         end
         tt = getfield(v, :tr_type)
-        if tt !== :none 
+        if tt !== :none
             return tt
         end
         if getfield(v, :ss_type) === :const

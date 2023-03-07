@@ -39,7 +39,7 @@ end
     log(lx[t]) - log(lx[t - 1]) = log(0.0 + 1.0)
 end
 
-@initialize model 
+@initialize model
 
 end"""))
     m = ASUBS.model

@@ -10,8 +10,8 @@ model = Model()
 model.flags.linear = true
 
 @parameters model begin
-    p_dlp = 0.0050000000000000 
-    p_dly = 0.0045000000000000 
+    p_dlp = 0.0050000000000000
+    p_dly = 0.0045000000000000
 end
 
 @variables model begin

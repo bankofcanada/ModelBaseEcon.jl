@@ -3,10 +3,10 @@
 Simple model with 3 variables, 3 shocks and 3 transition equations.
 Like E2, but with more lags/leads.
 
-The NL version is artificially made non-linear by taking one of the 
-equations (pinf[t]=rhs...) and rewriting it as exp(pinf[t])=exp(rhs...). 
-The solution of E3nl is identical to the linear E3 and can be used for 
-testing of the linearization solver. 
+The NL version is artificially made non-linear by taking one of the
+equations (pinf[t]=rhs...) and rewriting it as exp(pinf[t])=exp(rhs...).
+The solution of E3nl is identical to the linear E3 and can be used for
+testing of the linearization solver.
 """
 module  E3nl
 

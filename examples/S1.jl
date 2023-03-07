@@ -12,9 +12,9 @@ model.flags.linear = true
 @shocks model b_shk c_shk
 
 @parameters model begin
-    a_ss = 1.2 
-    α = 0.5 
-    β = 0.8 
+    a_ss = 1.2
+    α = 0.5
+    β = 0.8
     q = 2
 end
 

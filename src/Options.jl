@@ -15,7 +15,7 @@ Implements the [`Options`](@ref) data structure.
   * [`Options`](@ref)
   * [`getoption`](@ref) - read the value of an option
   * [`getoption!`](@ref) - if not present, also create an option
-  * [`setoption!`](@ref) - create or update the value of an option 
+  * [`setoption!`](@ref) - create or update the value of an option
 
 """
 module OptionsMod
@@ -54,7 +54,7 @@ Options:
 
 ```
 """
-struct Options 
+struct Options
     contents::Dict{Symbol,Any}
     # Options() = new(Dict())
     Options(c::Dict{Symbol,<:Any}) = new(c)
@@ -81,20 +81,20 @@ Options(pairs::Pair{<:AbstractString,<:Any}...) = Options(Dict(Symbol(k) => v fo
 Construct an Options instance as an exact copy of an existing instance.
 """
 Options(opts::Options) = Options(deepcopy(Dict(opts.contents)))
-    
+
 ############
 # compare
 
 Base.:(==)(opts::Options, opts2::Options) = opts.contents == opts2.contents
 Base.:(==)(opts::Dict, opts2::Options) = opts == opts2.contents
 Base.:(==)(opts::Options, opts2::Dict) = opts.contents == opts2
-    
+
 ############
 # merge
 
 """
     merge(o1::Options, o2::Options, ...)
-    
+
 Merge the given Options instances into a new Options instance.
 If the same option key exists in more than one instance, keep the value from
 the last one.
@@ -117,7 +117,7 @@ Base.propertynames(opts::Options) = tuple(keys(opts.contents)...)
 
 Base.setproperty!(opts::Options, name::Symbol, val) = opts.contents[name] = val
 
-Base.getproperty(opts::Options, name::Symbol) = 
+Base.getproperty(opts::Options, name::Symbol) =
     name ∈ fieldnames(Options) ? getfield(opts, name) :
     name ∈ keys(opts.contents) ? opts.contents[name]  :
                                  error("Option $name not set.");
@@ -135,7 +135,7 @@ function Base.show(io::IO, opts::Options)
     print(io, ")")
 end
 
-function Base.show(io::IO, ::MIME"text/plain", opts::Options) 
+function Base.show(io::IO, ::MIME"text/plain", opts::Options)
     recur_io = IOContext(io, :SHOWN_SET => opts.contents,
                              :typeinfo => eltype(opts.contents),
                              :compact => get(io, :compact, true))
@@ -175,7 +175,7 @@ if the name of the option is not a valid identifier.
 """
 function getoption end
 function getoption(opts::Options; kwargs...)
-    if length(kwargs) == 1 
+    if length(kwargs) == 1
         return get(opts.contents, first(kwargs)...)
     else
         return tuple((get(opts.contents, kv...) for kv in kwargs)...)
@@ -201,7 +201,7 @@ helpful if the name of the option is not a valid identifier.
 """
 function getoption! end
 function getoption!(opts::Options; kwargs...)
-    if length(kwargs) == 1 
+    if length(kwargs) == 1
         return get!(opts.contents, first(kwargs)...)
     else
         return tuple((get!(opts.contents, kv...) for kv in kwargs)...)

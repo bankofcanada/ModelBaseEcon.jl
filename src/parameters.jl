@@ -93,13 +93,13 @@ macro parameters()
 end
 
 # To deepcopy() Parameters, we make a new Ref to the same module and a deepcopy of contents.
-function Base.deepcopy_internal(p::Parameters, stackdict::IdDict) 
+function Base.deepcopy_internal(p::Parameters, stackdict::IdDict)
     if haskey(stackdict, p)
         return stackdict[p]::typeof(p)
     end
     p_copy = Parameters(
-        Ref(p.mod[]), 
-        Base.deepcopy_internal(p.contents, stackdict), 
+        Ref(p.mod[]),
+        Base.deepcopy_internal(p.contents, stackdict),
         Ref(p.rev[])
     )
     stackdict[p] = p_copy
@@ -230,7 +230,7 @@ end
 
 Evaluate the given expression in the context of the given parameters `params`.
 
-If `what` is a `ModelParam`, its current value is returned. If it's a link and 
+If `what` is a `ModelParam`, its current value is returned. If it's a link and
 there's a chance it might be out of date, call [`update_links!`](@ref).
 
 If `what` is a Symbol or an Expr, all mentions of parameter names are
@@ -256,8 +256,8 @@ peval(m::AbstractModel, what) = peval(parameters(m), what)
 """
     @peval params what
 
-Evaluate the expression `what` within the context of the 
-given set of parameters 
+Evaluate the expression `what` within the context of the
+given set of parameters
 """
 macro peval(par, what)
     qwhat = Meta.quot(what)
@@ -408,7 +408,7 @@ end
 
 Assign values to model parameters. New parameters can be given as key-value pairs
 in the function call, or in a collection, such as a `Dict`, for example.
-    
+
 Individual parameters can be assigned directly to the `model` using
 dot notation. This function should be more convenient when all parameters values
 are loaded from a file and available in a dictionary or some other key-value

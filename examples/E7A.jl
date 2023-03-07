@@ -11,10 +11,10 @@ model.flags.linear = false
 model.options.substitutions = false
 
 @parameters model begin
-    delta = 0.1000000000000000 
-    p_dlc_ss = 0.0040000000000000 
-    p_dlinv_ss = 0.0040000000000000 
-    p_growth = 0.0040000000000000 
+    delta = 0.1000000000000000
+    p_dlc_ss = 0.0040000000000000
+    p_dlinv_ss = 0.0040000000000000
+    p_growth = 0.0040000000000000
 end
 
 @variables model begin

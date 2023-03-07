@@ -44,7 +44,7 @@ struct SteadyStateVariable{DATA<:AbstractVector{Float64},MASK<:AbstractVector{Bo
     index::Int
     # A view in the SteadyStateData.values location for this variable
     data::DATA
-    # A view into the mask array 
+    # A view into the mask array
     mask::MASK
 end
 
@@ -98,7 +98,7 @@ function Base.getindex(v::SteadyStateVariable, t; ref=first(t))
 end
 
 #################################
-# pretty printing 
+# pretty printing
 
 
 # Return a 5-tuple with the number of characters for the name, and the alignment
@@ -295,7 +295,7 @@ Base.getindex(ssd::SteadyStateData, sym::AbstractString) = getproperty(ssd, Symb
 @inline ss_symbol(ssd::SteadyStateData, vi::Int) = Symbol("#", ssd.vars[(1+vi)÷2].name.name, "#", (vi % 2 == 1) ? :lvl : :slp, "#")
 
 #########################
-# 
+#
 
 export printsstate
 
@@ -328,14 +328,14 @@ printsstate(model::AbstractModel) = printsstate(Base.stdout, model)
 #   in the steady state equation, we assume that the variable y_ss
 #   follows a linear motion expressed as y_ss[t] = y_ss#lvl + t * y_ss#slp
 #   where y_ss#lvl and y_ss#slp are two unknowns we solve for.
-# 
+#
 #   The dynamic equation has mentions of lags and leads. We replace those
 #   with the above expression.
-# 
+#
 #   Since we have two parameters to determine, we need two steady state equations
 #   from each dynamic equation. We get this by writing the dynamic equation at
 #   two different values of `t` - 0 and another one we call `shift`.
-# 
+#
 #   Shift is a an option in the model object, which the user can set to any integer
 #   other than 0. The default is 10.
 
@@ -519,14 +519,14 @@ function setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Mod
     end
     ###############################################
     #     ssprocess(val)
-    # 
+    #
     # Process the given value to extract information about mentioned parameters and variables.
     # This function has the side effect of populating the vectors
     # `vinds`, `vsyms`, `val_params` and `source`
-    # 
+    #
     # Algorithm is recursive over the given expression. The bottom of the recursion is the
     # processing of a `Number`, a `Symbol`, (or a `LineNumberNode`).
-    # 
+    #
     # we will store indices
     local vinds = Int64[]
     local vsyms = Symbol[]
@@ -590,12 +590,12 @@ function setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Mod
     end
     # end of ssprocess() definition
     ###############################################
-    # 
+    #
     lhs, rhs = expr.args
     lhs = ssprocess(lhs)
     rhs = ssprocess(rhs)
     expr.args .= MacroTools.unblock.(expr.args)
-    # 
+    #
     nargs = length(vinds)
     # In case there's no source information, add a dummy one
     push!(source, LineNumberNode(0))
@@ -712,7 +712,7 @@ issssolved(ss::SteadyStateData) = all(ss.mask)
     assign_sstate!(model; var = value, ...)
 
 Assign a steady state solution from the given collection of name=>value pairs
-into the given model. 
+into the given model.
 
 In each pair, the value can be a number in which case it is assigned as the
 level and the slope is set to 0. The value can also be a `Tuple` or a `Vector`
@@ -772,7 +772,7 @@ export export_sstate
 """
     export_sstate!(container, model)
 
-Fill the given container with the steady state solution stored in the 
+Fill the given container with the steady state solution stored in the
 given model. The value for each variable will be a number, if the variable has
 zero slope, or else a named tuple of the form `(level = NUM, slope=NUM)`.
 """

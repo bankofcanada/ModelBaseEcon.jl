@@ -36,15 +36,15 @@ using Printf
 export @timer, inittimer, printtimer, stoptimer
 
 """
-    timerData 
-    
+    timerData
+
 Stores timing data.
-    
+
 !!! note
     For internal use. Do not modify directly.
 
 If equal to `nothing`, timing is disabled.
-Otherwise, contains a "database" of timing data in the 
+Otherwise, contains a "database" of timing data in the
 form of a Dict.
 """
 global timerData = nothing

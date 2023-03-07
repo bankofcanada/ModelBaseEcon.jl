@@ -84,12 +84,12 @@ linearizationerror(args...) = modelerror(LinearizationError, args...)
 export linearize!
 function linearize!(model::Model;
     # Idea:
-    # 
-    # We compute the residual and the Jacobian matrix at the steady state and 
+    #
+    # We compute the residual and the Jacobian matrix at the steady state and
     # store them in the model evaluation data. We store that into our new
     # linearized model evaluation data, which we place in the Model instance.
-    # When we evaluate the linearized model residual, all we need to do is multiply 
-    # the stored steady state Jacobian by the deviation of the given point from 
+    # When we evaluate the linearized model residual, all we need to do is multiply
+    # the stored steady state Jacobian by the deviation of the given point from
     # the steady state and add the stored steady state residual.
 
     sstate::SteadyStateData=model.sstate,
@@ -133,7 +133,7 @@ Create a new model that is the linear approximation of the given model about its
 
 ### Keyword arguments
   * `sstate` - linearize about the provided steady state solution
-  * `deviation`::Bool - whether or not the linearized model will tread data passed 
+  * `deviation`::Bool - whether or not the linearized model will tread data passed
 to is as deviation from the steady state
 
 See also: [`linearize!`](@ref) and [`with_linearized`](@ref)
@@ -144,13 +144,13 @@ export with_linearized
 """
     with_linearized(F::Function, model::Model; <arguments>)
 
-Apply the given function on a new model that is the linear approximation 
+Apply the given function on a new model that is the linear approximation
 of the given model about its steady state.  This is meant to be used
 with the `do` syntax, as in the example below.
 
 ### Keyword arguments
   * `sstate` - linearize about the provided steady state solution
-  * `deviation`::Bool - whether or not the linearized model will tread data passed 
+  * `deviation`::Bool - whether or not the linearized model will tread data passed
 to is as deviation from the steady state
 
 See also: [`linearize!`](@ref) and [`with_linearized`](@ref)
@@ -169,7 +169,7 @@ function with_linearized(F::Function, model::Model; kwargs...)
     variant = model.options.variant
     lmed = get(model.evaldata, :linearize, nothing)
     ret = try
-        # linearize 
+        # linearize
         linearize!(model; kwargs...)
         # do what we have to do
         F(model)
