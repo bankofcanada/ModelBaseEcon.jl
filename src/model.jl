@@ -816,8 +816,9 @@ function process_equation(model::Model, expr::Expr;
     sssyms = values(ssrefs)
     psyms = values(prefs)
     funcs_expr = makefuncs(residual, tssyms, sssyms, psyms, modelmodule)
-    resid, RJ = modelmodule.eval(funcs_expr)
+    resid, RJ, resid_param, chunk = modelmodule.eval(funcs_expr)
     _update_eqn_params!(resid, model.parameters)
+    modelmodule.eval(:($(@__MODULE__).precompilefuncs($resid, $RJ, $resid_param, $chunk)))
     tsrefs′ = LittleDict{Tuple{ModelSymbol,Int},Symbol}()
     for ((modsym, i), sym) in tsrefs
         tsrefs′[(ModelSymbol(modsym), i)] = sym

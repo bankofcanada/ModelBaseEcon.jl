@@ -11,7 +11,7 @@
 struct ModelBaseEconTag end
 
 """
-    precompilefuncs(resid, RJ, ::Val{N}, tag) where N
+    precompilefuncs(resid, RJ, resid_param, N::Int)
 
 Pre-compiles the given `resid` and `RJ` functions together
 with the dual-number arithmetic required by ForwardDiff.
@@ -20,7 +20,7 @@ with the dual-number arithmetic required by ForwardDiff.
     Internal function. Do not call directly
 
 """
-function precompilefuncs(resid, RJ, ::Val{N}) where {N}
+function precompilefuncs(resid, RJ, resid_param, N::Int)
     ccall(:jl_generating_output, Cint, ()) == 1 || return nothing
 
     tagtype = ModelBaseEconTag
@@ -30,6 +30,16 @@ function precompilefuncs(resid, RJ, ::Val{N}) where {N}
     precompile(resid, (Vector{Float64},)) || error("precompile")
     precompile(resid, (duals,)) || error("precompile")
     precompile(RJ, (Vector{Float64},)) || error("precompile")
+
+    # We precompile a version of the "function barrier" for the inital types
+    # of the parameters. This is a good apprixmimation of what will be evaluated
+    # in practice. If a user updates the parameter to a different type, a new version
+    # of the function barrier will have to be compiled but this should be fairly rare in
+    # practice.
+    type_params = typeof.(values(resid.params))
+    if !isempty(type_params)
+        precompile(resid_param, (duals, type_params...)) || error("precompile")
+    end
 
     return nothing
 end
@@ -58,8 +68,9 @@ function funcsyms(mod::Module)
     num = mod.__counter[]
     fn1 = Symbol("resid_", num)
     fn2 = Symbol("RJ_", num)
+    fn3 = Symbol("resid_param_", num)
     mod.__counter[] += 1
-    return fn1, fn2
+    return fn1, fn2, fn3
 end
 
 const MAX_CHUNK_SIZE = 4
@@ -93,21 +104,46 @@ callable `EquationEvaluator` instance) and a second function that evaluates both
 the residual and its gradient (as a callable `EquationGradient` instance).
 """
 function makefuncs(expr, tssyms, sssyms, psyms, mod)
-    fn1, fn2 = funcsyms(mod)
+    fn1, fn2, fn3 = funcsyms(mod)
     x = gensym("x")
     nargs = length(tssyms) + length(sssyms)
     chunk = min(nargs, MAX_CHUNK_SIZE)
+    has_psyms = !isempty(psyms)
+    # This is the expression that goes inside the body of the "outer" function.
+    # If the equation has no parameters, then we just unpack x and evaluate the expressions
+    # Otherwise, we unpack the parameters (which have unknown types) and pass it
+    # to another function that acts like a function barrier where the types are known.
+    psym_expr = if has_psyms
+        quote
+            ($(psyms...),) = values(ee.params)
+            $fn3($x, $(psyms...))
+        end
+    else
+        quote
+            ($(tssyms...), $(sssyms...),) = $x
+            $expr
+        end
+    end
+    # The expression for the function barrier
+    fn3_expr = if has_psyms
+        quote
+            function $fn3($x, $(psyms...))
+                ($(tssyms...), $(sssyms...),) = $x
+                $expr
+            end
+        end
+    else
+        :(const $fn3 = nothing)
+    end
     return quote
         function (ee::EquationEvaluator{$(QuoteNode(fn1))})($x::Vector{<:Real})
-            ($(tssyms...), $(sssyms...),) = $x
-            ($(psyms...),) = values(ee.params)
-            $expr
+            $psym_expr
         end
         const $fn1 = EquationEvaluator{$(QuoteNode(fn1))}(UInt(0),
             $(@__MODULE__).LittleDict(Symbol[$(QuoteNode.(psyms)...)], fill!(Vector{Any}(undef, $(length(psyms))), nothing)))
         const $fn2 = EquationGradient($FunctionWrapper($fn1), $nargs, Val($chunk))
-        $(@__MODULE__).precompilefuncs($fn1, $fn2, Val($chunk))
-        ($fn1, $fn2)
+        $fn3_expr
+        ($fn1, $fn2, $fn3, $chunk)
     end
 end
 
