@@ -720,7 +720,7 @@ function updatessdata!(model::AbstractModel)
         end
     end
     if !model.flags.ssZeroSlope
-        for eqn in alleqns(model)
+        for (key, eqn) in alleqns(model)
             eqn_name = Symbol("$(eqn.name)_tshift")
             if eqn_name ∉ keys(ss.equations)
                 push!(ss.equations, eqn_name => make_sseqn(model, eqn, true, eqn_name))
