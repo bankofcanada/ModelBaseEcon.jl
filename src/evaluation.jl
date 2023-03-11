@@ -365,7 +365,11 @@ function eval_RJ(point::Matrix{Float64}, med::ModelEvaluationData)
     neqns = length(med.alleqns)
     res = similar(med.R)
     jac = med.J
-    for (i, eqn, inds, ri, ed) in zip(1:neqns, med.alleqns, med.allinds, med.rowinds, med.eedata)
+    Threads.@threads for i in 1:neqns
+        eqn = med.alleqns[i]
+        inds = med.allinds[i]
+        ri = med.rowinds[i]
+        ed = med.eedata[i]
         _update_eqn_params!(eqn.eval_resid, med.params[])
         res[i], jac.nzval[ri] = eval_RJ(eqn, point[inds], ed)
     end
@@ -458,7 +462,11 @@ function eval_RJ(point::Matrix{Float64}, slmed::SelectiveLinearizationMED)
     neqns = length(med.alleqns)
     res = similar(med.R)
     jac = med.J
-    for (i, eqn, inds, ri, eed) in zip(1:neqns, med.alleqns, med.allinds, med.rowinds, slmed.eedata)
+    Threads.@threads for i in 1:neqns
+        eqn = med.alleqns[i]
+        inds = med.allinds[i]
+        ri = med.rowinds[i]
+        eed = slmed.eedata[i]
         islin(eqn) || _update_eqn_params!(eqn.eval_resid, med.params[])
         res[i], jac.nzval[ri] = eval_RJ(eqn, point[inds], eed)
     end
