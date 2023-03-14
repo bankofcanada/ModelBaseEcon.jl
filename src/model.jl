@@ -359,7 +359,7 @@ end
 # arrays within the model instance. The actual processing is done in @initialize
 
 export @variables, @logvariables, @neglogvariables, @steadyvariables, @exogenous, @shocks
-export @parameters, @equations, @autoshocks, @autoexogenize
+export @parameters, @equations, @autoshocks, @autoexogenize, @changeequations
 
 """
     @variables model name1 name2 ...
@@ -552,6 +552,43 @@ macro equations(model, block::Expr)
     end
     return esc(ret)
 end
+
+function changeequations!(eqns::OrderedDict{Symbol,Equation}, p::Pair{Symbol,Expr})
+    sym, e = p
+    eqnkeys = Set(keys(eqns))
+    if sym == :_unnamed_equation_
+        push!(eqns, Symbol("_EQ"*string(length(eqnkeys)+1)) => Equation(e))
+    elseif sym ∈ eqnkeys
+        eqns[sym] = Equation(e)
+    else
+        push!(eqns, sym => Equation(e))
+    end
+end
+
+macro changeequations(model, block::Expr)
+    if block.head != :block
+        modelerror("A list of equations must be within a begin-end block")
+    end
+    ret = Expr(:block)
+    eqn = Expr(:block)
+    for expr in block.args
+        if isa(expr, LineNumberNode)
+            push!(eqn.args, expr)
+        else
+            push!(eqn.args, expr)
+            if expr.args[1] isa Expr && expr.args[1].args[1] == :(=>)
+                sym = expr.args[1].args[2]
+                push!(ret.args, :(ModelBaseEcon.changeequations!($model.equations, $sym => $(Meta.quot(eqn)))))
+            else
+                push!(ret.args, :(ModelBaseEcon.changeequations!($model.equations, :_unnamed_equation_ => $(Meta.quot(eqn)))))
+            end
+            eqn = Expr(:block)
+        end
+    end
+    return esc(ret)
+end
+
+
 
 ################################################################
 # The processing of equations during model initialization.
