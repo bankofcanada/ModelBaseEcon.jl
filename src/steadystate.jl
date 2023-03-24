@@ -709,9 +709,12 @@ function updatessdata!(model::AbstractModel)
     # TODO: do the masks and values matter?
     # empty!(ss.values)
     # empty!(ss.mask)
-    # for var in model.allvars
-    #     push!(ss, var)
-    # end
+    existing_vars = [var.name for var in ss.vars] # actually a vector of ModelVariable
+    for var in model.allvars
+        if var ∉ existing_vars
+            push!(ss, var)
+        end
+    end
     # empty!(ss.equations)
     for (key, eqn) in alleqns(model)
         eqn_name = eqn.name
