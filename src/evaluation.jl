@@ -70,14 +70,15 @@ equation and its gradient.
 """
 function funcsyms end
 
-function funcsyms(mod::Module)
-    if !isdefined(mod, :__counter)
-        Base.eval(mod, :(__counter = Ref{Int}(1)))
+function funcsyms(mod::Module, eqn_name::Symbol)
+    iterator = 1
+    fn1 = Symbol("resid_", eqn_name)
+    fn2 = Symbol("RJ_", eqn_name)
+    while isdefined(mod, fn1) || isdefined(Main, fn1)
+        iterator += 1
+        fn1 = Symbol("resid_", eqn_name, "_", iterator)
+        fn2 = Symbol("RJ_", eqn_name, "_", iterator)
     end
-    num = mod.__counter[]
-    fn1 = Symbol("resid_", num)
-    fn2 = Symbol("RJ_", num)
-    mod.__counter[] += 1
     return fn1, fn2
 end
 
@@ -106,8 +107,8 @@ defined. The quote block contains definitions of the residual function (as a
 callable `EquationEvaluator` instance) and a second function that evaluates both
 the residual and its gradient (as a callable `EquationGradient` instance).
 """
-function makefuncs(expr, tssyms, sssyms, psyms, mod)
-    fn1, fn2 = funcsyms(mod)
+function makefuncs(eqn_name, expr, tssyms, sssyms, psyms, mod)
+    fn1, fn2 = funcsyms(mod, eqn_name)
     x = gensym("x")
     nargs = length(tssyms) + length(sssyms)
     chunk = min(nargs, MAX_CHUNK_SIZE[])

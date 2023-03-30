@@ -505,7 +505,13 @@ addition to the equations generated automatically from the dynamic system.
 """
 function setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Module=moduleof(model), eqn_key=:_undefined_)
     if eqn_key == :_undefined_
-        eqn_key = Symbol("_SSEQ$(length(model.sstate.constraints)+1)")
+        allkeys = collect(keys(model.sstate.constraints))
+        eqn_key = Symbol("_SSEQ$(length(allkeys)+1)")
+        incrementer = 1
+        while eqn_key ∈ allkeys
+            incrementer += 1
+            eqn_key = Symbol("_SSEQ$(length(allkeys)+incrementer)")
+        end
     end
 
     if expr.head != :(=)
@@ -609,7 +615,7 @@ function setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Mod
     # create the resid and RJ functions for the new equation
     # To do this, we use `makefuncs` from evaluation.jl
     residual = Expr(:block, source[1], :($(lhs) - $(rhs)))
-    funcs_expr = makefuncs(residual, vsyms, [], unique(val_params), modelmodule)
+    funcs_expr = makefuncs(eqn_key, residual, vsyms, [], unique(val_params), modelmodule)
     resid, RJ = modelmodule.eval(funcs_expr)
     _update_eqn_params!(resid, model.parameters)
     # We have all the ingredients to create the instance of SteadyStateEquation

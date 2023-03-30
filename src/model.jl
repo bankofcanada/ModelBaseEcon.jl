@@ -360,6 +360,7 @@ end
 
 export @variables, @logvariables, @neglogvariables, @steadyvariables, @exogenous, @shocks
 export @parameters, @equations, @autoshocks, @autoexogenize, @changeequations
+export @removevariables, @removeparameters, @removeequations, @removeshocks, @removesteadystate, @removeautoexogenize
 
 """
     @variables model name1 name2 ...
@@ -441,6 +442,14 @@ macro exogenous(model, vars::Symbol...)
     return esc(:(unique!(append!($(model).variables, to_exog.($vars))); nothing))
 end
 
+macro removevariables(model, block::Expr)
+    vars = filter(a -> !isa(a, LineNumberNode), block.args)
+    return esc(:(unique!(deleteat!($(model).variables, findall(x -> x ∈ $vars, $(model).variables))); nothing))
+end
+macro removevariables(model, vars::Symbol...)
+    return esc(:(unique!(deleteat!($(model).variables, findall(x -> x ∈ $vars, $(model).variables))); nothing))
+end
+
 """
     @shocks
 
@@ -453,6 +462,14 @@ macro shocks(model, block::Expr)
 end
 macro shocks(model, shks::Symbol...)
     return esc(:(unique!(append!($(model).shocks, to_shock.($shks))); nothing))
+end
+
+macro removeshocks(model, block::Expr)
+    shocks = filter(a -> !isa(a, LineNumberNode), block.args)
+    return esc(:(unique!(deleteat!($(model).shocks, findall(x -> x ∈ $shocks, $(model).shocks))); nothing))
+end
+macro removeshocks(model, shocks::Symbol...)
+    return esc(:(unique!(deleteat!($(model).shocks, findall(x -> x ∈ $shocks, $(model).shocks))); nothing))
 end
 
 """
@@ -507,6 +524,20 @@ macro parameters(model, args::Expr...)
     return esc(ret)
 end
 
+macro removeparameters(model, block::Expr)
+    params = filter(a -> !isa(a, LineNumberNode), block.args)
+    return esc(:(ModelBaseEcon.removeparameters!($(model), $(params)); nothing))
+end
+macro removeparameters(model, params::Symbol...)
+    return esc(:(ModelBaseEcon.removeparameters!($(model), $(params)); nothing))
+end
+
+function removeparameters!(model::Model, params::Vector{Any})
+    for param in params
+        delete!(model.parameters.contents, param)
+    end
+end
+
 """
     @autoexogenize model begin
         varname = shkname
@@ -523,6 +554,25 @@ macro autoexogenize(model, args::Expr...)
     args = filter(a -> a isa Expr && a.head == :(=), [args...])
     autoexos = Dict{Symbol,Any}([ex.args for ex in args])
     esc(:(merge!($(model).autoexogenize, $(autoexos)); nothing))
+end
+
+macro removeautoexogenize(model, args::Expr...)
+    if length(args) == 1 && args[1].head == :block
+        args = args[1].args
+    end
+    args = filter(a -> a isa Expr && a.head == :(=), [args...])
+    autoexos = Dict{Symbol,Any}([ex.args for ex in args])
+    esc(:(ModelBaseEcon.removeautoexogenize!($(model).autoexogenize, $(autoexos)); nothing))
+end
+
+function removeautoexogenize!(autoexogdict, entries)
+    for entry in entries
+        if entry[1] ∈ keys(autoexogdict)
+            if autoexogdict[entry[1]] == entry[2]
+                delete!(autoexogdict, entry[1])
+            end
+        end
+    end
 end
 
 
@@ -553,18 +603,6 @@ macro equations(model, block::Expr)
     return esc(ret)
 end
 
-function changeequations!(eqns::OrderedDict{Symbol,Equation}, p::Pair{Symbol,Expr})
-    sym, e = p
-    eqnkeys = Set(keys(eqns))
-    if sym == :_unnamed_equation_
-        push!(eqns, Symbol("_EQ"*string(length(eqnkeys)+1)) => Equation(e))
-    elseif sym ∈ eqnkeys
-        eqns[sym] = Equation(e)
-    else
-        push!(eqns, sym => Equation(e))
-    end
-end
-
 macro changeequations(model, block::Expr)
     if block.head != :block
         modelerror("A list of equations must be within a begin-end block")
@@ -586,6 +624,71 @@ macro changeequations(model, block::Expr)
         end
     end
     return esc(ret)
+end
+
+function changeequations!(eqns::OrderedDict{Symbol,Equation}, p::Pair{Symbol,Expr})
+    sym, e = p
+    # println(length(eqns))
+    eqnkeys = Set(keys(eqns))
+    if sym == :_unnamed_equation_
+        eqn_name = Symbol("_EQ"*string(length(eqnkeys)+1))
+        incrementer = 1
+        while eqn_name ∈ eqnkeys
+            incrementer += 1
+            eqn_name = Symbol("_EQ"*string(length(eqnkeys)+incrementer))
+        end
+        # println(eqn_name)
+        push!(eqns, eqn_name => Equation(e))
+    elseif sym ∈ eqnkeys
+        eqns[sym] = Equation(e)
+    else
+        push!(eqns, sym => Equation(e))
+    end
+end
+
+macro removeequations(model, block::Expr)
+    eqn_keys = filter(a -> !isa(a, LineNumberNode), block.args)
+    return esc(:(ModelBaseEcon.removeequations!($(model), $(eqn_keys)); nothing))
+end
+macro removeequations(model, eqn_keys::Symbol...)
+    return esc(:(ModelBaseEcon.removeequations!($(model), $(eqn_keys)); nothing))
+end
+
+function removeequations!(model::Model, keys::Vector{Any})
+    for key in keys
+        remove_aux_equations!(model, key)
+        remove_sstate_equations!(model, key)
+        delete!(model.equations, key)
+    end
+end
+
+macro removesteadystate(model, block::Expr)
+    eqn_keys = filter(a -> !isa(a, LineNumberNode), block.args)
+    return esc(:(ModelBaseEcon.remove_sstate_equations!($(model), $eqn_keys); nothing))
+end
+macro removesteadystate(model, eqn_keys::Symbol...)
+    return esc(:(ModelBaseEcon.remove_sstate_equations!($(model), $eqn_keys); nothing))
+end
+
+function remove_sstate_equations!(model::Model, key::Symbol)
+    ss = sstate(model)
+    if key ∈ keys(ss.equations)
+        delete!(ss.equations, key)
+    end
+    if key ∈ keys(ss.constraints)
+        delete!(ss.constraints, key)
+    end
+end
+function remove_sstate_equations!(model::Model, keys_vector::Vector{Any})
+    ss = sstate(model)
+    for key in keys_vector
+        if key ∈ keys(ss.equations)
+            delete!(ss.equations, key)
+        end
+        if key ∈ keys(ss.constraints)
+            delete!(ss.constraints, key)
+        end
+    end
 end
 
 
@@ -850,7 +953,7 @@ function process_equation(model::Model, expr::Expr;
     if eqn_name == :_unnamed_equation_
         throw(ArgumentError("No equation name specified"))
     end
-    funcs_expr = makefuncs(residual, tssyms, sssyms, psyms, modelmodule)
+    funcs_expr = makefuncs(eqn_name, residual, tssyms, sssyms, psyms, modelmodule)
     resid, RJ = modelmodule.eval(funcs_expr)
     _update_eqn_params!(resid, model.parameters)
     return Equation(doc, eqn_name, flags, expr, residual, tsrefs, ssrefs, prefs, resid, RJ)
@@ -1054,9 +1157,18 @@ end
 
 function reinitialize!(model::Model, modelmodule::Module)
     initfuncs(modelmodule)
+    samename = Symbol[intersect(model.allvars, keys(model.parameters))...]
+    if !isempty(samename)
+        modelerror("Found $(length(samename)) names that are both variables and parameters: $(join(samename, ", "))")
+    end
+    # varshks = model.varshks
+    # model.variables = varshks[.!isshock.(varshks)]
+    # model.shocks = varshks[isshock.(varshks)]
     # stoptimer()
     # inittimer()
     model.dynss = false
+    model.maxlag = 0
+    model.maxlead = 0
     for (key, e) in model.equations
         # println(e.eval_resid)
         if e.eval_resid == eqnnotready
@@ -1066,9 +1178,16 @@ function reinitialize!(model::Model, modelmodule::Module)
             # println("Adding equation")
             # @timer "add_equation" 
             add_equation!(model, key, e.expr; modelmodule=modelmodule)
+        else
+            #TODO: check this for AUX equations
+            model.maxlag = max(model.maxlag, e.maxlag)
+            model.maxlead = max(model.maxlead, e.maxlead)
+            model.dynss = model.dynss || !isempty(e.ssrefs)
         end
     end
-    updatessdata!(model)
+    # TODO: update the SS data instead
+    initssdata!(model)
+    # updatessdata!(model)
     update_links!(model.parameters)
     if !model.dynss
         # Note: we cannot set any other evaluation method yet - they require steady
@@ -1185,9 +1304,15 @@ function remove_aux_equations!(model::Model, key::Symbol)
     end
 end
 
-function remove_sstate_equations!(model::Model, key::Symbol)
-    ss = sstate(model)
-    if key ∈ keys(ss.equations)
-        delete!(ss.equations, key)
+function get_main_equation(model::Model, var::Symbol)
+    for (eqn_name, eqn) in pairs(model.equations)
+        for (t, sym) in eqn.tsrefs
+            if t[1].name == var && t[2] == 0
+                return eqn_name
+            end
+        end
     end
+    return nothing
+end
+export get_main_equation
 end
