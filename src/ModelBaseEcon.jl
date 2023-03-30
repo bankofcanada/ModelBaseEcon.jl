@@ -20,6 +20,7 @@ using SparseArrays
 using DiffResults
 using ForwardDiff
 using Printf
+using Term
 
 # The Timer submodule
 include("Timer.jl")

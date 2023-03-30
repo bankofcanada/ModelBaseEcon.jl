@@ -1304,6 +1304,45 @@ function remove_aux_equations!(model::Model, key::Symbol)
     end
 end
 
+"""
+    find(m::Model, sym::Symbol)
+
+Print information about the symbol in the provided model.
+"""
+function summarize(model::Model, sym::Symbol)
+    eqmap = equation_map(model)
+    sym_eqs = eqmap[sym]
+
+    if length((sym_eqs)) > 0
+        didfirst = false
+        for val in sym_eqs
+            if val in keys(model.equations)
+                prettyprint_equation(model, model.equations[val]; target=sym, eq_symbols=Vector{Symbol}())
+            elseif val ∈ keys(model.sstate.constraints)
+                prettyprint_equation(model, model.sstate.constraints[val]; target=sym, eq_symbols=Vector{Symbol}())
+            end
+            
+        end
+    else
+        println("$sym not found in model")
+    end
+
+    # println("\n\n============================")
+    # println("Values")
+    # println("============================")
+    # if issssolved(m)
+    #     println("Steady-state: $(m.sstate[sym])")
+    # end
+    # if @isdefined(dt) && dt isa Workspace && @isdefined(db_ff) && db_ff isa Workspace
+    #     ts = db_ff[sym]
+    #     println("db_ff:")
+    #     println("  Historical          : $(round(minimum(ts[firstdate(ts):dt.endhist]); digits=4)) - $(round(maximum(ts[firstdate(ts):dt.endhist]); digits=4))")
+    #     println("  Monitoring          : $(round(minimum(ts[dt.begmntr:dt.endmntr]); digits=4)) - $(round(maximum(ts[dt.begmntr:dt.endmntr]); digits=4))")
+    #     println("  Projection (6Q)     : $(round(minimum(ts[dt.begproj:dt.begproj+5]); digits=4)) - $(round(maximum(ts[dt.begproj:dt.begproj+5]); digits=4))")
+    #     println("  Projection (further): $(round(minimum(ts[dt.begproj+6:lastdate(ts)]); digits=4)) - $(round(maximum(ts[dt.begproj+6:lastdate(ts)]); digits=4))")
+    # end
+end
+
 function get_main_equation(model::Model, var::Symbol)
     for (eqn_name, eqn) in pairs(model.equations)
         for (t, sym) in eqn.tsrefs
@@ -1315,4 +1354,107 @@ function get_main_equation(model::Model, var::Symbol)
     return nothing
 end
 export get_main_equation
+"""
+    print_equation(m::Model, eq::Equation; target::Symbol, eq_symbols::Vector{Any}=[])
+    
+    Print the provided equation with the variables colored according to their type.
+
+    ### Keyword arguments
+      * `m`::Model - The model which contains the variables and equations.
+      * `eq`::Equation - The equation in question
+      * `target`::Symbol - if provided, the specified symbol will be presented in bright green.
+      * `eq_symbols`::Vector{Any} - a vector of symbols present in the equation. Can slightly speed up processing if provided.
+"""
+function prettyprint_equation(m::Model, eq::Union{Equation,SteadyStateEquation}; target::Symbol=nothing, eq_symbols::Vector{Symbol} = [])
+    # target_color = "#7DFF33"
+    target_color = "#f4C095"
+    var_color = "#1D7874"
+    shock_color = "#EE2E31"
+    param_color = "#91C7B1"
+    if length(eq_symbols) == 0
+        eq_symbols = equation_symbols(eq)
+    end
+    sort!(eq_symbols, by=symbol_length, rev=true)
+    eq_str = ":$(eq.name) => $eq"
+    for sym in eq_symbols
+        if (sym == target)
+            eq_str = replace(eq_str, Regex("\\Q$sym\\E\\Q[\\E") => "{$target_color bold}$sym{/$target_color bold}[")
+            eq_str = replace(eq_str, Regex("\\Q$sym\\E\\Q \\E") => "{$target_color bold}$sym{/$target_color bold} ")
+        elseif (sym in variables(m))
+            eq_str = replace(eq_str, Regex("\\Q$sym\\E\\Q[\\E") => "{$var_color}$sym{/$var_color}[")
+            eq_str = replace(eq_str, Regex("\\Q$sym\\E\\Q \\E") => "{$var_color}$sym{/$var_color}[")
+        elseif (sym in shocks(m))
+            eq_str = replace(eq_str, Regex("\\Q$sym\\E\\Q[\\E") => "{$shock_color}$sym{/$shock_color}[")
+            eq_str = replace(eq_str, Regex("\\Q$sym\\E\\Q \\E") => "{$shock_color}$sym{/$shock_color}[")
+        else
+            eq_str = replace(eq_str, Regex("\\Q$sym\\E") => "{$param_color}$sym{/$param_color}")
+        end
+    end
+    tprintln(eq_str, highlight=false)
+    # Term.set_theme(Term.TERM_THEME[])
+end
+
+"""
+    find_symbols!(dest::Vector, v::Vector{Any})
+    
+    Take a vector of equation arguments and add the non-mathematical ones to the destination vector. 
+"""
+function find_symbols!(dest::Vector{Symbol}, v::Vector{Any})
+    for el in v
+        if el isa Expr
+            find_symbols!(dest, el.args)  
+        elseif el isa Symbol && !(el in [:+, :-, :*, :/, :^, :max, :min, :t]) && !(el in dest)
+            push!(dest, el) 
+        end
+    end
+end
+
+symbol_length(sym::Symbol) = length("$sym")
+
+
+"""
+    equation_symbols(e::Equation)
+    
+    The a vector of symbols of the non-mathematical arguments in the provided equation. 
+"""
+function equation_symbols(e::Union{Equation,SteadyStateEquation})
+    vars = Vector{Symbol}()
+    find_symbols!(vars, e.expr.args) 
+    return vars
+end
+
+export summarize
+
+function equation_map(m::Model)
+    eqmap = Dict{Symbol, Any}()
+    for (key, eqn) in pairs(m.equations)
+        for (var, time) in keys(eqn.tsrefs)
+            if var.name ∈ keys(eqmap)
+                unique!(push!(eqmap[var.name], key))
+            else
+                eqmap[var.name] = [key]
+            end
+        end
+        for param in keys(eqn.prefs)
+            if param ∈ keys(eqmap)
+                unique!(push!(eqmap[param], key))
+            else
+                eqmap[param] = [key]
+            end
+        end
+        # TODO: ssrefs
+    end 
+    # Symbol("#", ssd.vars[(1+vi)÷2].name.name, "#", (vi % 2 == 1) ? :lvl : :slp, "#")
+    for (key, eqn) in pairs(m.sstate.constraints)
+        for ind in eqn.vinds
+            name = m.sstate.vars[(1+ind)÷2].name.name
+            if name ∈ keys(eqmap)
+                unique!(push!(eqmap[name], key))
+            else
+                eqmap[name] = [key]
+            end
+        end
+        # TODO: ssrefs
+    end 
+    return eqmap
 end
