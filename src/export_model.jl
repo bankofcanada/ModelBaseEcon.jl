@@ -133,8 +133,10 @@ function export_model(model::Model, name::AbstractString, fio::IO)
 
     if !isempty(model.autoexogenize)
         println(fio, "@autoexogenize model begin")
-        for (k, v) in pairs(model.autoexogenize)
-            println(fio, "    ", k, " = ", v)
+        vars = collect(keys(model.autoexogenize))
+        sort!(vars)
+        for var in vars
+            println(fio, "    ", var, " = ", model.autoexogenize[var])
         end
         println(fio, "end # autoexogenize")
         println(fio)
