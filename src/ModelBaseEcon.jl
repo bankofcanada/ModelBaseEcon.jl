@@ -8,7 +8,7 @@
 """
     ModelBaseEcon
 
-This package is part of the StateSpaceEcon ecosystem. 
+This package is part of the StateSpaceEcon ecosystem.
 It provides the basic elements needed for model definition.
 StateSpaceEcon works with model objects defined with ModelBaseEcon.
 """
@@ -44,6 +44,7 @@ include("metafuncs.jl")
 include("model.jl")
 include("export_model.jl")
 include("linearize.jl")
+include("precompile.jl")
 
 """
     @using_example name
