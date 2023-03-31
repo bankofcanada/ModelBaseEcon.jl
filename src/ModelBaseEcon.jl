@@ -21,6 +21,15 @@ using DiffResults
 using ForwardDiff
 using Printf
 
+# Note: The full type specification for `LittleDict` has 4 parameters.
+# Specifying only the first two in a struct as:
+# struct S
+#    a::LittleDict{Symbol, Int}
+# end
+# will be treated by Julia as a non-concrete field.
+# Therefore, define a small helper typealias to use in structs:
+const LittleDictVec{K,V} = LittleDict{K,V,Vector{K},Vector{V}}
+
 # The Timer submodule
 include("Timer.jl")
 using .Timer

@@ -104,7 +104,7 @@ function makefuncs(expr, tssyms, sssyms, psyms, mod)
             $expr
         end
         const $fn1 = EquationEvaluator{$(QuoteNode(fn1))}(UInt(0),
-            $(@__MODULE__).LittleDict(Symbol[$(QuoteNode.(psyms)...)], fill(nothing, $(length(psyms)))))
+            $(@__MODULE__).LittleDict(Symbol[$(QuoteNode.(psyms)...)], fill!(Vector{Any}(undef, $(length(psyms))), nothing)))
         const $fn2 = EquationGradient($FunctionWrapper($fn1), $nargs, Val($chunk))
         $(@__MODULE__).precompilefuncs($fn1, $fn2, Val($chunk))
         ($fn1, $fn2)
@@ -134,7 +134,7 @@ function initfuncs(mod::Module)
         mod.eval(quote
             struct EquationEvaluator{FN} <: Function
                 rev::Ref{UInt}
-                params::$(@__MODULE__).LittleDict{Symbol,Any}
+                params::$(@__MODULE__).LittleDictVec{Symbol,Any}
             end
             struct EquationGradient{DR,CFG} <: Function
                 fn1::Function
