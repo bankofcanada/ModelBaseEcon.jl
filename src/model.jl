@@ -1110,10 +1110,16 @@ function update_auxvars(data::AbstractArray{Float64,2}, model::Model;
         modelerror("Insufficient time periods $nt. Expected $mintimes or more.")
     end
     allvars = model.allvars
+
+    # Precompute index lookup for variables
+    var_to_idx = Dict{ModelVariable, Int}()
+    for (idx, var) in enumerate(allvars)
+        var_to_idx[var] = idx
+    end
     result = [data[:, 1:nvarshk] zeros(nt, nauxs)]
     for (i, eqn) in enumerate(model.auxeqns)
         for t in (eqn.maxlag+1):(nt-eqn.maxlead)
-            idx = [CartesianIndex((t + ti, _index_of_var(var, allvars))) for (var, ti) in keys(eqn.tsrefs)]
+            idx = [CartesianIndex((t + ti, var_to_idx[var])) for (var, ti) in keys(eqn.tsrefs)]
             res = eqn.eval_resid(result[idx])
             if res < 1.0
                 result[t, nvarshk+i] = log(1.0 - res)
