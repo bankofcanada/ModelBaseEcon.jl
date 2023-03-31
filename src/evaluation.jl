@@ -44,8 +44,8 @@ function precompilefuncs(resid, RJ, ::Val{N}, tag) where {N}
         precompile(getfield(Base, pred), (dual, dual)) || error("precompile")
     end
 
-    precompile(ForwardDiff.extract_gradient!, (Type{tag}, mdr, dual)) || error("precompile")
-    precompile(ForwardDiff.vector_mode_gradient!, (mdr, typeof(resid), Array{Float64,1}, cfg)) || error("precompile")
+    # precompile(ForwardDiff.extract_gradient!, (Type{tag}, mdr, dual)) || error("precompile")
+    # precompile(ForwardDiff.vector_mode_gradient!, (mdr, typeof(resid), Array{Float64,1}, cfg)) || error("precompile")
 
     # precompile(Tuple{typeof(ForwardDiff.extract_gradient!), Type{tag}, mdr, dual}) || error("precompile")
     # precompile(Tuple{typeof(ForwardDiff.vector_mode_gradient!), mdr, resid, Array{Float64, 1}, cfg}) || error("precompile")
@@ -85,6 +85,13 @@ end
 # is dropped.
 const MAX_CHUNK_SIZE = Ref(4)
 
+# Used to avoid specialzing the ForwardDiff functions on
+# every equation.
+struct FunctionWrapper <: Function
+    f::Function
+end
+(f::FunctionWrapper)(x) = f.f(x)
+
 """
     makefuncs(expr, tssyms, sssyms, psyms, mod)
 
@@ -119,7 +126,7 @@ function makefuncs(expr, tssyms, sssyms, psyms, mod)
         end
         const $fn1 = EquationEvaluator{$(QuoteNode(fn1))}(UInt(0),
             $(@__MODULE__).LittleDict(Symbol[$(QuoteNode.(psyms)...)], fill(nothing, $(length(psyms)))))
-        const $fn2 = EquationGradient($fn1, $nargs, Val($chunk))
+        const $fn2 = EquationGradient($FunctionWrapper($fn1), $nargs, Val($chunk))
         $(@__MODULE__).precompilefuncs($fn1, $fn2, Val($chunk), MyTag)
         ($fn1, $fn2)
     end
