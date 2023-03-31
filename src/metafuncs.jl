@@ -110,7 +110,7 @@ For example: `at_movsum(x[t], 3) = x[t] + x[t-1] + x[t-2]`.
 See also [`at_lag`](@ref).
 """
 at_movsum(expr::Expr, n::Integer) = MacroTools.unblock(
-    Expr(:call, :+, expr, (at_lag(expr, i) for i = 1:n-1)...)
+    split_nargs(Expr(:call, :+, expr, (at_lag(expr, i) for i = 1:n-1)...))
 )
 
 """
@@ -132,10 +132,10 @@ For example: `at_movsumew(x[t], 3, 0.7) = x[t] + 0.7*x[t-1] + 0.7^2x[t-2]`
 See also [`at_movavew`](@ref)
 """
 at_movsumew(expr::Expr, n::Integer, r) =
-    MacroTools.unblock(Expr(:call, :+, expr, (Expr(:call, :*, :(($r)^($i)), at_lag(expr, i)) for i = 1:n-1)...))
+    MacroTools.unblock(split_nargs(Expr(:call, :+, expr, (Expr(:call, :*, :(($r)^($i)), at_lag(expr, i)) for i = 1:n-1)...)))
 at_movsumew(expr::Expr, n::Integer, r::Real) =
     isapprox(r, 1.0) ? at_movsum(expr, n) :
-    MacroTools.unblock(Expr(:call, :+, expr, (Expr(:call, :*, r^i, at_lag(expr, i)) for i = 1:n-1)...))
+    MacroTools.unblock(split_nargs(Expr(:call, :+, expr, (Expr(:call, :*, r^i, at_lag(expr, i)) for i = 1:n-1)...)))
 
 """
     at_movavew(expr, n, r)
@@ -165,4 +165,3 @@ for sym in (:lag, :lead, :d, :dlog, :movsum, :movav, :movsumew, :movavew)
     end
     eval(qq)
 end
-
