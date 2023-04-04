@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020-2022, Bank of Canada
+# Copyright (c) 2020-2023, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -426,7 +426,7 @@ function sseqn_resid_RJ(s::SSEqnData)
 end
 
 """
-    make_sseqn(model::AbstractModel, eqn::Equation; shift::Int64=0)
+    make_sseqn(model::AbstractModel, eqn::Equation, shift::Bool, var_to_idx)
 
 Create a steady state equation from the given dynamic equation for the given
 model.
@@ -435,14 +435,12 @@ model.
     This function is for internal use only and not intended to be called
     directly by users.
 """
-function make_sseqn(model::AbstractModel, eqn::Equation, shift::Bool)
-    local allvars = model.allvars
-    tvalue(t) = shift ? t + model.shift : t
+function make_sseqn(model::AbstractModel, eqn::Equation, shift::Bool, var_to_idx=get_var_to_idx(model))
     # ssind converts the dynamic index (v, t) into
     # the corresponding indexes of steady state unknowns.
-    # Returned value is a list of length 0, 1, or 2.
+    # Returned value is a list of length 1, or 2.
     function ssind((var, ti),)::Array{Int64,1}
-        vi = _index_of_var(var, allvars)
+        vi = var_to_idx[var]
         no_slope = isshock(var) || issteady(var)
         # The level unknown has index 2*vi-1.
         # The slope unknown has index 2*vi. However:
@@ -499,7 +497,7 @@ addition to the equations generated automatically from the dynamic system.
     directly by users. Use [`@steadystate`](@ref) instead of calling this
     function.
 """
-function setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Module=moduleof(model))
+function setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Module=moduleof(model), var_to_idx=get_var_to_idx(model))
 
     if expr.head != :(=)
         error("Expected an equation, not $(expr.head)")
@@ -542,7 +540,7 @@ function setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Mod
             push!(val_params, val)
             return val
         end
-        vind = _index_of_var(val, allvars)
+        vind = get(var_to_idx, val, nothing)
         if vind !== nothing
             # it's a vriable of some sort: make a symbol and an index for the
             # corresponding steady state unknown
@@ -673,6 +671,7 @@ Create and initialize the `SteadyStateData` structure of the given model.
     directly by users. It is called during [`@initialize`](@ref).
 """
 function initssdata!(model::AbstractModel)
+    var_to_idx = get_var_to_idx(model)
     ss = sstate(model)
     empty!(ss.vars)
     empty!(ss.values)
@@ -682,11 +681,11 @@ function initssdata!(model::AbstractModel)
     end
     empty!(ss.equations)
     for eqn in alleqns(model)
-        push!(ss.equations, make_sseqn(model, eqn, false))
+        push!(ss.equations, make_sseqn(model, eqn, false, var_to_idx))
     end
     if !model.flags.ssZeroSlope
         for eqn in alleqns(model)
-            push!(ss.equations, make_sseqn(model, eqn, true))
+            push!(ss.equations, make_sseqn(model, eqn, true, var_to_idx))
         end
     end
     empty!(ss.constraints)

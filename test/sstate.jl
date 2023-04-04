@@ -68,7 +68,7 @@ end
     # make sure @sstate(x) was transformed
     @test m.equations[1].ssrefs[:x] === Symbol("#log#x#ss#")
 
-    xi = ModelBaseEcon._index_of_var(:x, m.variables)
+    xi = ModelBaseEcon.get_var_to_idx(m)[:x]
     for i = 1:10
         x = 0.1 + 6*rand()
         m.sstate.x.level = x
