@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020-2022, Bank of Canada
+# Copyright (c) 2020-2023, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -189,8 +189,6 @@ function initfuncs(mod::Module)
     return nothing
 end
 
-_index_of_var(var, allvars) = indexin([var], allvars)[1]
-
 ###########################################################
 # Part 2: Evaluation data for models and equations
 
@@ -209,11 +207,11 @@ struct DynEqnEvalDataN <: DynEqnEvalData
     ss::Vector{Float64}
 end
 
-function _fill_ss_values(eqn, ssvals, allvars)
+function _fill_ss_values(eqn, ssvals, var_to_ind)
     ret = fill(0.0, length(eqn.ssrefs))
     bad = ModelSymbol[]
     for (i, v) in enumerate(keys(eqn.ssrefs))
-        vi = _index_of_var(v, allvars)
+        vi = var_to_ind[v]
         ret[i] = ssvals[2vi-1]
         if !isapprox(ssvals[2vi], 0, atol=1e-12)
             push!(bad, v)
@@ -225,9 +223,9 @@ function _fill_ss_values(eqn, ssvals, allvars)
     end
     return ret
 end
-function DynEqnEvalData(eqn, model)
+function DynEqnEvalData(eqn, model, var_to_ind=get_var_to_idx(model))
     return length(eqn.ssrefs) == 0 ? DynEqnEvalData0() : DynEqnEvalDataN(
-        _fill_ss_values(eqn, model.sstate.values, model.allvars)
+        _fill_ss_values(eqn, model.sstate.values, var_to_ind)
     )
 end
 
@@ -307,6 +305,7 @@ The standard model evaluation data used in the general case and by default.
 """
 struct ModelEvaluationData{E<:AbstractEquation,I,D<:DynEqnEvalData} <: AbstractModelEvaluationData
     params::Ref{Parameters{ModelParam}}
+    var_to_idx::LittleDictVec{Symbol,Int}
     eedata::Vector{D}
     alleqns::Vector{E}
     allinds::Vector{I}
@@ -326,6 +325,11 @@ end
     end
 end
 
+function _make_var_to_idx(allvars)
+    # Precompute index lookup for variables
+    return LittleDictVec{Symbol,Int}(allvars, 1:length(allvars))
+end
+
 """
     ModelEvaluationData(model::AbstractModel)
 
@@ -336,8 +340,9 @@ function ModelEvaluationData(model::AbstractModel)
     alleqns = model.alleqns
     neqns = length(alleqns)
     allvars = model.allvars
-    nvars = length(allvars)
-    allinds = [[CartesianIndex((time0 + ti, _index_of_var(var, allvars))) for (var, ti) in keys(eqn.tsrefs)] for eqn in alleqns]
+    nvars = length(allvars) 
+    var_to_idx = _make_var_to_idx(allvars)
+    allinds = [[CartesianIndex((time0 + ti, var_to_idx[var])) for (var, ti) in keys(eqn.tsrefs)] for eqn in alleqns]
     ntimes = 1 + model.maxlag + model.maxlead
     LI = LinearIndices((ntimes, nvars))
     II = reduce(vcat, (fill(i, length(eqn.tsrefs)) for (i, eqn) in enumerate(alleqns)))
@@ -345,11 +350,14 @@ function ModelEvaluationData(model::AbstractModel)
     M = SparseArrays.sparse(II, reduce(vcat, JJ), similar(II), neqns, ntimes * nvars)
     M.nzval .= 1:length(II)
     rowinds = [copy(M[i, LI[inds]].nzval) for (i, inds) in enumerate(JJ)]
-    eedata = [DynEqnEvalData(eqn, model) for eqn in alleqns]
+    # this is the only place where we must pass var_to_idx to DynEqnEvalData explicitly
+    # this is because normally var_to_idx is taken from the ModelEvaluationData, but that's 
+    # what's being built here, so it doesn't yet exist in the `model`
+    eedata = [DynEqnEvalData(eqn, model, var_to_idx) for eqn in alleqns]
     if model.dynss && !issssolved(model)
         @warn "Steady state not solved."
     end
-    ModelEvaluationData(Ref(model.parameters), eedata,
+    ModelEvaluationData(Ref(model.parameters), var_to_idx, eedata,
         alleqns, allinds, similar(M, Float64), Vector{Float64}(undef, neqns), rowinds)
 end
 
@@ -383,7 +391,7 @@ mutable struct LinEqnEvalData <: AbstractEqnEvalData
     #    f(x) = f(s) + ∇f(s) ⋅ (x-s) + O(|x-s|^2)
     # we store s in sspt, f(s) in resid and ∇f(s) in grad
     # we expect that f(s) should be 0 (because steady state is a solution) and
-    #    warn it in isn't
+    #    warn if it isn't
     # we store it and use it because even with ≠0 it's still a valid Taylor
     #    expansion.
     resid::Float64
@@ -496,8 +504,8 @@ export refresh_med!
 # dispatcher
 refresh_med!(model::AbstractModel, variant::Symbol=model.options.variant) = model.dynss ? refresh_med!(model, Val(variant)) : model
 # catch all and issue a meaningful error message
-refresh_med!(::AbstractModel, V::Val{VARIANT}) where VARIANT = modelerror("Missing method to update model variant: $VARIANT")
+refresh_med!(::AbstractModel, V::Val{VARIANT}) where {VARIANT} = modelerror("Missing method to update model variant: $VARIANT")
 # specific cases
 # refresh_med!(m::AbstractModel, ::Type{NoModelEvaluationData}) = (m.evaldata = ModelEvaluationData(m); m)
-refresh_med!(model::AbstractModel, ::Val{:default}) = (setevaldata!(model, default = ModelEvaluationData(model)); model)
+refresh_med!(model::AbstractModel, ::Val{:default}) = (setevaldata!(model, default=ModelEvaluationData(model)); model)
 refresh_med!(model::AbstractModel, ::Val{:selective_linearize}) = selective_linearize!(model)

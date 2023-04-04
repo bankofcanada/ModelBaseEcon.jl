@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020-2022, Bank of Canada
+# Copyright (c) 2020-2023, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -114,6 +114,15 @@ function setevaldata!(model::Model; kwargs...)
         model.options.variant = key
     end
     return nothing
+end
+
+function get_var_to_idx(model::Model)
+    med = getevaldata(model, :default, false)
+    if ismissing(med)
+        return _make_var_to_idx(model.allvars)
+    else
+        return med.var_to_idx
+    end
 end
 
 hassolverdata(model::Model, solver::Symbol) = haskey(model.solverdata, solver)
@@ -311,10 +320,11 @@ function fullprint(io::IO, model::Model)
         print(io, " with ", length(model.auxeqns), " auxiliary equations")
     end
     print(io, ": \n")
+    var_to_idx = get_var_to_idx(model)
     function print_aux_eq(bi)
         v = model.auxeqns[bi]
-        for (var, ti) in keys(v.tsrefs)
-            ai = _index_of_var(var, model.allvars)
+        for (var, _) in keys(v.tsrefs)
+            ai = var_to_idx[var]
             ci = ai - nvarshk
             (1 <= ci < bi) && print_aux_eq(ci)
         end
@@ -323,8 +333,8 @@ function fullprint(io::IO, model::Model)
     for (i, v) in enumerate(model.equations)
         println(io, "   E$i:   ", v)
         allvars = model.allvars
-        for (var, ti) in keys(v.tsrefs)
-            ai = _index_of_var(var, allvars)
+        for (var, _) in keys(v.tsrefs)
+            ai = var_to_idx[var]
             if ai > nvarshk
                 print_aux_eq(ai - nvarshk)
             end
@@ -590,6 +600,7 @@ process_equation(model::Model, expr::String; kwargs...) = process_equation(model
 # process_equation(model::Model, val::Number; kwargs...) = process_equation(model, Expr(:block, val); kwargs...)
 # process_equation(model::Model, val::Symbol; kwargs...) = process_equation(model, Expr(:block, val); kwargs...)
 function process_equation(model::Model, expr::Expr;
+    var_to_idx=get_var_to_idx(model),
     modelmodule::Module=moduleof(model),
     line=LineNumberNode(0),
     flags=EqnFlags(),
@@ -644,7 +655,7 @@ function process_equation(model::Model, expr::Expr;
     # Mentions of time series throw errors (they must always have a t-reference)
     function process(sym::Symbol)
         # is this symbol a known variable?
-        ind = _index_of_var(sym, allvars)
+        ind = get(var_to_idx, sym, nothing)
         if ind !== nothing
             if model.warn.no_t
                 warn_process("Variable or shock `$(sym)` without `t` reference. Assuming `$(sym)[t]`", expr)
@@ -679,7 +690,7 @@ function process_equation(model::Model, expr::Expr;
             # check if this is a steady state mention
             if macroname ∈ (:sstate,)
                 length(ex.args) == 3 || error_process("Invalid use of @(ex.args[1])", expr)
-                vind = _index_of_var(ex.args[3], allvars)
+                vind = get(var_to_idx, ex.args[3], nothing)
                 vind === nothing && error_process("Argument of @(ex.args[1]) must be a variable", expr)
                 add_ssref(allvars[vind])
                 return ex
@@ -767,7 +778,7 @@ function process_equation(model::Model, expr::Expr;
     function make_residual_expression(ex::Expr)
         if ex.head == :ref
             varname, tindex = ex.args
-            vind = _index_of_var(varname, allvars)
+            vind = get(var_to_idx, varname, nothing)
             if vind !== nothing
                 # The index expression is either t, or t+n or t-n. We made sure of that in process() above.
                 if isa(tindex, Symbol) && tindex == :t
@@ -786,7 +797,7 @@ function process_equation(model::Model, expr::Expr;
         elseif ex.head === :macrocall
             macroname, _, varname = ex.args
             macroname === Symbol("@sstate") || error_process("Unexpected macro call.", expr)
-            vind = _index_of_var(varname, allvars)
+            vind = get(var_to_idx, varname, nothing)
             vind === nothing && error_process("Not a variable name in steady state reference $(ex)", expr)
             var = allvars[vind]
             newsym = ssrefs[var]
@@ -874,7 +885,7 @@ Equation() instance for it, and add it to the model instance.
 Usually there's no need to call this function directly. It is called during
 [`@initialize`](@ref).
 """
-function add_equation!(model::Model, expr::Expr; modelmodule::Module=moduleof(model))
+function add_equation!(model::Model, expr::Expr; var_to_idx=get_var_to_idx(model), modelmodule::Module=moduleof(model))
     source = LineNumberNode[]
     auxeqns = Expr[]
     flags = EqnFlags()
@@ -964,15 +975,17 @@ function add_equation!(model::Model, expr::Expr; modelmodule::Module=moduleof(mo
                         @goto skip_substitution
                     end
                 end
-                aux_expr = process_equation(model, Expr(:(=), arg, 0); modelmodule=modelmodule)
+                aux_expr = process_equation(model, Expr(:(=), arg, 0); var_to_idx, modelmodule)
                 if isempty(aux_expr.tsrefs)
                     # arg doesn't contain any variables, no need for substitution
                     @goto skip_substitution
                 end
                 # substitute log(something) with auxN and add equation exp(auxN) = something
-                push!(model.auxvars, :new)
+                resize!(model.auxvars, model.nauxs + 1)
                 model.auxvars[end] = auxs = Symbol("aux", model.nauxs)
                 push!(auxeqns, Expr(:(=), Expr(:call, :exp, Expr(:ref, auxs, :t)), arg))
+                # update variables to indexes map
+                push!(var_to_idx, auxs => length(var_to_idx) + 1)
                 return Expr(:ref, auxs, :t)
                 @label skip_substitution
                 nothing
@@ -987,13 +1000,13 @@ function add_equation!(model::Model, expr::Expr; modelmodule::Module=moduleof(mo
     if isempty(source)
         push!(source, LineNumberNode(0))
     end
-    eqn = process_equation(model, new_expr; modelmodule=modelmodule, line=source[1], flags=flags, doc=doc)
+    eqn = process_equation(model, new_expr; var_to_idx, modelmodule, line=source[1], flags, doc)
     push!(model.equations, eqn)
     model.maxlag = max(model.maxlag, eqn.maxlag)
     model.maxlead = max(model.maxlead, eqn.maxlead)
     model.dynss = model.dynss || !isempty(eqn.ssrefs)
     for i ∈ eachindex(auxeqns)
-        eqn = process_equation(model, auxeqns[i]; modelmodule=modelmodule, line=source[1])
+        eqn = process_equation(model, auxeqns[i]; var_to_idx, modelmodule, line=source[1])
         push!(model.auxeqns, eqn)
         model.maxlag = max(model.maxlag, eqn.maxlag)
         model.maxlead = max(model.maxlead, eqn.maxlead)
@@ -1038,8 +1051,9 @@ function initialize!(model::Model, modelmodule::Module)
     empty!(model.equations)
     empty!(model.auxeqns)
     model.dynss = false
+    var_to_idx = _make_var_to_idx(model.allvars)
     for e in eqns
-        add_equation!(model, e; modelmodule=modelmodule)
+        add_equation!(model, e; modelmodule, var_to_idx)
     end
     initssdata!(model)
     update_links!(model.parameters)
@@ -1103,7 +1117,7 @@ If there are no auxiliary variables/equations in the model, return *a copy* of
     implement a general approach that would work for any substitution.
 """
 function update_auxvars(data::AbstractArray{Float64,2}, model::Model;
-    tol::Float64=model.options.tol, default::Float64=0.0
+    var_to_idx=get_var_to_idx(model), tol::Float64=model.options.tol, default::Float64=0.0
 )
     nauxs = length(model.auxvars)
     if nauxs == 0
@@ -1117,13 +1131,6 @@ function update_auxvars(data::AbstractArray{Float64,2}, model::Model;
     mintimes = 1 + model.maxlag + model.maxlead
     if nt < mintimes
         modelerror("Insufficient time periods $nt. Expected $mintimes or more.")
-    end
-    allvars = model.allvars
-
-    # Precompute index lookup for variables
-    var_to_idx = Dict{ModelVariable, Int}()
-    for (idx, var) in enumerate(allvars)
-        var_to_idx[var] = idx
     end
     result = [data[:, 1:nvarshk] zeros(nt, nauxs)]
     for (i, eqn) in enumerate(model.auxeqns)
