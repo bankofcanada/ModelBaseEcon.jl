@@ -981,7 +981,7 @@ function add_equation!(model::Model, expr::Expr; var_to_idx=get_var_to_idx(model
                     @goto skip_substitution
                 end
                 # substitute log(something) with auxN and add equation exp(auxN) = something
-                resize!(model.auxvars, model.nauxs + 1)
+                push!(model.auxvars, :dummy)  # faster than resize!(model.auxvars, length(model.auxvars)+1)
                 model.auxvars[end] = auxs = Symbol("aux", model.nauxs)
                 push!(auxeqns, Expr(:(=), Expr(:call, :exp, Expr(:ref, auxs, :t)), arg))
                 # update variables to indexes map
