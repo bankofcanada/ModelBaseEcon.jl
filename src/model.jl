@@ -1231,25 +1231,17 @@ function reinitialize!(model::Model, modelmodule::Module)
     model.dynss = false
     model.maxlag = 0
     model.maxlead = 0
-    for (key, e) in model.equations
-        # println(e.eval_resid)
+    for (key, e) in alleqns(model)
         if e.eval_resid == eqnnotready
             remove_aux_equations!(model, key)
             remove_sstate_equations!(model, key)
-            # remove!(model.equations, e)
-            # println("Adding equation")
-            # @timer "add_equation" 
             add_equation!(model, key, e.expr; modelmodule=modelmodule)
         else
-            #TODO: check this for AUX equations
             model.maxlag = max(model.maxlag, e.maxlag)
             model.maxlead = max(model.maxlead, e.maxlead)
             model.dynss = model.dynss || !isempty(e.ssrefs)
         end
     end
-    # TODO: update the SS data instead
-    #benchmark is .75 seconds for initssdata
-    # @time initssdata!(model)
     updatessdata!(model)
     update_links!(model.parameters)
     if !model.dynss
@@ -1526,7 +1518,6 @@ function equation_map(m::Model)
                 eqmap[var.name] = [key]
             end
         end
-        # TODO: ssrefs
     end 
     for (key, eqn) in pairs(m.sstate.constraints)
         for ind in eqn.vinds
