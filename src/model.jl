@@ -1312,6 +1312,10 @@ Print information about the symbol in the provided model.
 """
 function summarize(model::Model, sym::Symbol)
     eqmap = equation_map(model)
+    if sym ∉ keys(eqmap)
+        println("$sym not found in model.")
+        return
+    end
     sym_eqs = eqmap[sym]
 
     if length((sym_eqs)) > 0
@@ -1377,22 +1381,33 @@ function prettyprint_equation(m::Model, eq::Union{Equation,SteadyStateEquation};
     end
     sort!(eq_symbols, by=symbol_length, rev=true)
     eq_str = ":$(eq.name) => $eq"
+
     for sym in eq_symbols
         if (sym == target)
-            eq_str = replace(eq_str, Regex("\\Q$sym\\E\\Q[\\E") => "{$target_color bold}$sym{/$target_color bold}[")
-            eq_str = replace(eq_str, Regex("\\Q$sym\\E\\Q \\E") => "{$target_color bold}$sym{/$target_color bold} ")
+            eq_str = replace(eq_str, Regex("([^_a-zA-Z])($sym)([^_a-zA-Z])") => s"""\1|||crayon"#f4C095 bold"|||\2|||crayon"default !bold"|||\3""")
+            eq_str = replace(eq_str, Regex("([^_a-zA-Z])($sym)\$") => s"""\1|||crayon"#f4C095 bold"|||\2|||crayon"default !bold"|||""")
         elseif (sym in variables(m))
-            eq_str = replace(eq_str, Regex("\\Q$sym\\E\\Q[\\E") => "{$var_color}$sym{/$var_color}[")
-            eq_str = replace(eq_str, Regex("\\Q$sym\\E\\Q \\E") => "{$var_color}$sym{/$var_color}[")
+            eq_str = replace(eq_str, Regex("([^_a-zA-Z])($sym)([^_a-zA-Z])") => s"""\1|||crayon"#1D7874"|||\2|||crayon"default"|||\3""")
+            eq_str = replace(eq_str, Regex("([^_a-zA-Z])($sym)\$") => s"""\1|||crayon"#1D7874"|||\2|||crayon"default"|||""")
         elseif (sym in shocks(m))
-            eq_str = replace(eq_str, Regex("\\Q$sym\\E\\Q[\\E") => "{$shock_color}$sym{/$shock_color}[")
-            eq_str = replace(eq_str, Regex("\\Q$sym\\E\\Q \\E") => "{$shock_color}$sym{/$shock_color}[")
+            eq_str = replace(eq_str, Regex("([^_a-zA-Z])($sym)([^_a-zA-Z])") => s"""\1|||crayon"#EE2E31"|||\2|||crayon"default"|||\3""")
+            eq_str = replace(eq_str, Regex("([^_a-zA-Z])($sym)\$") => s"""\1|||crayon"#EE2E31"|||\2|||crayon"default"|||""")
         else
-            eq_str = replace(eq_str, Regex("\\Q$sym\\E") => "{$param_color}$sym{/$param_color}")
+            eq_str = replace(eq_str, Regex("([^_a-zA-Z])($sym)([^_a-zA-Z])") => s"""\1|||crayon"#91C7B1"|||\2|||crayon"default"|||\3""")
+            eq_str = replace(eq_str, Regex("([^_a-zA-Z])($sym)\$") => s"""\1|||crayon"#91C7B1"|||\2|||crayon"default"|||""")
+            
         end
     end
-    tprintln(eq_str, highlight=false)
-    # Term.set_theme(Term.TERM_THEME[])
+    print_array = Vector{Any}()
+    for part in split(eq_str, "|||")
+        cray = findfirst("crayon", part)
+        if !isnothing(cray) && first(cray) == 1
+            push!(print_array, eval(Meta.parse(part)))
+        else
+            push!(print_array, part)
+        end
+    end
+    println(print_array...)
 end
 
 """
@@ -1436,16 +1451,22 @@ function equation_map(m::Model)
                 eqmap[var.name] = [key]
             end
         end
-        for param in keys(eqn.prefs)
+        for param in keys(eqn.eval_resid.params)
             if param ∈ keys(eqmap)
                 unique!(push!(eqmap[param], key))
             else
                 eqmap[param] = [key]
             end
         end
+        for var in keys(eqn.ssrefs)
+            if var.name ∈ keys(eqmap)
+                unique!(push!(eqmap[var.name], key))
+            else
+                eqmap[var.name] = [key]
+            end
+        end
         # TODO: ssrefs
     end 
-    # Symbol("#", ssd.vars[(1+vi)÷2].name.name, "#", (vi % 2 == 1) ? :lvl : :slp, "#")
     for (key, eqn) in pairs(m.sstate.constraints)
         for ind in eqn.vinds
             name = m.sstate.vars[(1+ind)÷2].name.name
@@ -1455,7 +1476,13 @@ function equation_map(m::Model)
                 eqmap[name] = [key]
             end
         end
-        # TODO: ssrefs
+        for param in keys(eqn.eval_resid.params)
+            if param ∈ keys(eqmap)
+                unique!(push!(eqmap[param], key))
+            else
+                eqmap[param] = [key]
+            end
+        end
     end 
     return eqmap
 end
