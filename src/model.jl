@@ -1186,8 +1186,9 @@ function reinitialize!(model::Model, modelmodule::Module)
         end
     end
     # TODO: update the SS data instead
-    initssdata!(model)
-    # updatessdata!(model)
+    #benchmark is .75 seconds for initssdata
+    # @time initssdata!(model)
+    updatessdata!(model)
     update_links!(model.parameters)
     if !model.dynss
         # Note: we cannot set any other evaluation method yet - they require steady

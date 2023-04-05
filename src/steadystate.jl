@@ -201,6 +201,30 @@ function Base.push!(ssd::SteadyStateData, var::ModelSymbol)
     return v
 end
 
+# function Base.delete!(ssd::SteadyStateData, var::SteadyStateVariable)
+#     ssd_vars = getfield(ssd, :vars)
+#     ssd_vals = getfield(ssd, :values)
+#     ssd_mask = getfield(ssd, :mask)
+#     for (i,v) in enumerate(ssd_vars)
+#         if v == var
+#             deleteat!(ssd_vars, i)
+#             deleteat!(ssd_vals, (2i-1, 2i))
+#             deleteat!(ssd_mask, (2i-1, 2i))
+            
+#             # deleteat!(ssd_vals, 2i-1)
+#             # deleteat!(ssd_vals, 2i-1) # equivalent to 2i
+#             # deleteat!(ssd_mask, 2i-1)
+#             # deleteat!(ssd_mask, 2i-1) # equivalent to 2i
+#             for ind in i:length(ssd_vars)
+#                 ssd_vars[ind].index = ind
+#                 ssd_vars[ind].data = view(ssd_vals, 2ind .+ (-1:0))
+#                 ssd_vars[ind].mask = view(ssd_mask, 2ind .+ (-1:0))
+#             end
+#             break
+#         end
+#     end
+# end
+
 export alleqns
 """
     alleqns(ssd::SteadyStateData)
@@ -530,6 +554,7 @@ function setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Mod
         isneglog(var) ? Symbol("#logm#", var.name, "#", ty, "#") :
         Symbol("#", var.name, "#", ty, "#")
     end
+
     ###############################################
     #     ssprocess(val)
     # 
@@ -710,22 +735,70 @@ end
 
 function updatessdata!(model::AbstractModel)
     ss = sstate(model)
-    # TODO: can we add variables?
-    # empty!(ss.vars)
-    # TODO: do the masks and values matter?
-    # empty!(ss.values)
-    # empty!(ss.mask)
-    existing_vars = [var.name for var in ss.vars] # actually a vector of ModelVariable
+    
+    
+    # make new SteadyStateVariables (as they are immutable) and pass the relevant data from
+    # the previous steadystate
+    # this is slightly faster than a more piecemeal approach relying on mutable structs
+    old_mask = deepcopy(getfield(ss, :mask))
+    old_vals = deepcopy(getfield(ss, :values))
+    old_vars = Dict{Symbol,SteadyStateVariable}(var.name.name => deepcopy(var) for var in ss.vars)
+    empty!(ss.vars)
+    empty!(ss.values)
+    empty!(ss.mask)
+
+    ind = 1
     for var in model.allvars
-        if var ∉ existing_vars
-            push!(ss, var)
+        push!(ss, var)
+        if var.name ∈ keys(old_vars) && var.vr_type ==  old_vars[var.name].name.vr_type
+            oldind = old_vars[var.name].index
+            ss.values[2ind-1:2ind] .= old_vals[2oldind-1:2oldind]
+            ss.mask[2ind-1:2ind] .= old_mask[2oldind-1:2oldind]
+        end
+        ind += 1
+    end
+
+    # i = 1
+    # while i <= length(ss.vars)
+    #     vind = 0
+    #     if model.allvars[i].name != ss.vars[i].name.name
+    #         delete!(ss, ss.vars[i])
+    #         i -= 1
+    #     end
+    #     i += 1
+    # end
+    
+    # existing_vars = [var.name for var in ss.vars] # actually a vector of ModelVariable
+    # for var in model.allvars
+    #     if var ∉ existing_vars
+    #         # println("pushing ", var, ", ", length(ss.vars))
+    #         push!(ss, var)
+    #     end
+    # end
+
+    # for i in 1:length(model.allvars)
+    #     @assert model.allvars[i].name == model.sstate.vars[i].name.name "$i, $(model.allvars[i].name) vs. $(model.sstate.vars[i].name.name)"
+    # end
+
+    # update vinds in the equations
+    vinds_map = Dict{Symbol, Integer}()
+    for (i, var) in enumerate(model.allvars)
+        vinds_map[Symbol("#$(var.name)#lvl#")] = 2i - 1
+        vinds_map[Symbol("#$(var.name)#slp#")] = 2i
+    end
+    for eqn in values(alleqns(ss))
+        for j in 1:length(eqn.vinds)
+            eqn.vinds[j] = vinds_map[eqn.vsyms[j]]
         end
     end
-    # empty!(ss.equations)
+
     for (key, eqn) in alleqns(model)
         eqn_name = eqn.name
         if eqn_name ∉ keys(ss.equations)
+            # println("Adding $eqn_name")
             push!(ss.equations,eqn_name => make_sseqn(model, eqn, false, eqn_name))
+            # println(ss.equations[eqn_name])
+            # println(ss.equations[eqn_name].vsyms)
         end
     end
     if !model.flags.ssZeroSlope
@@ -736,8 +809,6 @@ function updatessdata!(model::AbstractModel)
             end
         end
     end
-    # TODO: does it matter if constraints are changed/updated?
-    # empty!(ss.constraints)
     return nothing
 end
 
