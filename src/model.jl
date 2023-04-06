@@ -571,7 +571,7 @@ macro removeparameters(model, params::Symbol...)
     return esc(:(ModelBaseEcon.removeparameters!($(model), $(params)); nothing))
 end
 
-function removeparameters!(model::Model, params::Vector{Any})
+function removeparameters!(model::Model, params)
     for param in params
         delete!(model.parameters.contents, param)
     end
@@ -750,11 +750,10 @@ macro removeequations(model, eqn_keys::Symbol...)
     return esc(:(ModelBaseEcon.removeequations!($(model), $(eqn_keys)); nothing))
 end
 
-
-function removeequations!(model::Model, keys::Vector{Any})
+function removeequations!(model::Model, keys)
     for key in keys
         remove_aux_equations!(model, key)
-        remove_sstate_equations!(model, key)
+        remove_sstate_equation!(model, key)
         delete!(model.equations, key)
     end
 end
@@ -782,7 +781,7 @@ macro removesteadystate(model, eqn_keys::Symbol...)
     return esc(:(ModelBaseEcon.remove_sstate_equations!($(model), $eqn_keys); nothing))
 end
 
-function remove_sstate_equations!(model::Model, key::Symbol)
+function remove_sstate_equation!(model::Model, key::Symbol)
     ss = sstate(model)
     if key ∈ keys(ss.equations)
         delete!(ss.equations, key)
@@ -792,7 +791,7 @@ function remove_sstate_equations!(model::Model, key::Symbol)
     end
 end
 
-function remove_sstate_equations!(model::Model, keys_vector::Vector{Any})
+function remove_sstate_equations!(model::Model, keys_vector)
     ss = sstate(model)
     for key in keys_vector
         if key ∈ keys(ss.equations)
@@ -1338,7 +1337,7 @@ function reinitialize!(model::Model, modelmodule::Module)
     for (key, e) in alleqns(model)
         if e.eval_resid == eqnnotready
             remove_aux_equations!(model, key)
-            remove_sstate_equations!(model, key)
+            remove_sstate_equation!(model, key)
             add_equation!(model, key, e.expr; modelmodule=modelmodule)
         else
             model.maxlag = max(model.maxlag, e.maxlag)
