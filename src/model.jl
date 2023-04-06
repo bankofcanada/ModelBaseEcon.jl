@@ -362,7 +362,7 @@ function Base.show(io::IO, model::Model)
 end
 
 ################################################################
-# The macros used in the model definition.
+# The macros used in the model definition and alteration.
 
 # Note: These macros simply store the information into the corresponding
 # arrays within the model instance. The actual processing is done in @initialize
@@ -451,6 +451,18 @@ macro exogenous(model, vars::Symbol...)
     return esc(:(unique!(append!($(model).variables, to_exog.($vars))); nothing))
 end
 
+"""
+    @removevariables model name1 name2 ...
+    @removevariables model begin
+        name1
+        name2
+        ...
+    end
+
+Removed the variables with the given names from the model. The variable can be of any of the variable types.
+
+Changes like this should be followed by a call to [`@reinitialize`](@ref) on the model.
+"""
 macro removevariables(model, block::Expr)
     vars = filter(a -> !isa(a, LineNumberNode), block.args)
     return esc(:(unique!(deleteat!($(model).variables, findall(x -> x ∈ $vars, $(model).variables))); nothing))
@@ -473,6 +485,11 @@ macro shocks(model, shks::Symbol...)
     return esc(:(unique!(append!($(model).shocks, to_shock.($shks))); nothing))
 end
 
+"""
+    @removeshocks
+
+Like [`@removevariables`](@ref), but will remove the shocks in the model with the provided name.
+"""
 macro removeshocks(model, block::Expr)
     shocks = filter(a -> !isa(a, LineNumberNode), block.args)
     return esc(:(unique!(deleteat!($(model).shocks, findall(x -> x ∈ $shocks, $(model).shocks))); nothing))
@@ -533,6 +550,19 @@ macro parameters(model, args::Expr...)
     return esc(ret)
 end
 
+"""
+    @removeparameters model name1 name2 ...
+    @removeparameters model begin
+        name1
+        name2
+        ...
+    end
+
+Removed the parameters with the given names from the model. Note that there is no check for whether the removed
+parameters are linked to other parameters.
+
+Changes like this should be followed by a call to [`@reinitialize`](@ref) on the model.
+"""
 macro removeparameters(model, block::Expr)
     params = filter(a -> !isa(a, LineNumberNode), block.args)
     return esc(:(ModelBaseEcon.removeparameters!($(model), $(params)); nothing))
@@ -565,6 +595,16 @@ macro autoexogenize(model, args::Expr...)
     esc(:(merge!($(model).autoexogenize, $(autoexos)); nothing))
 end
 
+"""
+    @removeautoexogenize model begin
+        varname = shkname
+        ...
+    end
+
+Removed the variable-shock combinations provided from the autoexogenize list.
+
+Changes like this should be followed by a call to [`@reinitialize`](@ref) on the model.
+"""
 macro removeautoexogenize(model, args::Expr...)
     if length(args) == 1 && args[1].head == :block
         args = args[1].args
@@ -612,6 +652,12 @@ macro equations(model, block::Expr)
     return esc(ret)
 end
 
+"""
+    get_next_equation_name(eqns::OrderedDict{Symbol,Equation})
+
+Returns the next available equation name of the form `:_EQ#`.
+The initial guess is at the number of equations + 1.
+"""
 function get_next_equation_name(eqns::OrderedDict{Symbol,Equation})
     existing_keys = keys(eqns)
     iterator = length(existing_keys) + 1
@@ -623,6 +669,21 @@ function get_next_equation_name(eqns::OrderedDict{Symbol,Equation})
     return eqn_key
 end
 
+"""
+    @changeequations model begin
+        :eqnkey => lhs = rhs
+        lhs = rhs
+        ...
+    end
+
+Replace equations with the given keys with the equation provided. Equations provided without
+a key or with a non-existing key will be added to the model.
+The keys must be provided with their full symbol reference, including the `:`.
+
+To find the key for an equation, see [`summarize`](@ref). For equation details, see [`Equation`](@ref).
+
+Changes like this should be followed by a call to [`@reinitialize`](@ref) on the model.
+"""
 macro changeequations(model, block::Expr)
     if block.head != :block
         modelerror("A list of equations must be within a begin-end block")
@@ -666,6 +727,21 @@ function changeequations!(eqns::OrderedDict{Symbol,Equation}, p::Pair{Symbol,Exp
     end
 end
 
+"""
+    @removeequations model eqnkey1 eqnkey2 ...
+    @removeparameters model begin
+        eqnkey1
+        eqnkey2
+        ...
+    end
+
+Removed the equations with the provided keys from the model.
+The keys must be provided without the `:` at the front.
+
+To find the key for an equation, see [`summarize`](@ref). 
+
+Changes like this should be followed by a call to [`@reinitialize`](@ref) on the model.
+"""
 macro removeequations(model, block::Expr)
     eqn_keys = filter(a -> !isa(a, LineNumberNode), block.args)
     return esc(:(ModelBaseEcon.removeequations!($(model), $(eqn_keys)); nothing))
@@ -673,6 +749,7 @@ end
 macro removeequations(model, eqn_keys::Symbol...)
     return esc(:(ModelBaseEcon.removeequations!($(model), $(eqn_keys)); nothing))
 end
+
 
 function removeequations!(model::Model, keys::Vector{Any})
     for key in keys
@@ -682,6 +759,21 @@ function removeequations!(model::Model, keys::Vector{Any})
     end
 end
 
+"""
+    @removesteadystate model eqnkey1 eqnkey2 ...
+    @removesteadystate model begin
+        eqnkey1
+        eqnkey2
+        ...
+    end
+
+Removed the steadystate equations with the provided keys from the model.
+The keys must be provided without the `:` at the front.
+
+To find the key for an equation, see [`summarize`](@ref). 
+
+Changes like this should be followed by a call to [`@reinitialize`](@ref) on the model.
+"""
 macro removesteadystate(model, block::Expr)
     eqn_keys = filter(a -> !isa(a, LineNumberNode), block.args)
     return esc(:(ModelBaseEcon.remove_sstate_equations!($(model), $eqn_keys); nothing))
@@ -699,6 +791,7 @@ function remove_sstate_equations!(model::Model, key::Symbol)
         delete!(ss.constraints, key)
     end
 end
+
 function remove_sstate_equations!(model::Model, keys_vector::Vector{Any})
     ss = sstate(model)
     for key in keys_vector
@@ -1026,7 +1119,7 @@ function split_nargs(ex)
 end
 
 """
-    add_equation!(model::Model, expr::Expr; modelmodule::Module)
+    add_equation!(model::Model, eqn_key::Symbol, expr::Expr; modelmodule::Module)
 
 Process the given expression in the context of the given module, create the
 Equation() instance for it, and add it to the model instance.
@@ -1222,6 +1315,17 @@ function initialize!(model::Model, modelmodule::Module)
     return nothing
 end
 
+"""
+    reinitialize!(model, modelmodule)
+
+In the model file, after all changes to flags, parameters, variables, shocks,
+autoexogenize pairs, equations, and steadystate equations are done, it is necessary to 
+reinitialize the model instance. Usually it
+is easier to call [`@reinitialize`](@ref), which automatically sets the
+`modelmodule` value. When it is necessary to set the `modelmodule` argument to
+some other module, then this can be done by calling this function instead of the
+macro.
+"""
 function reinitialize!(model::Model, modelmodule::Module)
     initfuncs(modelmodule)
     samename = Symbol[intersect(model.allvars, keys(model.parameters))...]
@@ -1268,6 +1372,15 @@ macro initialize(model::Symbol)
         $(@__MODULE__).initialize!($(model), $(__module__))
     end |> esc
 end
+"""
+    @reinitialize model
+
+Process the changes made to a model and prepare the model instance for analysis. 
+Call this macro after all changes to parameters, variable names, shock names, 
+equations, autoexogenize lists, and removed steadystate equations have been declared and defined.
+
+Additional/new steadystate constraints can be added after the call to `@reinitialize`.
+"""
 macro reinitialize(model::Symbol)
     # @__MODULE__ is this module (ModelBaseEcon)
     # __module__ is the module where this macro is called (the module where the model exists)
@@ -1344,14 +1457,24 @@ function update_auxvars(data::AbstractArray{Float64,2}, model::Model;
     return result
 end
 
+"""
+    get_aux_equation_keys(m::Model, eqn_key::Symbol)
+
+Returns a vector of symbol keys for the Aux equations used for the given equation.
+"""
 function get_aux_equation_keys(model::Model, eqn_key::Symbol)
     key_string = string(eqn_key)
     aux_keys = filter(x -> contains(string(x), key_string), keys(model.auxeqns))
     return aux_keys
 end
 
-function remove_aux_equations!(model::Model, key::Symbol)
-    for k in get_aux_equation_keys(model, key)
+"""
+    remove_aux_equations!(m::Model, eqn_key::Symbol)
+
+Removes the aux equations associated with a given equation from the model.
+"""
+function remove_aux_equations!(model::Model, eqn_key::Symbol)
+    for k in get_aux_equation_keys(model, eqn_key)
         delete!(model.auxeqns, k)
     end
 end
@@ -1359,9 +1482,9 @@ end
 """
     find(m::Model, sym::Symbol)
 
-Print information about the symbol in the provided model.
+Prints the equations which use the the given symbol in the provided model.
 """
-function summarize(model::Model, sym::Symbol)
+function find(model::Model, sym::Symbol)
     eqmap = equation_map(model)
     if sym ∉ keys(eqmap)
         println("$sym not found in model.")
@@ -1391,7 +1514,7 @@ function get_main_equation(model::Model, var::Symbol)
 end
 export get_main_equation
 """
-    print_equation(m::Model, eq::Equation; target::Symbol, eq_symbols::Vector{Any}=[])
+    prettyprint_equation(m::Model, eq::Equation; target::Symbol, eq_symbols::Vector{Any}=[])
     
     Print the provided equation with the variables colored according to their type.
 
@@ -1440,6 +1563,7 @@ function prettyprint_equation(m::Model, eq::Union{Equation,SteadyStateEquation};
     println(print_array...)
 end
 
+#TODO: improve this
 """
     find_symbols!(dest::Vector, v::Vector{Any})
     
@@ -1469,11 +1593,17 @@ function equation_symbols(e::Union{Equation,SteadyStateEquation})
     return vars
 end
 
-export summarize
+export find
 
+"""
+    equation_map(e::Model)
+    
+    Returns a dictionary with the keys beign the symbols used in the models equations 
+    and the values being a vector of equation keys for equations which use these symbols. 
+"""
 function equation_map(m::Model)
     eqmap = Dict{Symbol, Any}()
-    for (key, eqn) in pairs(m.equations)
+    for (key, eqn) in pairs(alleqns(m))
         for (var, time) in keys(eqn.tsrefs)
             if var.name ∈ keys(eqmap)
                 unique!(push!(eqmap[var.name], key))

@@ -430,7 +430,7 @@ function sseqn_resid_RJ(s::SSEqnData)
 end
 
 """
-    make_sseqn(model::AbstractModel, eqn::Equation, shift::Bool, var_to_idx)
+    make_sseqn(model::AbstractModel, eqn::Equation, shift::Bool, eqn_name::Symbol, var_to_idx)
 
 Create a steady state equation from the given dynamic equation for the given
 model.
@@ -493,7 +493,7 @@ end
 
 
 """
-    setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Module)
+    setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Module, eqn_key=:_undefined_, var_to_idx=get_var_to_idx(model))
 
 Add a steady state equation to the model. Equations added by `setss!` are in
 addition to the equations generated automatically from the dynamic system.
@@ -713,10 +713,18 @@ function initssdata!(model::AbstractModel)
     return nothing
 end
 
+"""
+    updatessdata!(m::AbstractModel)
+
+`SteadyStateData` structure of the given model during reinitialization.
+
+!!! warning
+    This function is for internal use only and not intended to be called
+    directly by users. It is called during [`@reinitialize`](@ref).
+"""
 function updatessdata!(model::AbstractModel)
     ss = sstate(model)
-    
-    
+ 
     # make new SteadyStateVariables (as they are immutable) and pass the relevant data from
     # the previous steadystate
     # this is slightly faster than a more piecemeal approach relying on mutable structs
