@@ -1480,26 +1480,29 @@ function remove_aux_equations!(model::Model, eqn_key::Symbol)
 end
 
 """
-    find(m::Model, sym::Symbol)
+    findequations(m::Model, sym::Symbol; verbose=true)
 
-Prints the equations which use the the given symbol in the provided model.
+Prints the equations which use the the given symbol in the provided model and returns a vector with
+their keys. Only returns the vector if verbose is set to `false`.
 """
-function find(model::Model, sym::Symbol)
+function findequations(model::Model, sym::Symbol; verbose=true)
     eqmap = equation_map(model)
     if sym ∉ keys(eqmap)
-        println("$sym not found in model.")
-        return
+        verbose && println("$sym not found in model.")
+        return Vector{Symbol}()
     end
     sym_eqs = eqmap[sym]
 
-    for val in sym_eqs
-        if val in keys(model.equations)
-            prettyprint_equation(model, model.equations[val]; target=sym, eq_symbols=Vector{Symbol}())
-        elseif val ∈ keys(model.sstate.constraints)
-            prettyprint_equation(model, model.sstate.constraints[val]; target=sym, eq_symbols=Vector{Symbol}())
+    if verbose
+        for val in sym_eqs
+            if val in keys(model.equations)
+                prettyprint_equation(model, model.equations[val]; target=sym, eq_symbols=Vector{Symbol}())
+            elseif val ∈ keys(model.sstate.constraints)
+                prettyprint_equation(model, model.sstate.constraints[val]; target=sym, eq_symbols=Vector{Symbol}())
+            end
         end
-        
     end
+    return sym_eqs
 end
 
 function get_main_equation(model::Model, var::Symbol)
@@ -1593,7 +1596,7 @@ function equation_symbols(e::Union{Equation,SteadyStateEquation})
     return vars
 end
 
-export find
+export findequations
 
 """
     equation_map(e::Model)
