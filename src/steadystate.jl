@@ -201,30 +201,6 @@ function Base.push!(ssd::SteadyStateData, var::ModelSymbol)
     return v
 end
 
-# function Base.delete!(ssd::SteadyStateData, var::SteadyStateVariable)
-#     ssd_vars = getfield(ssd, :vars)
-#     ssd_vals = getfield(ssd, :values)
-#     ssd_mask = getfield(ssd, :mask)
-#     for (i,v) in enumerate(ssd_vars)
-#         if v == var
-#             deleteat!(ssd_vars, i)
-#             deleteat!(ssd_vals, (2i-1, 2i))
-#             deleteat!(ssd_mask, (2i-1, 2i))
-            
-#             # deleteat!(ssd_vals, 2i-1)
-#             # deleteat!(ssd_vals, 2i-1) # equivalent to 2i
-#             # deleteat!(ssd_mask, 2i-1)
-#             # deleteat!(ssd_mask, 2i-1) # equivalent to 2i
-#             for ind in i:length(ssd_vars)
-#                 ssd_vars[ind].index = ind
-#                 ssd_vars[ind].data = view(ssd_vals, 2ind .+ (-1:0))
-#                 ssd_vars[ind].mask = view(ssd_mask, 2ind .+ (-1:0))
-#             end
-#             break
-#         end
-#     end
-# end
-
 export alleqns
 """
     alleqns(ssd::SteadyStateData)
@@ -530,11 +506,11 @@ addition to the equations generated automatically from the dynamic system.
 function setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Module=moduleof(model), eqn_key=:_undefined_, var_to_idx=get_var_to_idx(model))
     if eqn_key == :_undefined_
         allkeys = collect(keys(model.sstate.constraints))
-        eqn_key = Symbol("_SSEQ$(length(allkeys)+1)")
-        incrementer = 1
+        incrementer = length(allkeys)+1
+        eqn_key = Symbol("_SSEQ$(incrementer)")
         while eqn_key ∈ allkeys
             incrementer += 1
-            eqn_key = Symbol("_SSEQ$(length(allkeys)+incrementer)")
+            eqn_key = Symbol("_SSEQ$(incrementer)")
         end
     end
 
@@ -759,28 +735,6 @@ function updatessdata!(model::AbstractModel)
         ind += 1
     end
 
-    # i = 1
-    # while i <= length(ss.vars)
-    #     vind = 0
-    #     if model.allvars[i].name != ss.vars[i].name.name
-    #         delete!(ss, ss.vars[i])
-    #         i -= 1
-    #     end
-    #     i += 1
-    # end
-    
-    # existing_vars = [var.name for var in ss.vars] # actually a vector of ModelVariable
-    # for var in model.allvars
-    #     if var ∉ existing_vars
-    #         # println("pushing ", var, ", ", length(ss.vars))
-    #         push!(ss, var)
-    #     end
-    # end
-
-    # for i in 1:length(model.allvars)
-    #     @assert model.allvars[i].name == model.sstate.vars[i].name.name "$i, $(model.allvars[i].name) vs. $(model.sstate.vars[i].name.name)"
-    # end
-
     # update vinds in the equations
     vinds_map = Dict{Symbol, Integer}()
     for (i, var) in enumerate(model.allvars)
@@ -796,10 +750,7 @@ function updatessdata!(model::AbstractModel)
     for (key, eqn) in alleqns(model)
         eqn_name = eqn.name
         if eqn_name ∉ keys(ss.equations)
-            # println("Adding $eqn_name")
             push!(ss.equations,eqn_name => make_sseqn(model, eqn, false, eqn_name))
-            # println(ss.equations[eqn_name])
-            # println(ss.equations[eqn_name].vsyms)
         end
     end
     if !model.flags.ssZeroSlope

@@ -96,7 +96,6 @@ nauxvars(model::Model) = length(auxvars(model))
 allvars(model::Model) = vcat(variables(model), shocks(model), auxvars(model))
 nallvars(model::Model) = length(variables(model)) + length(shocks(model)) + length(auxvars(model))
 
-# alleqns(model::Model) = vcat(collect(values(equations(model))), collect(values(getfield(model, :auxeqns))))
 alleqns(model::Model) = OrderedDict{Symbol,Equation}(key => eqn for (key, eqn) in vcat(pairs(equations(model))..., pairs(getfield(model, :auxeqns))...))
 nalleqns(model::Model) = length(equations(model)) + length(getfield(model, :auxeqns))
 
@@ -322,14 +321,9 @@ function fullprint(io::IO, model::Model)
     end
     print(io, ": \n")
     var_to_idx = get_var_to_idx(model)
-    function print_aux_eq(bi)
-        v = model.auxeqns[bi]
-        for (var, _) in keys(v.tsrefs)
-            ai = var_to_idx[var]
-            ci = ai - nvarshk
-            (1 <= ci < bi) && print_aux_eq(ci)
-        end
-        println(io, "   |->A$bi:   ", v.expr)
+    function print_aux_eq(aux_key)
+        v = model.auxeqns[aux_key]
+        println(io, "   |-> $aux_key:   ", v.expr)
     end
     for (key, eq) in model.equations
         println(io, "   $key:\t", eq)
@@ -611,11 +605,22 @@ macro equations(model, block::Expr)
             push!(eqn.args, expr)
         else
             push!(eqn.args, expr)
-            push!(ret.args, :(push!($model.equations, Symbol("_EQ"*string(length(keys($model.equations))+1)) => $(Meta.quot(eqn)))))
+            push!(ret.args, :(push!($model.equations, ModelBaseEcon.get_next_equation_name($model.equations) => $(Meta.quot(eqn)))))
             eqn = Expr(:block)
         end
     end
     return esc(ret)
+end
+
+function get_next_equation_name(eqns::OrderedDict{Symbol,Equation})
+    existing_keys = keys(eqns)
+    iterator = length(existing_keys) + 1
+    eqn_key = Symbol("_EQ", iterator)
+    while eqn_key ∈ existing_keys
+        iterator += 1
+        eqn_key = Symbol("_EQ", iterator)
+    end
+    return eqn_key
 end
 
 macro changeequations(model, block::Expr)
@@ -1223,11 +1228,6 @@ function reinitialize!(model::Model, modelmodule::Module)
     if !isempty(samename)
         modelerror("Found $(length(samename)) names that are both variables and parameters: $(join(samename, ", "))")
     end
-    # varshks = model.varshks
-    # model.variables = varshks[.!isshock.(varshks)]
-    # model.shocks = varshks[isshock.(varshks)]
-    # stoptimer()
-    # inittimer()
     model.dynss = false
     model.maxlag = 0
     model.maxlead = 0
@@ -1252,8 +1252,6 @@ function reinitialize!(model::Model, modelmodule::Module)
         # if dynss is true, then we need the steady state even for the standard MED
         nothing
     end
-    # stoptimer()
-    # printtimer()
     return nothing
 end
 
@@ -1371,34 +1369,14 @@ function summarize(model::Model, sym::Symbol)
     end
     sym_eqs = eqmap[sym]
 
-    if length((sym_eqs)) > 0
-        didfirst = false
-        for val in sym_eqs
-            if val in keys(model.equations)
-                prettyprint_equation(model, model.equations[val]; target=sym, eq_symbols=Vector{Symbol}())
-            elseif val ∈ keys(model.sstate.constraints)
-                prettyprint_equation(model, model.sstate.constraints[val]; target=sym, eq_symbols=Vector{Symbol}())
-            end
-            
+    for val in sym_eqs
+        if val in keys(model.equations)
+            prettyprint_equation(model, model.equations[val]; target=sym, eq_symbols=Vector{Symbol}())
+        elseif val ∈ keys(model.sstate.constraints)
+            prettyprint_equation(model, model.sstate.constraints[val]; target=sym, eq_symbols=Vector{Symbol}())
         end
-    else
-        println("$sym not found in model")
+        
     end
-
-    # println("\n\n============================")
-    # println("Values")
-    # println("============================")
-    # if issssolved(m)
-    #     println("Steady-state: $(m.sstate[sym])")
-    # end
-    # if @isdefined(dt) && dt isa Workspace && @isdefined(db_ff) && db_ff isa Workspace
-    #     ts = db_ff[sym]
-    #     println("db_ff:")
-    #     println("  Historical          : $(round(minimum(ts[firstdate(ts):dt.endhist]); digits=4)) - $(round(maximum(ts[firstdate(ts):dt.endhist]); digits=4))")
-    #     println("  Monitoring          : $(round(minimum(ts[dt.begmntr:dt.endmntr]); digits=4)) - $(round(maximum(ts[dt.begmntr:dt.endmntr]); digits=4))")
-    #     println("  Projection (6Q)     : $(round(minimum(ts[dt.begproj:dt.begproj+5]); digits=4)) - $(round(maximum(ts[dt.begproj:dt.begproj+5]); digits=4))")
-    #     println("  Projection (further): $(round(minimum(ts[dt.begproj+6:lastdate(ts)]); digits=4)) - $(round(maximum(ts[dt.begproj+6:lastdate(ts)]); digits=4))")
-    # end
 end
 
 function get_main_equation(model::Model, var::Symbol)
@@ -1424,7 +1402,6 @@ export get_main_equation
       * `eq_symbols`::Vector{Any} - a vector of symbols present in the equation. Can slightly speed up processing if provided.
 """
 function prettyprint_equation(m::Model, eq::Union{Equation,SteadyStateEquation}; target::Symbol=nothing, eq_symbols::Vector{Symbol} = [])
-    # target_color = "#7DFF33"
     target_color = "#f4C095"
     var_color = "#1D7874"
     shock_color = "#EE2E31"

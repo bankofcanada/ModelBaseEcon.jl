@@ -246,7 +246,7 @@ using ModelBaseEcon
 end
 @testset "Evaluations" begin
     ModelBaseEcon.initfuncs(E)
-    E.eval(ModelBaseEcon.makefuncs(:(x + 3 * y), [:x, :y], [], [], E))
+    E.eval(ModelBaseEcon.makefuncs(Symbol(1), :(x + 3 * y), [:x, :y], [], [], E))
     @test :resid_1 ∈ names(E, all=true)
     @test :RJ_1 ∈ names(E, all=true)
     @test E.resid_1([1.1, 2.3]) == 8.0
