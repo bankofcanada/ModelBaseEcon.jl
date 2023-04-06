@@ -636,8 +636,11 @@ function setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Mod
         # with just that variable and, if so, remove it.
         for (k, ssc) in ss.constraints
             if ssc.type == type && length(ssc.vinds) == 1 && ssc.vinds[1] == sscon.vinds[1]
-                ss.constraints[k] = sscon
-                return sscon
+                funcs_expr = makefuncs(k, residual, vsyms, [], unique(val_params), modelmodule)
+                resid, RJ = modelmodule.eval(funcs_expr)
+                _update_eqn_params!(resid, model.parameters)
+                ss.constraints[k] = SteadyStateEquation(type, k, vinds, vsyms, expr, resid, RJ)
+                return ss.constraints[k]
             end
         end
     end
