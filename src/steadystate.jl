@@ -172,11 +172,11 @@ struct SteadyStateData
     "`mask[i] == true if and only if `values[i]` holds the steady state value."
     mask::BitArray{1}
     "Steady state equations derived from the dynamic system."
-    equations::LittleDict{Symbol,SteadyStateEquation}
+    equations::OrderedDict{Symbol,SteadyStateEquation}
     "Steady state equations explicitly added with @steadystate."
-    constraints::LittleDict{Symbol,SteadyStateEquation}
+    constraints::OrderedDict{Symbol,SteadyStateEquation}
     # default constructor
-    SteadyStateData() = new([], [], [], LittleDict{Symbol,SteadyStateEquation}(), LittleDict{Symbol,SteadyStateEquation}())
+    SteadyStateData() = new([], [], [], OrderedDict{Symbol,SteadyStateEquation}(), OrderedDict{Symbol,SteadyStateEquation}())
 end
 
 @inline function Base.push!(ssd::SteadyStateData, var, vars...)
@@ -210,7 +210,7 @@ Return a list of all steady state equations.
 The list contains all explicitly added steady state constraints and all
 equations derived from the dynamic system.
 """
-alleqns(ssd::SteadyStateData) = LittleDict{Symbol, SteadyStateEquation}(key => eqn for (key, eqn) in vcat(pairs(ssd.constraints)..., pairs(ssd.equations)...))
+alleqns(ssd::SteadyStateData) = OrderedDict{Symbol, SteadyStateEquation}(key => eqn for (key, eqn) in vcat(pairs(ssd.constraints)..., pairs(ssd.equations)...))
 
 export neqns
 """
