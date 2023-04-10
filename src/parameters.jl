@@ -225,6 +225,14 @@ function _addlink(params, val, key)
     return
 end
 
+function _update_depends!(p::ModelParam, key::Symbol, params::Parameters)
+    for (k, param) in params
+        if param.link == key
+            push!(p.depends, k)
+        end
+    end
+end
+
 """
     peval(params, what)
 
@@ -374,6 +382,7 @@ function Base.setindex!(params::Parameters, val, key)
     _addlink(params, val, key)
     p.link = _link(val)
     p.value = _value(val)
+    _update_depends!(p, key, params)
     _update_values(params, p, key)
     params.rev[] = hash(params.contents)
     return params

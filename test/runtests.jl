@@ -863,6 +863,40 @@ end
     end
 end
 
+@testset "E1.equation change 2" begin
+    m = E1.newmodel()
+    @test propertynames(m.parameters) == (:α, :β)
+    @test peval(m, :α) == 0.5
+    m.parameters.beta = @alias β
+    @removeparameters m β
+    @parameters m begin
+        β = 0.5
+    end
+    m.β = @link 1.0 - α
+    @reinitialize(m)
+    for α = 0.0:0.1:1.0
+        m.α = α
+        test_eval_RJ(m, [0.0], [-α 1.0 -m.beta 0.0 -1.0 0.0;])
+    end
+end
+
+@testset "E1.equation change 3" begin
+    m = E1.newmodel()
+    @test propertynames(m.parameters) == (:α, :β)
+    @test peval(m, :α) == 0.5
+    m.parameters.beta = @alias β
+    m.β = @link 1.0 - α
+    @removeparameters m α
+    @parameters m begin
+        α = 0.5
+    end
+    @reinitialize(m)
+    for α = 0.0:0.1:1.0
+        m.α = α
+        test_eval_RJ(m, [0.0], [-α 1.0 -m.beta 0.0 -1.0 0.0;])
+    end
+end
+
 module AUX
 using ModelBaseEcon
 model = Model()
