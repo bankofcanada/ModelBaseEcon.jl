@@ -1647,3 +1647,55 @@ function equation_map(m::Model)
     end 
     return eqmap
 end
+
+"""
+    @replaceparameterlinks model oldmodel => newmodel
+    
+
+This function is used when a model uses parameters which link to another model object.
+The function must be called with a pair of models as they appear in the Main module.
+
+This is useful when ones models are modularized and include sattelite models. The function
+can then be used to link the parameters in modified copies of the sattelite model to modified 
+copies of the main model. For example, if the FRBUS_VAR model has a main model and a sattelite model
+the following workflow would make sense.
+
+```
+using FRBUS_VAR
+m = deepcopy(FRBUS_VAR.model)
+m_sattelite = deepcopy(FRBUS_VAR.sattelitemodel)
+
+## INSERT CHANGES to m
+@reinitialize m
+@replaceparameterlinks m_sattelite FRBUS_VAR.model => m
+@reinitialize m_sattelite
+
+```
+
+Changes like this should be followed by a call to [`@reinitialize`](@ref) on the model.
+"""
+macro replaceparameterlinks(model, expr)
+    if expr.args[1] !== :(=>)
+        error("The replacement must by of the form oldmodel => newmodel")
+    end
+    old_string = string(expr.args[2])
+    new_string = string(expr.args[3])
+    model_name = string(model)
+    return esc(:(
+        params_string = ModelBaseEcon.corrected_parameters_block($model, $old_string, $new_string, $model_name);
+        eval(Meta.parse(params_string));
+        nothing
+        ));
+end
+export @replaceparamlinks
+    
+function corrected_parameters_block(model::Model, s1::String, s2::String, model_name::String)
+    str = sprint(println, "@parameters $model_name begin")
+    for (n, p) in model.parameters
+        str = str*sprint(println, "    ", n, " = ", p)
+    end
+    str = str*sprint(println, "end # parameters")
+    str = replace(str, s1 => s2)
+    return str
+end
+
