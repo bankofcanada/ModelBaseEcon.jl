@@ -1334,11 +1334,12 @@ function reinitialize!(model::Model, modelmodule::Module)
     model.dynss = false
     model.maxlag = 0
     model.maxlead = 0
+    var_to_idx = _make_var_to_idx(model.allvars)
     for (key, e) in alleqns(model)
         if e.eval_resid == eqnnotready
             remove_aux_equations!(model, key)
             remove_sstate_equation!(model, key)
-            add_equation!(model, key, e.expr; modelmodule=modelmodule)
+            add_equation!(model, key, e.expr; modelmodule=modelmodule, var_to_idx=var_to_idx)
         else
             model.maxlag = max(model.maxlag, e.maxlag)
             model.maxlead = max(model.maxlead, e.maxlead)
