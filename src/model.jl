@@ -1687,7 +1687,7 @@ macro replaceparameterlinks(model, expr)
         nothing
         ));
 end
-export @replaceparamlinks
+export @replaceparameterlinks
     
 function corrected_parameters_block(model::Model, s1::String, s2::String, model_name::String)
     str = sprint(println, "@parameters $model_name begin")
