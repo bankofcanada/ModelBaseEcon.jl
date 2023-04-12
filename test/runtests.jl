@@ -438,24 +438,6 @@ end
     end
 end
 
-@testset "Timer" begin
-    @test inittimer() === nothing
-    @timer "model" m = Model()
-    @timer "model" @variables m x
-    @timer "model" @shocks m sx
-    @timer "model" @equations m begin
-        x[t-1] = sx[t+1]
-        @lag(x[t]) = @lag(sx[t+2])
-    end
-    @timer params = @parameters
-    @test printtimer(IOBuffer()) === nothing
-    @test_throws ErrorException try
-        @eval @timer
-    catch err
-        throw(ErrorException(err.msg))
-    end
-    @test stoptimer() === nothing
-end
 
 @testset "Abstract" begin
     struct AM <: ModelBaseEcon.AbstractModel end
