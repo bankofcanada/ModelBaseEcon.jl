@@ -30,11 +30,6 @@ using Printf
 # Therefore, define a small helper typealias to use in structs:
 const LittleDictVec{K,V} = LittleDict{K,V,Vector{K},Vector{V}}
 
-# The Timer submodule
-include("Timer.jl")
-using .Timer
-export @timer, inittimer, stoptimer, printtimer
-
 # The Options submodule
 include("Options.jl")
 
