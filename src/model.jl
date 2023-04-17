@@ -635,34 +635,6 @@ end
 
 
 """
-    @equations model begin
-        lhs = rhs
-        lhs = rhs
-        ...
-    end
-
-Define model equations. See [`Equation`](@ref).
-"""
-macro equations(model, block::Expr)
-    if block.head != :block
-        modelerror("A list of equations must be within a begin-end block")
-    end
-    ret = Expr(:block)
-    eqn = Expr(:block)
-    for expr in block.args
-        if isa(expr, LineNumberNode)
-            push!(eqn.args, expr)
-        else
-            push!(eqn.args, expr)
-            push!(ret.args, :(push!($model.equations, ModelBaseEcon.get_next_equation_name($model.equations) => $(Meta.quot(eqn)))))
-            eqn = Expr(:block)
-        end
-    end
-    push!(ret.args, :(ModelBaseEcon.update_model_state!($(model));))
-    return esc(ret)
-end
-
-"""
     get_next_equation_name(eqns::OrderedDict{Symbol,Equation})
 
 Returns the next available equation name of the form `:_EQ#`.
@@ -680,7 +652,7 @@ function get_next_equation_name(eqns::OrderedDict{Symbol,Equation})
 end
 
 """
-    @changeequations model begin
+    @equations model begin
         :eqnkey => lhs = rhs
         lhs = rhs
         ...
@@ -694,7 +666,7 @@ To find the key for an equation, see [`summarize`](@ref). For equation details, 
 
 Changes like this should be followed by a call to [`@reinitialize`](@ref) on the model.
 """
-macro changeequations(model, block::Expr)
+macro equations(model, block::Expr)
     if block.head != :block
         modelerror("A list of equations must be within a begin-end block")
     end
@@ -714,7 +686,7 @@ macro changeequations(model, block::Expr)
             eqn = Expr(:block)
         end
     end
-    push!(ret.args, :(ModelBaseEcon.update_model_state!($(model)); nothing))
+    push!(ret.args, :(ModelBaseEcon.process_new_equations!($(model),  $(__module__)); ModelBaseEcon.update_model_state!($(model)); nothing))
     return esc(ret)
 end
 
@@ -735,6 +707,21 @@ function changeequations!(eqns::OrderedDict{Symbol,Equation}, p::Pair{Symbol,Exp
         eqns[sym] = Equation(e)
     else
         push!(eqns, sym => Equation(e))
+    end
+end
+
+function process_new_equations!(model::Model, modelmodule::Module)
+    if model.state == :new
+        return
+    end
+    initfuncs(modelmodule)
+    var_to_idx = _make_var_to_idx(model.allvars)
+    for (key, e) in alleqns(model)
+        if e.eval_resid == eqnnotready
+            delete_aux_equations!(model, key)
+            delete_sstate_equation!(model, key)
+            add_equation!(model, key, e.expr; modelmodule=modelmodule, var_to_idx=var_to_idx)
+        end
     end
 end
 
@@ -1304,12 +1291,10 @@ function initialize!(model::Model, modelmodule::Module)
     model.variables = varshks[.!isshock.(varshks)]
     model.shocks = varshks[isshock.(varshks)]
     empty!(model.auxvars)
-    eqns = deepcopy(model.equations)
-    empty!(model.equations)
     empty!(model.auxeqns)
     model.dynss = false
     var_to_idx = _make_var_to_idx(model.allvars)
-    for (key, e) in eqns
+    for (key, e) in alleqns(model)
         add_equation!(model, key, e.expr; var_to_idx=var_to_idx, modelmodule=modelmodule)
     end
     initssdata!(model)
