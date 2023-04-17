@@ -837,7 +837,7 @@ end
 @testset "E1.equation change" begin 
     for α = 0.0:0.1:1.0
         new_E1 = E1_noparams.newmodel()
-        @changeequations new_E1 begin
+        @equations new_E1 begin
             :maineq => y[t] = $α * y[t - 1] + $(1-α) * y[t + 1] + y_shk[t]
         end
         @reinitialize(new_E1)
