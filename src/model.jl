@@ -369,7 +369,7 @@ end
 
 export @variables, @logvariables, @neglogvariables, @steadyvariables, @exogenous, @shocks
 export @parameters, @equations, @autoshocks, @autoexogenize, @changeequations
-export @removevariables, @removeparameters, @removeequations, @removeshocks, @removesteadystate, @removeautoexogenize
+export @removevariables, @removeequations, @removeshocks, @removesteadystate, @removeautoexogenize
 
 """
     @variables model name1 name2 ...
@@ -550,32 +550,32 @@ macro parameters(model, args::Expr...)
     return esc(ret)
 end
 
-"""
-    @removeparameters model name1 name2 ...
-    @removeparameters model begin
-        name1
-        name2
-        ...
-    end
+# """
+#     @removeparameters model name1 name2 ...
+#     @removeparameters model begin
+#         name1
+#         name2
+#         ...
+#     end
 
-Removed the parameters with the given names from the model. Note that there is no check for whether the removed
-parameters are linked to other parameters.
+# Removed the parameters with the given names from the model. Note that there is no check for whether the removed
+# parameters are linked to other parameters.
 
-Changes like this should be followed by a call to [`@reinitialize`](@ref) on the model.
-"""
-macro removeparameters(model, block::Expr)
-    params = filter(a -> !isa(a, LineNumberNode), block.args)
-    return esc(:(ModelBaseEcon.removeparameters!($(model), $(params)); nothing))
-end
-macro removeparameters(model, params::Symbol...)
-    return esc(:(ModelBaseEcon.removeparameters!($(model), $(params)); nothing))
-end
+# Changes like this should be followed by a call to [`@reinitialize`](@ref) on the model.
+# """
+# macro removeparameters(model, block::Expr)
+#     params = filter(a -> !isa(a, LineNumberNode), block.args)
+#     return esc(:(ModelBaseEcon.removeparameters!($(model), $(params)); nothing))
+# end
+# macro removeparameters(model, params::Symbol...)
+#     return esc(:(ModelBaseEcon.removeparameters!($(model), $(params)); nothing))
+# end
 
-function removeparameters!(model::Model, params)
-    for param in params
-        delete!(model.parameters.contents, param)
-    end
-end
+# function removeparameters!(model::Model, params)
+#     for param in params
+#         delete!(model.parameters.contents, param)
+#     end
+# end
 
 """
     @autoexogenize model begin
@@ -729,7 +729,7 @@ end
 
 """
     @removeequations model eqnkey1 eqnkey2 ...
-    @removeparameters model begin
+    @removeequations model begin
         eqnkey1
         eqnkey2
         ...
