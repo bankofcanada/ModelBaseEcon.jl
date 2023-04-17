@@ -850,7 +850,6 @@ end
     @test propertynames(m.parameters) == (:α, :β)
     @test peval(m, :α) == 0.5
     m.parameters.beta = @alias β
-    @removeparameters m β
     @parameters m begin
         β = 0.5
     end
@@ -868,7 +867,6 @@ end
     @test peval(m, :α) == 0.5
     m.parameters.beta = @alias β
     m.β = @link 1.0 - α
-    @removeparameters m α
     @parameters m begin
         α = 0.5
     end
