@@ -372,9 +372,9 @@ end
 export @variables, @logvariables, @neglogvariables, @steadyvariables, @exogenous, @shocks
 export @parameters, @equations, @autoshocks, @autoexogenize, @changeequations
 export @deletevariables, @deleteequations, @deleteshocks, @deletesteadystate, @deleteautoexogenize
-export update_model_state
+export update_model_state!
 
-function update_model_state(m)
+function update_model_state!(m)
     m.state = m.state == :ready ? :dev : m.state
 end
 
@@ -395,10 +395,10 @@ In the `begin-end` version the variable names can be preceeded by a description
 """
 macro variables(model, block::Expr)
     vars = filter(a -> !isa(a, LineNumberNode), block.args)
-    return esc(:(unique!(append!($(model).variables, $vars)); ModelBaseEcon.update_model_state($(model)); nothing))
+    return esc(:(unique!(append!($(model).variables, $vars)); ModelBaseEcon.update_model_state!($(model)); nothing))
 end
 macro variables(model, vars::Symbol...)
-    return esc(:(unique!(append!($(model).variables, $vars)); ModelBaseEcon.update_model_state($(model)); nothing))
+    return esc(:(unique!(append!($(model).variables, $vars)); ModelBaseEcon.update_model_state!($(model)); nothing))
 end
 
 """
@@ -409,10 +409,10 @@ are log-transformed.
 """
 macro logvariables(model, block::Expr)
     vars = filter(a -> !isa(a, LineNumberNode), block.args)
-    return esc(:(unique!(append!($(model).variables, to_log.($vars))); ModelBaseEcon.update_model_state($(model)); nothing))
+    return esc(:(unique!(append!($(model).variables, to_log.($vars))); ModelBaseEcon.update_model_state!($(model)); nothing))
 end
 macro logvariables(model, vars::Symbol...)
-    return esc(:(unique!(append!($(model).variables, to_log.($vars))); ModelBaseEcon.update_model_state($(model)); nothing))
+    return esc(:(unique!(append!($(model).variables, to_log.($vars))); ModelBaseEcon.update_model_state!($(model)); nothing))
 end
 
 """
@@ -423,10 +423,10 @@ are negative-log-transformed.
 """
 macro neglogvariables(model, block::Expr)
     vars = filter(a -> !isa(a, LineNumberNode), block.args)
-    return esc(:(unique!(append!($(model).variables, to_neglog.($vars))); ModelBaseEcon.update_model_state($(model)); nothing))
+    return esc(:(unique!(append!($(model).variables, to_neglog.($vars))); ModelBaseEcon.update_model_state!($(model)); nothing))
 end
 macro neglogvariables(model, vars::Symbol...)
-    return esc(:(unique!(append!($(model).variables, to_neglog.($vars))); ModelBaseEcon.update_model_state($(model)); nothing))
+    return esc(:(unique!(append!($(model).variables, to_neglog.($vars))); ModelBaseEcon.update_model_state!($(model)); nothing))
 end
 
 """
@@ -438,10 +438,10 @@ have zero slope in their steady state and final conditions.
 """
 macro steadyvariables(model, block::Expr)
     vars = filter(a -> !isa(a, LineNumberNode), block.args)
-    return esc(:(unique!(append!($(model).variables, to_steady.($vars))); ModelBaseEcon.update_model_state($(model)); nothing))
+    return esc(:(unique!(append!($(model).variables, to_steady.($vars))); ModelBaseEcon.update_model_state!($(model)); nothing))
 end
 macro steadyvariables(model, vars::Symbol...)
-    return esc(:(unique!(append!($(model).variables, to_steady.($vars))); ModelBaseEcon.update_model_state($(model)); nothing))
+    return esc(:(unique!(append!($(model).variables, to_steady.($vars))); ModelBaseEcon.update_model_state!($(model)); nothing))
 end
 
 """
@@ -452,10 +452,10 @@ exogenous.
 """
 macro exogenous(model, block::Expr)
     vars = filter(a -> !isa(a, LineNumberNode), block.args)
-    return esc(:(unique!(append!($(model).variables, to_exog.($vars))); ModelBaseEcon.update_model_state($(model)); nothing))
+    return esc(:(unique!(append!($(model).variables, to_exog.($vars))); ModelBaseEcon.update_model_state!($(model)); nothing))
 end
 macro exogenous(model, vars::Symbol...)
-    return esc(:(unique!(append!($(model).variables, to_exog.($vars))); ModelBaseEcon.update_model_state($(model)); nothing))
+    return esc(:(unique!(append!($(model).variables, to_exog.($vars))); ModelBaseEcon.update_model_state!($(model)); nothing))
 end
 
 """
@@ -472,10 +472,10 @@ Changes like this should be followed by a call to [`@reinitialize`](@ref) on the
 """
 macro deletevariables(model, block::Expr)
     vars = filter(a -> !isa(a, LineNumberNode), block.args)
-    return esc(:(unique!(deleteat!($(model).variables, findall(x -> x ∈ $vars, $(model).variables))); ModelBaseEcon.update_model_state($(model)); nothing))
+    return esc(:(unique!(deleteat!($(model).variables, findall(x -> x ∈ $vars, $(model).variables))); ModelBaseEcon.update_model_state!($(model)); nothing))
 end
 macro deletevariables(model, vars::Symbol...)
-    return esc(:(unique!(deleteat!($(model).variables, findall(x -> x ∈ $vars, $(model).variables))); ModelBaseEcon.update_model_state($(model)); nothing))
+    return esc(:(unique!(deleteat!($(model).variables, findall(x -> x ∈ $vars, $(model).variables))); ModelBaseEcon.update_model_state!($(model)); nothing))
 end
 
 """
@@ -486,10 +486,10 @@ shocks.
 """
 macro shocks(model, block::Expr)
     shks = filter(a -> !isa(a, LineNumberNode), block.args)
-    return esc(:(unique!(append!($(model).shocks, to_shock.($shks))); ModelBaseEcon.update_model_state($(model)); nothing))
+    return esc(:(unique!(append!($(model).shocks, to_shock.($shks))); ModelBaseEcon.update_model_state!($(model)); nothing))
 end
 macro shocks(model, shks::Symbol...)
-    return esc(:(unique!(append!($(model).shocks, to_shock.($shks))); ModelBaseEcon.update_model_state($(model)); nothing))
+    return esc(:(unique!(append!($(model).shocks, to_shock.($shks))); ModelBaseEcon.update_model_state!($(model)); nothing))
 end
 
 """
@@ -499,10 +499,10 @@ Like [`@deletevariables`](@ref), but will remove the shocks in the model with th
 """
 macro deleteshocks(model, block::Expr)
     shocks = filter(a -> !isa(a, LineNumberNode), block.args)
-    return esc(:(unique!(deleteat!($(model).shocks, findall(x -> x ∈ $shocks, $(model).shocks))); ModelBaseEcon.update_model_state($(model)); nothing))
+    return esc(:(unique!(deleteat!($(model).shocks, findall(x -> x ∈ $shocks, $(model).shocks))); ModelBaseEcon.update_model_state!($(model)); nothing))
 end
 macro deleteshocks(model, shocks::Symbol...)
-    return esc(:(unique!(deleteat!($(model).shocks, findall(x -> x ∈ $shocks, $(model).shocks))); ModelBaseEcon.update_model_state($(model)); nothing))
+    return esc(:(unique!(deleteat!($(model).shocks, findall(x -> x ∈ $shocks, $(model).shocks))); ModelBaseEcon.update_model_state!($(model)); nothing))
 end
 
 """
@@ -520,7 +520,7 @@ macro autoshocks(model, suf="_shk")
         push!($(model).autoexogenize, (
             v.name => Symbol(v.name, $(QuoteNode(suf))) for v in $(model).variables if !isexog(v)
         )...)
-        ModelBaseEcon.update_model_state($(model));
+        ModelBaseEcon.update_model_state!($(model));
         nothing
     end)
 end
@@ -555,7 +555,7 @@ macro parameters(model, args::Expr...)
         end
         throw(ArgumentError("Parameter definitions must be assignments, not\n  $a"))
     end
-    push!(ret.args, :(ModelBaseEcon.update_model_state($(model)); nothing))
+    push!(ret.args, :(ModelBaseEcon.update_model_state!($(model)); nothing))
     return esc(ret)
 end
 
@@ -601,7 +601,7 @@ macro autoexogenize(model, args::Expr...)
     end
     args = filter(a -> a isa Expr && a.head == :(=), [args...])
     autoexos = Dict{Symbol,Any}([ex.args for ex in args])
-    esc(:(merge!($(model).autoexogenize, $(autoexos)); ModelBaseEcon.update_model_state($(model)); nothing))
+    esc(:(merge!($(model).autoexogenize, $(autoexos)); ModelBaseEcon.update_model_state!($(model)); nothing))
 end
 
 """
@@ -620,7 +620,7 @@ macro deleteautoexogenize(model, args::Expr...)
     end
     args = filter(a -> a isa Expr && a.head == :(=), [args...])
     autoexos = Dict{Symbol,Any}([ex.args for ex in args])
-    esc(:(ModelBaseEcon.deleteautoexogenize!($(model).autoexogenize, $(autoexos)); ModelBaseEcon.update_model_state($(model)); nothing))
+    esc(:(ModelBaseEcon.deleteautoexogenize!($(model).autoexogenize, $(autoexos)); ModelBaseEcon.update_model_state!($(model)); nothing))
 end
 
 function deleteautoexogenize!(autoexogdict, entries)
@@ -658,7 +658,7 @@ macro equations(model, block::Expr)
             eqn = Expr(:block)
         end
     end
-    push!(ret.args, :(ModelBaseEcon.update_model_state($(model));))
+    push!(ret.args, :(ModelBaseEcon.update_model_state!($(model));))
     return esc(ret)
 end
 
@@ -714,7 +714,7 @@ macro changeequations(model, block::Expr)
             eqn = Expr(:block)
         end
     end
-    push!(ret.args, :(ModelBaseEcon.update_model_state($(model)); nothing))
+    push!(ret.args, :(ModelBaseEcon.update_model_state!($(model)); nothing))
     return esc(ret)
 end
 
@@ -755,10 +755,10 @@ Changes like this should be followed by a call to [`@reinitialize`](@ref) on the
 """
 macro deleteequations(model, block::Expr)
     eqn_keys = filter(a -> !isa(a, LineNumberNode), block.args)
-    return esc(:(ModelBaseEcon.deleteequations!($(model), $(eqn_keys)); ModelBaseEcon.update_model_state($(model)); nothing))
+    return esc(:(ModelBaseEcon.deleteequations!($(model), $(eqn_keys)); ModelBaseEcon.update_model_state!($(model)); nothing))
 end
 macro deleteequations(model, eqn_keys::Symbol...)
-    return esc(:(ModelBaseEcon.deleteequations!($(model), $(eqn_keys)); ModelBaseEcon.update_model_state($(model)); nothing))
+    return esc(:(ModelBaseEcon.deleteequations!($(model), $(eqn_keys)); ModelBaseEcon.update_model_state!($(model)); nothing))
 end
 
 function deleteequations!(model::Model, keys)
@@ -786,10 +786,10 @@ Changes like this should be followed by a call to [`@reinitialize`](@ref) on the
 """
 macro deletesteadystate(model, block::Expr)
     eqn_keys = filter(a -> !isa(a, LineNumberNode), block.args)
-    return esc(:(ModelBaseEcon.delete_sstate_equations!($(model), $eqn_keys); ModelBaseEcon.update_model_state($(model)); nothing))
+    return esc(:(ModelBaseEcon.delete_sstate_equations!($(model), $eqn_keys); ModelBaseEcon.update_model_state!($(model)); nothing))
 end
 macro deletesteadystate(model, eqn_keys::Symbol...)
-    return esc(:(ModelBaseEcon.delete_sstate_equations!($(model), $eqn_keys); ModelBaseEcon.update_model_state($(model)); nothing))
+    return esc(:(ModelBaseEcon.delete_sstate_equations!($(model), $eqn_keys); ModelBaseEcon.update_model_state!($(model)); nothing))
 end
 
 function delete_sstate_equation!(model::Model, key::Symbol)
