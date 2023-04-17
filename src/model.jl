@@ -676,6 +676,11 @@ macro equations(model, block::Expr)
         if isa(expr, LineNumberNode)
             push!(eqn.args, expr)
         else
+            if (expr.args[1] isa Symbol) && expr.args[1] == Symbol("@delete")
+                eqn_keys = filter(a -> !isa(a, LineNumberNode), expr.args[2:end])
+                push!(ret.args, :(ModelBaseEcon.deleteequations!($(model), $(eqn_keys))))
+                continue
+            end
             push!(eqn.args, expr)
             if expr.args[1] isa Expr && expr.args[1].args[1] == :(=>)
                 sym = expr.args[1].args[2]
