@@ -369,7 +369,7 @@ end
 
 export @variables, @logvariables, @neglogvariables, @steadyvariables, @exogenous, @shocks
 export @parameters, @equations, @autoshocks, @autoexogenize, @changeequations
-export @removevariables, @removeequations, @removeshocks, @removesteadystate, @removeautoexogenize
+export @deletevariables, @deleteequations, @deleteshocks, @deletesteadystate, @deleteautoexogenize
 
 """
     @variables model name1 name2 ...
@@ -452,22 +452,22 @@ macro exogenous(model, vars::Symbol...)
 end
 
 """
-    @removevariables model name1 name2 ...
-    @removevariables model begin
+    @deletevariables model name1 name2 ...
+    @deletevariables model begin
         name1
         name2
         ...
     end
 
-Removed the variables with the given names from the model. The variable can be of any of the variable types.
+Removes the variables with the given names from the model. The variable can be of any of the variable types.
 
 Changes like this should be followed by a call to [`@reinitialize`](@ref) on the model.
 """
-macro removevariables(model, block::Expr)
+macro deletevariables(model, block::Expr)
     vars = filter(a -> !isa(a, LineNumberNode), block.args)
     return esc(:(unique!(deleteat!($(model).variables, findall(x -> x ∈ $vars, $(model).variables))); nothing))
 end
-macro removevariables(model, vars::Symbol...)
+macro deletevariables(model, vars::Symbol...)
     return esc(:(unique!(deleteat!($(model).variables, findall(x -> x ∈ $vars, $(model).variables))); nothing))
 end
 
@@ -486,15 +486,15 @@ macro shocks(model, shks::Symbol...)
 end
 
 """
-    @removeshocks
+    @deleteshocks
 
-Like [`@removevariables`](@ref), but will remove the shocks in the model with the provided name.
+Like [`@deletevariables`](@ref), but will remove the shocks in the model with the provided name.
 """
-macro removeshocks(model, block::Expr)
+macro deleteshocks(model, block::Expr)
     shocks = filter(a -> !isa(a, LineNumberNode), block.args)
     return esc(:(unique!(deleteat!($(model).shocks, findall(x -> x ∈ $shocks, $(model).shocks))); nothing))
 end
-macro removeshocks(model, shocks::Symbol...)
+macro deleteshocks(model, shocks::Symbol...)
     return esc(:(unique!(deleteat!($(model).shocks, findall(x -> x ∈ $shocks, $(model).shocks))); nothing))
 end
 
@@ -551,27 +551,27 @@ macro parameters(model, args::Expr...)
 end
 
 # """
-#     @removeparameters model name1 name2 ...
-#     @removeparameters model begin
+#     @deleteparameters model name1 name2 ...
+#     @deleteparameters model begin
 #         name1
 #         name2
 #         ...
 #     end
 
-# Removed the parameters with the given names from the model. Note that there is no check for whether the removed
+# Remove the parameters with the given names from the model. Note that there is no check for whether the removed
 # parameters are linked to other parameters.
 
 # Changes like this should be followed by a call to [`@reinitialize`](@ref) on the model.
 # """
-# macro removeparameters(model, block::Expr)
+# macro deleteparameters(model, block::Expr)
 #     params = filter(a -> !isa(a, LineNumberNode), block.args)
-#     return esc(:(ModelBaseEcon.removeparameters!($(model), $(params)); nothing))
+#     return esc(:(ModelBaseEcon.deleteparameters!($(model), $(params)); nothing))
 # end
-# macro removeparameters(model, params::Symbol...)
-#     return esc(:(ModelBaseEcon.removeparameters!($(model), $(params)); nothing))
+# macro deleteparameters(model, params::Symbol...)
+#     return esc(:(ModelBaseEcon.deleteparameters!($(model), $(params)); nothing))
 # end
 
-# function removeparameters!(model::Model, params)
+# function deleteparameters!(model::Model, params)
 #     for param in params
 #         delete!(model.parameters.contents, param)
 #     end
@@ -596,25 +596,25 @@ macro autoexogenize(model, args::Expr...)
 end
 
 """
-    @removeautoexogenize model begin
+    @deleteautoexogenize model begin
         varname = shkname
         ...
     end
 
-Removed the variable-shock combinations provided from the autoexogenize list.
+Removes the variable-shock combinations provided from the autoexogenize list.
 
 Changes like this should be followed by a call to [`@reinitialize`](@ref) on the model.
 """
-macro removeautoexogenize(model, args::Expr...)
+macro deleteautoexogenize(model, args::Expr...)
     if length(args) == 1 && args[1].head == :block
         args = args[1].args
     end
     args = filter(a -> a isa Expr && a.head == :(=), [args...])
     autoexos = Dict{Symbol,Any}([ex.args for ex in args])
-    esc(:(ModelBaseEcon.removeautoexogenize!($(model).autoexogenize, $(autoexos)); nothing))
+    esc(:(ModelBaseEcon.deleteautoexogenize!($(model).autoexogenize, $(autoexos)); nothing))
 end
 
-function removeautoexogenize!(autoexogdict, entries)
+function deleteautoexogenize!(autoexogdict, entries)
     for entry in entries
         if entry[1] ∈ keys(autoexogdict)
             if autoexogdict[entry[1]] == entry[2]
@@ -728,60 +728,60 @@ function changeequations!(eqns::OrderedDict{Symbol,Equation}, p::Pair{Symbol,Exp
 end
 
 """
-    @removeequations model eqnkey1 eqnkey2 ...
-    @removeequations model begin
+    @deleteequations model eqnkey1 eqnkey2 ...
+    @deleteequations model begin
         eqnkey1
         eqnkey2
         ...
     end
 
-Removed the equations with the provided keys from the model.
+Removes the equations with the provided keys from the model.
 The keys must be provided without the `:` at the front.
 
 To find the key for an equation, see [`summarize`](@ref). 
 
 Changes like this should be followed by a call to [`@reinitialize`](@ref) on the model.
 """
-macro removeequations(model, block::Expr)
+macro deleteequations(model, block::Expr)
     eqn_keys = filter(a -> !isa(a, LineNumberNode), block.args)
-    return esc(:(ModelBaseEcon.removeequations!($(model), $(eqn_keys)); nothing))
+    return esc(:(ModelBaseEcon.deleteequations!($(model), $(eqn_keys)); nothing))
 end
-macro removeequations(model, eqn_keys::Symbol...)
-    return esc(:(ModelBaseEcon.removeequations!($(model), $(eqn_keys)); nothing))
+macro deleteequations(model, eqn_keys::Symbol...)
+    return esc(:(ModelBaseEcon.deleteequations!($(model), $(eqn_keys)); nothing))
 end
 
-function removeequations!(model::Model, keys)
+function deleteequations!(model::Model, keys)
     for key in keys
-        remove_aux_equations!(model, key)
-        remove_sstate_equation!(model, key)
+        delete_aux_equations!(model, key)
+        delete_sstate_equation!(model, key)
         delete!(model.equations, key)
     end
 end
 
 """
-    @removesteadystate model eqnkey1 eqnkey2 ...
-    @removesteadystate model begin
+    @deletesteadystate model eqnkey1 eqnkey2 ...
+    @deletesteadystate model begin
         eqnkey1
         eqnkey2
         ...
     end
 
-Removed the steadystate equations with the provided keys from the model.
+Removes the steadystate equations with the provided keys from the model.
 The keys must be provided without the `:` at the front.
 
 To find the key for an equation, see [`summarize`](@ref). 
 
 Changes like this should be followed by a call to [`@reinitialize`](@ref) on the model.
 """
-macro removesteadystate(model, block::Expr)
+macro deletesteadystate(model, block::Expr)
     eqn_keys = filter(a -> !isa(a, LineNumberNode), block.args)
-    return esc(:(ModelBaseEcon.remove_sstate_equations!($(model), $eqn_keys); nothing))
+    return esc(:(ModelBaseEcon.delete_sstate_equations!($(model), $eqn_keys); nothing))
 end
-macro removesteadystate(model, eqn_keys::Symbol...)
-    return esc(:(ModelBaseEcon.remove_sstate_equations!($(model), $eqn_keys); nothing))
+macro deletesteadystate(model, eqn_keys::Symbol...)
+    return esc(:(ModelBaseEcon.delete_sstate_equations!($(model), $eqn_keys); nothing))
 end
 
-function remove_sstate_equation!(model::Model, key::Symbol)
+function delete_sstate_equation!(model::Model, key::Symbol)
     ss = sstate(model)
     if key ∈ keys(ss.equations)
         delete!(ss.equations, key)
@@ -791,7 +791,7 @@ function remove_sstate_equation!(model::Model, key::Symbol)
     end
 end
 
-function remove_sstate_equations!(model::Model, keys_vector)
+function delete_sstate_equations!(model::Model, keys_vector)
     ss = sstate(model)
     for key in keys_vector
         if key ∈ keys(ss.equations)
@@ -1337,8 +1337,8 @@ function reinitialize!(model::Model, modelmodule::Module)
     var_to_idx = _make_var_to_idx(model.allvars)
     for (key, e) in alleqns(model)
         if e.eval_resid == eqnnotready
-            remove_aux_equations!(model, key)
-            remove_sstate_equation!(model, key)
+            delete_aux_equations!(model, key)
+            delete_sstate_equation!(model, key)
             add_equation!(model, key, e.expr; modelmodule=modelmodule, var_to_idx=var_to_idx)
         else
             model.maxlag = max(model.maxlag, e.maxlag)
@@ -1469,11 +1469,11 @@ function get_aux_equation_keys(model::Model, eqn_key::Symbol)
 end
 
 """
-    remove_aux_equations!(m::Model, eqn_key::Symbol)
+    delete_aux_equations!(m::Model, eqn_key::Symbol)
 
 Removes the aux equations associated with a given equation from the model.
 """
-function remove_aux_equations!(model::Model, eqn_key::Symbol)
+function delete_aux_equations!(model::Model, eqn_key::Symbol)
     for k in get_aux_equation_keys(model, eqn_key)
         delete!(model.auxeqns, k)
     end
