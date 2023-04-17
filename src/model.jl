@@ -680,6 +680,16 @@ macro equations(model, block::Expr)
             if expr.args[1] isa Expr && expr.args[1].args[1] == :(=>)
                 sym = expr.args[1].args[2]
                 push!(ret.args, :(ModelBaseEcon.changeequations!($model.equations, $sym => $(Meta.quot(eqn)))))
+            elseif expr.args[1] isa GlobalRef 
+                #need to find the implication (if any)
+                last_arg = string(expr.args[end])
+                implication_range = findfirst("=>", last_arg)
+                if implication_range !== nothing
+                    sym = QuoteNode(Symbol(strip(replace(last_arg[begin:first(implication_range)-1], ":" => ""))))
+                    push!(ret.args, :(ModelBaseEcon.changeequations!($model.equations, $(sym) => $(Meta.quot(eqn)))))
+                else
+                    push!(ret.args, :(ModelBaseEcon.changeequations!($model.equations, :_unnamed_equation_ => $(Meta.quot(eqn)))))
+                end
             else
                 push!(ret.args, :(ModelBaseEcon.changeequations!($model.equations, :_unnamed_equation_ => $(Meta.quot(eqn)))))
             end
@@ -748,8 +758,8 @@ macro deleteequations(model, eqn_keys::Symbol...)
     return esc(:(ModelBaseEcon.deleteequations!($(model), $(eqn_keys)); ModelBaseEcon.update_model_state!($(model)); nothing))
 end
 
-function deleteequations!(model::Model, keys)
-    for key in keys
+function deleteequations!(model::Model, eqn_keys)
+    for key in eqn_keys
         delete_aux_equations!(model, key)
         delete_sstate_equation!(model, key)
         delete!(model.equations, key)
