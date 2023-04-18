@@ -378,6 +378,40 @@ function update_model_state!(m)
     m.state = m.state == :ready ? :dev : m.state
 end
 
+function parse_deletes(block::Expr)
+    removals = Expr(:block)
+    additions = Expr(:block)
+    push_to_delete = false
+    for expr in block.args
+        if isa(expr, LineNumberNode)
+            continue
+        end
+        if expr isa Symbol && expr == Symbol("@delete")
+            # whole block is a line starting with @delete 
+            push_to_delete = true
+        elseif expr isa Symbol && push_to_delete == true
+            # entire line is just one symbol
+            push!(removals.args, expr)
+        elseif expr isa Symbol
+            # entire line is just one symbol
+            push!(additions.args, expr)
+        elseif expr.args[1] isa Symbol && expr.args[1] == Symbol("@delete")
+            # line in a block starting with @delete
+            args = filter(a -> !isa(a, LineNumberNode), expr.args[2:end])
+            push!(removals.args, args...)
+        elseif push_to_delete == true
+            # line in a block starting with @delete
+            args = filter(a -> !isa(a, LineNumberNode), expr.args)
+            push!(removals.args, args...)
+        else
+            # regular / complex variable
+            args = filter(a -> !isa(a, LineNumberNode), expr.args)
+            push!(additions.args, expr)
+        end
+    end
+    return removals, additions
+end
+
 """
     @variables model name1 name2 ...
     @variables model begin
@@ -392,11 +426,20 @@ In the `begin-end` version the variable names can be preceeded by a description
 (like a docstring) and flags like `@log`, `@steady`, `@exog`, etc. See
 [`ModelVariable`](@ref) for details about this.
 
+You can also remove variables from the model by prefacing one or more  variables
+with `@delete`.
+
 """
 macro variables(model, block::Expr)
-    vars = filter(a -> !isa(a, LineNumberNode), block.args)
-    return esc(:(unique!(append!($(model).variables, $vars)); ModelBaseEcon.update_model_state!($(model)); nothing))
+    removals, additions = parse_deletes(block)
+    return esc(:(
+        unique!(deleteat!($(model).variables, findall(x -> x ∈ $(removals.args), $(model).variables)));
+        unique!(append!($(model).variables, $(additions.args)));
+        ModelBaseEcon.update_model_state!($(model)); 
+        nothing
+    ))
 end
+
 macro variables(model, vars::Symbol...)
     return esc(:(unique!(append!($(model).variables, $vars)); ModelBaseEcon.update_model_state!($(model)); nothing))
 end
@@ -408,8 +451,13 @@ Same as [`@variables`](@ref), but the variables declared with `@logvariables`
 are log-transformed.
 """
 macro logvariables(model, block::Expr)
-    vars = filter(a -> !isa(a, LineNumberNode), block.args)
-    return esc(:(unique!(append!($(model).variables, to_log.($vars))); ModelBaseEcon.update_model_state!($(model)); nothing))
+    removals, additions = parse_deletes(block)
+    return esc(:(
+        unique!(deleteat!($(model).variables, findall(x -> x ∈ $(removals.args), $(model).variables)));
+        unique!(append!($(model).variables, to_log.($(additions.args))));
+        ModelBaseEcon.update_model_state!($(model)); 
+        nothing
+    ))
 end
 macro logvariables(model, vars::Symbol...)
     return esc(:(unique!(append!($(model).variables, to_log.($vars))); ModelBaseEcon.update_model_state!($(model)); nothing))
@@ -422,8 +470,13 @@ Same as [`@variables`](@ref), but the variables declared with `@neglogvariables`
 are negative-log-transformed.
 """
 macro neglogvariables(model, block::Expr)
-    vars = filter(a -> !isa(a, LineNumberNode), block.args)
-    return esc(:(unique!(append!($(model).variables, to_neglog.($vars))); ModelBaseEcon.update_model_state!($(model)); nothing))
+    removals, additions = parse_deletes(block)
+    return esc(:(
+        unique!(deleteat!($(model).variables, findall(x -> x ∈ $(removals.args), $(model).variables)));
+        unique!(append!($(model).variables, to_neglog.($(additions.args))));
+        ModelBaseEcon.update_model_state!($(model)); 
+        nothing
+    ))
 end
 macro neglogvariables(model, vars::Symbol...)
     return esc(:(unique!(append!($(model).variables, to_neglog.($vars))); ModelBaseEcon.update_model_state!($(model)); nothing))
@@ -437,8 +490,13 @@ have zero slope in their steady state and final conditions.
 
 """
 macro steadyvariables(model, block::Expr)
-    vars = filter(a -> !isa(a, LineNumberNode), block.args)
-    return esc(:(unique!(append!($(model).variables, to_steady.($vars))); ModelBaseEcon.update_model_state!($(model)); nothing))
+    removals, additions = parse_deletes(block)
+    return esc(:(
+        unique!(deleteat!($(model).variables, findall(x -> x ∈ $(removals.args), $(model).variables)));
+        unique!(append!($(model).variables, to_steady.($(additions.args))));
+        ModelBaseEcon.update_model_state!($(model)); 
+        nothing
+    ))
 end
 macro steadyvariables(model, vars::Symbol...)
     return esc(:(unique!(append!($(model).variables, to_steady.($vars))); ModelBaseEcon.update_model_state!($(model)); nothing))
@@ -451,8 +509,13 @@ Like [`@variables`](@ref), but the names declared with `@exogenous` are
 exogenous.
 """
 macro exogenous(model, block::Expr)
-    vars = filter(a -> !isa(a, LineNumberNode), block.args)
-    return esc(:(unique!(append!($(model).variables, to_exog.($vars))); ModelBaseEcon.update_model_state!($(model)); nothing))
+    removals, additions = parse_deletes(block)
+    return esc(:(
+        unique!(deleteat!($(model).variables, findall(x -> x ∈ $(removals.args), $(model).variables)));
+        unique!(append!($(model).variables, to_exog.($(additions.args))));
+        ModelBaseEcon.update_model_state!($(model)); 
+        nothing
+    ))
 end
 macro exogenous(model, vars::Symbol...)
     return esc(:(unique!(append!($(model).variables, to_exog.($vars))); ModelBaseEcon.update_model_state!($(model)); nothing))
@@ -485,8 +548,13 @@ Like [`@variables`](@ref), but the names declared with `@shocks` are
 shocks.
 """
 macro shocks(model, block::Expr)
-    shks = filter(a -> !isa(a, LineNumberNode), block.args)
-    return esc(:(unique!(append!($(model).shocks, to_shock.($shks))); ModelBaseEcon.update_model_state!($(model)); nothing))
+    removals, additions = parse_deletes(block)
+    return esc(:(
+        unique!(deleteat!($(model).shocks, findall(x -> x ∈ $(removals.args), $(model).shocks)));
+        unique!(append!($(model).shocks, to_shock.($(additions.args))));
+        ModelBaseEcon.update_model_state!($(model)); 
+        nothing
+    ))
 end
 macro shocks(model, shks::Symbol...)
     return esc(:(unique!(append!($(model).shocks, to_shock.($shks))); ModelBaseEcon.update_model_state!($(model)); nothing))
