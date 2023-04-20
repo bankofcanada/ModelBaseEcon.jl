@@ -731,15 +731,13 @@ function parse_equation_deletes(block::Expr)
         for expr in block.args
             if isa(expr, LineNumberNode)
                 continue
+            elseif expr.args[1] isa Symbol && expr.args[1] == Symbol("@delete")
+                # line in a block starting with @delete
+                args = filter(a -> !isa(a, LineNumberNode), expr.args[2:end])
+                push!(removals.args, args...)
             else
-            if expr.args[1] isa Symbol && expr.args[1] == Symbol("@delete")
-                    # line in a block starting with @delete
-                    args = filter(a -> !isa(a, LineNumberNode), expr.args[2:end])
-                    push!(removals.args, args...)
-                else
-                    # regular equation
-                    push!(additions.args, expr)
-                end
+                # regular equation
+                push!(additions.args, expr)
             end
         end
     end
