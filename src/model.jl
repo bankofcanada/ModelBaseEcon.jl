@@ -662,14 +662,38 @@ end
 
 Define a mapping between variables and shocks that can be used to
 conveniently  swap exogenous and endogenous variables.
+
+You can also remove pairs from the model by prefacing each removed pair
+with `@delete`.
 """
-macro autoexogenize(model, args::Expr...)
-    if length(args) == 1 && args[1].head == :block
-        args = args[1].args
+macro autoexogenize(model, block::Expr)
+    removals, additions = parse_deletes(block)
+    autoexos = Dict{Symbol,Any}()
+    removed_autoexos = Dict{Symbol,Any}()
+    for expr in additions.args
+        if expr isa LineNumberNode
+            continue
+        elseif expr isa Expr && expr.head == :(=)
+            autoexos[expr.args[1]] = expr.args[2]
+        elseif expr isa Expr && expr.head == :call && expr.args[1] == :(=>)
+            autoexos[expr.args[2]] = expr.args[3]
+        end
     end
-    args = filter(a -> a isa Expr && a.head == :(=), [args...])
-    autoexos = Dict{Symbol,Any}([ex.args for ex in args])
-    esc(:(merge!($(model).autoexogenize, $(autoexos)); ModelBaseEcon.update_model_state!($(model)); nothing))
+    for expr in removals.args
+        if expr isa LineNumberNode
+            continue
+        elseif expr isa Expr && expr.head == :(=)
+            removed_autoexos[expr.args[1]] = expr.args[2]
+        elseif expr isa Expr && expr.head == :call && expr.args[1] == :(=>)
+            removed_autoexos[expr.args[2]] = expr.args[3]
+        end
+    end
+    return esc(:(
+        ModelBaseEcon.deleteautoexogenize!($(model).autoexogenize, $(removed_autoexos));
+        merge!($(model).autoexogenize, $(autoexos)); 
+        ModelBaseEcon.update_model_state!($(model)); 
+        nothing
+    ))
 end
 
 """
