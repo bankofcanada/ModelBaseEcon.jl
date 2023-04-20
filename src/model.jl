@@ -381,34 +381,33 @@ end
 function parse_deletes(block::Expr)
     removals = Expr(:block)
     additions = Expr(:block)
-    push_to_delete = false
-    for expr in block.args
-        if isa(expr, LineNumberNode)
-            continue
-        end
-        if expr isa Symbol && expr == Symbol("@delete")
-            # whole block is a line starting with @delete 
-            push_to_delete = true
-        elseif expr isa Symbol && push_to_delete == true
-            # entire line is just one symbol
-            push!(removals.args, expr)
-        elseif expr isa Symbol
-            # entire line is just one symbol
-            push!(additions.args, expr)
-        elseif expr.args[1] isa Symbol && expr.args[1] == Symbol("@delete")
-            # line in a block starting with @delete
+    if typeof(block.args[1]) !== LineNumberNode
+        # whole block is one line
+        if typeof(block.args[1]) == Symbol && block.args[1] == Symbol("@delete")
             args = filter(a -> !isa(a, LineNumberNode), expr.args[2:end])
             push!(removals.args, args...)
-        elseif push_to_delete == true
-            # line in a block starting with @delete
-            args = filter(a -> !isa(a, LineNumberNode), expr.args)
-            push!(removals.args, args...)
         else
-            # regular / complex variable
-            args = filter(a -> !isa(a, LineNumberNode), expr.args)
-            push!(additions.args, expr)
+            push!(additions.args, block...)
+        end
+    else
+        for expr in block.args
+            if isa(expr, LineNumberNode)
+                continue
+            elseif isa(expr, Symbol)
+                # regular single variable
+                push!(additions.args, expr)
+            elseif expr.args[1] isa Symbol && expr.args[1] == Symbol("@delete")
+                # @delete line
+                args = filter(a -> !isa(a, LineNumberNode), expr.args[2:end])
+                push!(removals.args, args...)
+            else 
+                # regular / complex variable
+                args = filter(a -> !isa(a, LineNumberNode), expr.args)
+                push!(additions.args, expr)
+            end
         end
     end
+
     return removals, additions
 end
 
