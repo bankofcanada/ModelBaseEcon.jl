@@ -653,6 +653,13 @@ export @steadystate
 
 """
     @steadystate model [type] lhs = rhs
+    @steadystate model begin
+        lhs = rhs
+        @delete _SSEQ1 _SSEQ2
+        @level lhs = rhs
+        @slope lhs = rhs
+    end
+    @steadystate model @delete _SSEQ1 _SSEQ2
 
 Add a steady state equation to the model.
 
@@ -668,6 +675,10 @@ to help the steady state solver find the one you want to use.
   * `lhs = rhs` is the expression defining the steady state constraint. In the
   equation, use variables and shocks from the model, but without any t-references.
 
+  There is also a block form of this which allows for several steadystate equations.
+  These can be preceeded by @level or @slope to specify the type. @level is the default.
+  Steadystate equations can also be removed with @delete lines followed by a list of constraint keys.
+
 """
 macro steadystate(model, type::Symbol, equation::Expr)
     thismodule = @__MODULE__
@@ -675,9 +686,64 @@ macro steadystate(model, type::Symbol, equation::Expr)
     return esc(:($(thismodule).setss!($(model), $(Meta.quot(equation)); type=$(QuoteNode(type)))))  # , modelmodule=$(modelmodule))))
 end
 
-macro steadystate(model, equation::Expr)
+macro steadystate(model, block::Expr)
+    ret = Expr(:block)
+    removals, additions = parse_equation_deletes(block)
+    
+    #removals
+    if length(removals.args) > 0
+        push!(ret.args, :(ModelBaseEcon.delete_sstate_equations!($(model), $(removals.args))))
+        push!(ret.args, :(ModelBaseEcon.update_model_state!($(model)); nothing))
+    end
+    
+    # additions
     thismodule = @__MODULE__
-    return esc(:($(thismodule).setss!($(model), $(Meta.quot(equation)); type=:level))) # , modelmodule=$(modelmodule))))
+    for expr in additions.args
+        if expr.head == :(=)
+            push!(ret.args, :($(thismodule).setss!($(model), $(Meta.quot(expr)); type=:level)))
+        elseif expr.head == :macrocall
+            if expr.args[1] == Symbol("@level")
+                push!(ret.args, :($(thismodule).setss!($(model), $(Meta.quot(expr.args[3])); type=:level)))
+            elseif expr.args[1] == Symbol("@slope")
+                push!(ret.args, :($(thismodule).setss!($(model), $(Meta.quot(expr.args[3])); type=:slope)))
+            else
+               #push the whole thing, get an error in setss!
+               push!(ret.args, :($(thismodule).setss!($(model), $(Meta.quot(expr)); type=:level))) 
+            end
+        end
+    end
+    
+    return esc(ret)
+end
+
+function parse_equation_deletes(block::Expr)
+    removals = Expr(:block)
+    additions = Expr(:block)
+    if typeof(block.args[1]) !== LineNumberNode
+        # entire block is one line
+        if typeof(block.args[1]) == Symbol && block.args[1] == Symbol("@delete")
+            args = filter(a -> !isa(a, LineNumberNode), expr.args[2:end])
+            push!(removals.args, args...)
+        else
+            push!(additions.args, block)
+        end
+    else
+        for expr in block.args
+            if isa(expr, LineNumberNode)
+                continue
+            else
+            if expr.args[1] isa Symbol && expr.args[1] == Symbol("@delete")
+                    # line in a block starting with @delete
+                    args = filter(a -> !isa(a, LineNumberNode), expr.args[2:end])
+                    push!(removals.args, args...)
+                else
+                    # regular equation
+                    push!(additions.args, expr)
+                end
+            end
+        end
+    end
+    return removals, additions
 end
 
 """
