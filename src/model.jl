@@ -323,7 +323,10 @@ function fullprint(io::IO, model::Model)
     end
     print(io, ": \n")
     var_to_idx = get_var_to_idx(model)
-    longest_key = maximum(length.(string.(keys(model.equations))))
+    longest_key = 0
+    if length(model.equations) > 0
+        longest_key = maximum(length.(string.(keys(model.equations))))
+    end
     function print_aux_eq(aux_key)
         v = model.auxeqns[aux_key]
         println(io, "  $(" "^longest_key) |-> ", v.expr)
