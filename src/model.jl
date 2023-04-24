@@ -381,14 +381,13 @@ end
 function parse_deletes(block::Expr)
     removals = Expr(:block)
     additions = Expr(:block)
-    if typeof(block.args[1]) !== LineNumberNode
-        # whole block is one line
-        if typeof(block.args[1]) == Symbol && block.args[1] == Symbol("@delete")
-            args = filter(a -> !isa(a, LineNumberNode), expr.args[2:end])
-            push!(removals.args, args...)
-        else
-            push!(additions.args, block...)
-        end
+    has_lines = any(typeof.(block.args) .== LineNumberNode)
+    if typeof(block.args[1]) == Symbol && block.args[1] == Symbol("@delete")
+        # whole block is one delete line
+        args = filter(a -> !isa(a, LineNumberNode), block.args[2:end])
+        push!(removals.args, args...)
+    elseif !has_lines
+        push!(additions.args, block...)
     else
         for expr in block.args
             if isa(expr, LineNumberNode)
@@ -408,6 +407,34 @@ function parse_deletes(block::Expr)
         end
     end
 
+    return removals, additions
+end
+
+function parse_equation_deletes(block::Expr)
+    removals = Expr(:block)
+    additions = Expr(:block)
+    has_lines = any(typeof.(block.args) .== LineNumberNode)
+    if (typeof(block.args[1]) == Symbol && block.args[1] == Symbol("@delete"))
+        args = filter(a -> !isa(a, LineNumberNode), block.args[2:end])
+        push!(removals.args, args...)
+    elseif has_lines == false
+        push!(additions.args, block)
+    else
+        stored_linenumber_node = nothing
+        for expr in block.args
+            if isa(expr, LineNumberNode)
+                stored_linenumber_node = expr
+                continue
+            elseif expr.args[1] isa Symbol && expr.args[1] == Symbol("@delete")
+                # line in a block starting with @delete
+                args = filter(a -> !isa(a, LineNumberNode), expr.args[2:end])
+                push!(removals.args, args...)
+            else
+                push!(additions.args, stored_linenumber_node)
+                push!(additions.args, expr)
+            end
+        end
+    end
     return removals, additions
 end
 
@@ -666,18 +693,10 @@ You can also remove pairs from the model by prefacing each removed pair
 with `@delete`.
 """
 macro autoexogenize(model, block::Expr)
-    removals, additions = parse_deletes(block)
+    # removals, additions = parse_deletes(block)
+    removals, additions = parse_equation_deletes(block)
     autoexos = Dict{Symbol,Any}()
     removed_autoexos = Dict{Symbol,Any}()
-    for expr in additions.args
-        if expr isa LineNumberNode
-            continue
-        elseif expr isa Expr && expr.head == :(=)
-            autoexos[expr.args[1]] = expr.args[2]
-        elseif expr isa Expr && expr.head == :call && expr.args[1] == :(=>)
-            autoexos[expr.args[2]] = expr.args[3]
-        end
-    end
     for expr in removals.args
         if expr isa LineNumberNode
             continue
@@ -687,6 +706,19 @@ macro autoexogenize(model, block::Expr)
             removed_autoexos[expr.args[2]] = expr.args[3]
         end
     end
+    for expr in additions.args
+        if expr isa LineNumberNode
+            continue
+        elseif expr isa Expr && expr.head == :(=)
+            autoexos[expr.args[1]] = expr.args[2]
+        elseif expr isa Expr && expr.head == :call && expr.args[1] == :(=>)
+            autoexos[expr.args[2]] = expr.args[3]
+        else 
+            err = ArgumentError("Expression does not appear to be an equation or pair: $expr")
+            return esc(:(throw($err)))
+        end
+    end
+
     return esc(:(
         ModelBaseEcon.deleteautoexogenize!($(model).autoexogenize, $(removed_autoexos));
         merge!($(model).autoexogenize, $(autoexos)); 
@@ -762,17 +794,21 @@ macro equations(model, block::Expr)
         modelerror("A list of equations must be within a begin-end block")
     end
     ret = Expr(:block)
+    removals, additions = parse_equation_deletes(block)
+    
+    #removals
+    if length(removals.args) > 0
+        push!(ret.args, :(ModelBaseEcon.deleteequations!($(model), $(removals.args))))
+        push!(ret.args, :(ModelBaseEcon.update_model_state!($(model)); nothing))
+    end
+    
+    # additions
     eqn = Expr(:block)
-    for expr in block.args
+    for expr in additions.args
+        push!(eqn.args, expr)
         if isa(expr, LineNumberNode)
-            push!(eqn.args, expr)
+            continue
         else
-            if (expr.args[1] isa Symbol) && expr.args[1] == Symbol("@delete")
-                eqn_keys = filter(a -> !isa(a, LineNumberNode), expr.args[2:end])
-                push!(ret.args, :(ModelBaseEcon.deleteequations!($(model), $(eqn_keys))))
-                continue
-            end
-            push!(eqn.args, expr)
             if expr.args[1] isa Expr && expr.args[1].args[1] == :(=>)
                 sym = expr.args[1].args[2]
                 push!(ret.args, :(ModelBaseEcon.changeequations!($model.equations, $sym => $(Meta.quot(eqn)))))
@@ -807,7 +843,6 @@ function changeequations!(eqns::OrderedDict{Symbol,Equation}, p::Pair{Symbol,Exp
             incrementer += 1
             eqn_name = Symbol("_EQ"*string(length(eqnkeys)+incrementer))
         end
-        # println(eqn_name)
         push!(eqns, eqn_name => Equation(e))
     elseif sym ∈ eqnkeys
         eqns[sym] = Equation(e)

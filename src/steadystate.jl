@@ -699,7 +699,9 @@ macro steadystate(model, block::Expr)
     # additions
     thismodule = @__MODULE__
     for expr in additions.args
-        if expr.head == :(=)
+        if isa(expr, LineNumberNode)
+            continue
+        elseif expr.head == :(=)
             push!(ret.args, :($(thismodule).setss!($(model), $(Meta.quot(expr)); type=:level)))
         elseif expr.head == :macrocall
             if expr.args[1] == Symbol("@level")
@@ -710,39 +712,43 @@ macro steadystate(model, block::Expr)
                #push the whole thing, get an error in setss!
                push!(ret.args, :($(thismodule).setss!($(model), $(Meta.quot(expr)); type=:level))) 
             end
+        else
+            # not an equation
+            err = ArgumentError("Expression does not appear to be an equation: $expr")
+            return esc(:(throw($err)))
         end
     end
     
     return esc(ret)
 end
 
-function parse_equation_deletes(block::Expr)
-    removals = Expr(:block)
-    additions = Expr(:block)
-    if typeof(block.args[1]) !== LineNumberNode
-        # entire block is one line
-        if typeof(block.args[1]) == Symbol && block.args[1] == Symbol("@delete")
-            args = filter(a -> !isa(a, LineNumberNode), expr.args[2:end])
-            push!(removals.args, args...)
-        else
-            push!(additions.args, block)
-        end
-    else
-        for expr in block.args
-            if isa(expr, LineNumberNode)
-                continue
-            elseif expr.args[1] isa Symbol && expr.args[1] == Symbol("@delete")
-                # line in a block starting with @delete
-                args = filter(a -> !isa(a, LineNumberNode), expr.args[2:end])
-                push!(removals.args, args...)
-            else
-                # regular equation
-                push!(additions.args, expr)
-            end
-        end
-    end
-    return removals, additions
-end
+# function parse_equation_deletes(block::Expr)
+#     removals = Expr(:block)
+#     additions = Expr(:block)
+#     if typeof(block.args[1]) !== LineNumberNode
+#         # entire block is one line
+#         if typeof(block.args[1]) == Symbol && block.args[1] == Symbol("@delete")
+#             args = filter(a -> !isa(a, LineNumberNode), expr.args[2:end])
+#             push!(removals.args, args...)
+#         else
+#             push!(additions.args, block)
+#         end
+#     else
+#         for expr in block.args
+#             if isa(expr, LineNumberNode)
+#                 continue
+#             elseif expr.args[1] isa Symbol && expr.args[1] == Symbol("@delete")
+#                 # line in a block starting with @delete
+#                 args = filter(a -> !isa(a, LineNumberNode), expr.args[2:end])
+#                 push!(removals.args, args...)
+#             else
+#                 # regular equation
+#                 push!(additions.args, expr)
+#             end
+#         end
+#     end
+#     return removals, additions
+# end
 
 """
     initssdata!(m::AbstractModel)
