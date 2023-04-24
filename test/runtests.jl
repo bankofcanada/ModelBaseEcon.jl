@@ -302,6 +302,12 @@ end
     end
     @test_throws ModelBaseEcon.ModelNotInitError ModelBaseEcon.getevaldata(m, :default)
     @initialize m
+
+    unused = get_unused_symbols(m)
+    @test unused[:variables] == [:x, :y, :z, :k, :l, :m, :q, :r]
+    @test unused[:shocks] == [:a, :b, :c]
+    @test unused[:parameters] == Vector{Symbol}()
+    
     @test ModelBaseEcon.hasevaldata(m, :default)
     @test_throws ModelBaseEcon.ModelError @initialize m
     @test_throws ModelBaseEcon.EvalDataNotFound ModelBaseEcon.getevaldata(m, :nosuchevaldata)
@@ -780,7 +786,7 @@ end
         @test issssolved(m) == true
         @test neqns(m.sstate) == 2
         @steadystate m y = 5
-        @test_throws ErrorException @steadystate m sin(y + 7)
+        @test_throws ArgumentError @steadystate m sin(y + 7)
         @test length(m.sstate.constraints) == 1
         @test neqns(m.sstate) == 3
         @test length(alleqns(m.sstate)) == 3
@@ -1211,3 +1217,95 @@ include("sstate.jl")
     out = sprint(print_linearized, m)
     @test startswith(out, " 0 = -0.938386*pinf[t - 1] +")
 end
+
+
+@testset "Model edits, autoexogenize" begin
+    m = E2.newmodel()
+
+    @test length(m.autoexogenize) == 3
+    @test m.autoexogenize[:pinf] == :pinf_shk 
+    @test m.autoexogenize[:rate] == :rate_shk 
+    
+    @autoexogenize m @delete ygap = ygap_shk
+    @test length(m.autoexogenize) == 2
+    @test !haskey(m.autoexogenize, :ygap)
+    
+    @autoexogenize m ygap = ygap_shk
+    @test length(m.autoexogenize) == 3
+    @test m.autoexogenize[:ygap] == :ygap_shk 
+    
+    @autoexogenize m begin
+        @delete ygap = ygap_shk
+    end 
+    @test length(m.autoexogenize) == 2
+    @test !haskey(m.autoexogenize, :ygap)
+    
+    @autoexogenize m begin
+        ygap = ygap_shk
+    end
+    @test length(m.autoexogenize) == 3
+    @test m.autoexogenize[:ygap] == :ygap_shk 
+end
+
+@testset "Model edits, variables" begin
+    m = E2.newmodel()
+
+    @test length(m.variables) == 3
+    
+    @variables m @delete pinf rate
+    @test length(m.variables) == 1
+    
+    @variables m pinf rate
+    @test length(m.variables) == 3
+    
+    @variables m begin 
+        @delete pinf rate
+    end
+    @test length(m.variables) == 1
+    
+    @variables m (pinf; rate)
+    @test length(m.variables) == 3
+
+    @variables m begin 
+        @delete pinf 
+        @delete rate
+    end
+    @test length(m.variables) == 1
+
+    @variables m (@delete ygap; rate)
+    @test length(m.variables) == 1
+    @test m.variables[1].name == :rate
+
+end
+
+@testset "Model edits, shocks" begin
+    m = E2.newmodel()
+
+    @test length(m.shocks) == 3
+    
+    @shocks m @delete pinf_shk rate_shk
+    @test length(m.shocks) == 1
+    
+    @shocks m pinf_shk rate_shk
+    @test length(m.shocks) == 3
+    
+    @shocks m begin 
+        @delete pinf_shk rate_shk
+    end
+    @test length(m.shocks) == 1
+    
+    @shocks m (pinf_shk; rate_shk)
+    @test length(m.shocks) == 3
+
+    @shocks m begin 
+        @delete pinf_shk 
+        @delete rate_shk
+    end
+    @test length(m.shocks) == 1
+
+    @shocks m (@delete ygap_shk; rate_shk)
+    @test length(m.shocks) == 1
+    @test m.shocks[1].name == :rate_shk
+
+end
+
