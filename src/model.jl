@@ -817,6 +817,7 @@ function changeequations!(eqns::OrderedDict{Symbol,Equation}, p::Pair{Symbol,Exp
 end
 
 function process_new_equations!(model::Model, modelmodule::Module)
+    # only process at this point if model is not new
     if model.state == :new
         return
     end
@@ -1413,6 +1414,13 @@ function initialize!(model::Model, modelmodule::Module)
         # if dynss is true, then we need the steady state even for the standard MED
         nothing
     end
+    unused = get_unused_symbols(model)
+    if length(unused[:variables]) > 0
+        @warn "Model contains unused variables: $(unused[:variables])"
+    end
+    if length(unused[:shocks]) > 0
+        @warn "Model contains unused shocks: $(unused[:shocks])"
+    end
     model.state = :ready
     return nothing
 end
@@ -1458,6 +1466,13 @@ function reinitialize!(model::Model, modelmodule::Module)
     else
         # if dynss is true, then we need the steady state even for the standard MED
         nothing
+    end
+    unused = get_unused_symbols(model)
+    if length(unused[:variables]) > 0
+        @warn "Model contains unused variables: $(unused[:variables])"
+    end
+    if length(unused[:shocks]) > 0
+        @warn "Model contains unused shocks: $(unused[:shocks])"
     end
     model.state = :ready
     return nothing
@@ -1804,3 +1819,19 @@ function corrected_parameters_block(model::Model, s1::String, s2::String, model_
     return str
 end
 
+"""
+    get_unused_symbols(model::Model)
+
+    Returns a dictionary with vectors of the unused variables, shocks, and parameters.
+
+"""
+function get_unused_symbols(model::Model)
+    eqmap = equation_map(model)
+    unused = Dict(
+        :variables => filter(x -> !haskey(eqmap, x), [x.name for x in model.variables]),
+        :shocks => filter(x -> !haskey(eqmap, x), [x.name for x in model.shocks]),
+        :parameters => filter(x -> !haskey(eqmap, x), collect(keys(model.parameters)))
+    )
+    return unused
+end
+export get_unused_symbols
