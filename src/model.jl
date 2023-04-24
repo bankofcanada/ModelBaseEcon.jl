@@ -809,15 +809,18 @@ macro equations(model, block::Expr)
         if isa(expr, LineNumberNode)
             continue
         else
-            if expr.args[1] isa Expr && expr.args[1].args[1] == :(=>)
+            if expr.args[1] isa Symbol && expr.args[1] == :(=>)
+                sym = expr.args[2]
+                push!(ret.args, :(ModelBaseEcon.changeequations!($model.equations, $sym => $(Meta.quot(eqn)))))
+            elseif expr.args[1] isa Expr && expr.args[1].args[1] == :(=>)
                 sym = expr.args[1].args[2]
                 push!(ret.args, :(ModelBaseEcon.changeequations!($model.equations, $sym => $(Meta.quot(eqn)))))
             elseif expr.args[1] isa GlobalRef 
                 #need to find the implication (if any)
-                last_arg = string(expr.args[end])
-                implication_range = findfirst("=>", last_arg)
+                args_string = string(expr.args[end])
+                implication_range = findfirst("=>", args_string)
                 if implication_range !== nothing
-                    sym = QuoteNode(Symbol(strip(replace(last_arg[begin:first(implication_range)-1], ":" => ""))))
+                    sym = QuoteNode(Symbol(strip(replace(args_string[begin:first(implication_range)-1], ":" => ""))))
                     push!(ret.args, :(ModelBaseEcon.changeequations!($model.equations, $(sym) => $(Meta.quot(eqn)))))
                 else
                     push!(ret.args, :(ModelBaseEcon.changeequations!($model.equations, :_unnamed_equation_ => $(Meta.quot(eqn)))))
