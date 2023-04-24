@@ -328,7 +328,7 @@ function fullprint(io::IO, model::Model)
         println(io, "   |-> $aux_key:   ", v.expr)
     end
     for (key, eq) in model.equations
-        println(io, "   $key:\t", eq)
+        println(io, "\t:$key => \t", eq)
         allvars = model.allvars
         for aux_key in get_aux_equation_keys(model, key)
             print_aux_eq(aux_key)
