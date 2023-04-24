@@ -32,6 +32,9 @@ function export_model(model::Model, name::AbstractString, fio::IO)
     println(fio, "module ", name)
     println(fio)
     println(fio, "using ModelBaseEcon")
+    if :fctype ∈ keys(model.options)
+        println(fio, "using StateSpaceEcon")
+    end
     println(fio)
     println(fio, "const model = Model()")
     println(fio)
@@ -48,7 +51,7 @@ function export_model(model::Model, name::AbstractString, fio::IO)
     end
 
     println(fio, "# options")
-    _print_modified_options(model.options, defaultoptions, "model.")
+    _print_modified_options(model.options, defaultoptions, "model.options.")
     println(fio)
 
     println(fio, "# flags")
