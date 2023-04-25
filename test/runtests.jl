@@ -476,6 +476,7 @@ params.a = @link custom(val)
 end
 
 @testset "Parameters" begin
+    m = Model()
     params = Parameters()
     push!(params, :a => 1.0)
     push!(params, :b => @link 1.0 - a)
@@ -515,6 +516,8 @@ end
 
     @test params.d ≈ √3 / 2.0
     params.e[3] = 2
+    m.parameters = params
+    # update_links!(params)
     update_links!(params)
     @test 1.0 + params.d ≈ 1.0
 
@@ -1306,6 +1309,27 @@ end
     @shocks m (@delete ygap_shk; rate_shk)
     @test length(m.shocks) == 1
     @test m.shocks[1].name == :rate_shk
+
+end
+
+@testset "sattelite models" begin
+    m1 = E2.newmodel()
+
+    m_sattelite = Model()
+    m_sattelite.parameters.parent = Ref(E2.model)
+
+    @parameters m_sattelite begin
+       cx = @link _parent.cp
+    end
+    @test m1.cp == [0.5, 0.02]
+    @test m_sattelite.cx == [0.5, 0.02]
+    
+    m1.cp = [0.6, 0.03]
+    @test m1.cp == [0.6, 0.03]
+
+    m_sattelite.parameters.parent = Ref(m1)
+    update_links!(m_sattelite)
+    @test m_sattelite.cx == [0.6, 0.03]
 
 end
 
