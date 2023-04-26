@@ -44,11 +44,11 @@ parameter, use the [`@alias`](@ref) macro. To create a link parameter use the
 See also: [`ModelParam`](@ref), [`peval`](@ref), [`@alias`](@ref),
 [`@link`](@ref), [`update_links!`](@ref).
 """
-mutable struct Parameters{P<:AbstractParam} <: AbstractDict{Symbol,P}
+struct Parameters{P<:AbstractParam} <: AbstractDict{Symbol,P}
     mod::Ref{Module}
     contents::Dict{Symbol,P}
     rev::Ref{UInt}  # revision number, changes every time we update
-    parent::Ref{<:Union{<:AbstractModel, Nothing}}
+    refs::Dict{Symbol,Ref}
 end
 
 """
@@ -65,7 +65,7 @@ mutable struct ModelParam <: AbstractParam
 end
 ModelParam() = ModelParam(Set{Symbol}(), nothing, nothing)
 ModelParam(value) = ModelParam(Set{Symbol}(), nothing, value)
-ModelParam(value::Union{Symbol,Expr}) = ModelParam(Set{Symbol}(), value, nothing)
+ModelParam(value::Union{Symbol,Expr}) = ModelParam(Set{Symbol}(), value, Dict{Symbol,Ref}())
 
 Base.hash(mp::ModelParam, h::UInt) = hash((mp.link, mp.value), h)
 
@@ -80,7 +80,7 @@ any link parameters that depend on custom functions or global
 variables/constants. In this case, the `mod` argument should be the module in
 which these definitions exist.
 """
-Parameters(mod::Module=@__MODULE__) = Parameters(Ref(mod), copy(_default_dict), Ref(_default_hash), Ref(nothing))
+Parameters(mod::Module=@__MODULE__) = Parameters(Ref(mod), copy(_default_dict), Ref(_default_hash), Dict{Symbol,Ref}())
 
 """
     params = @parameters
@@ -102,7 +102,7 @@ function Base.deepcopy_internal(p::Parameters, stackdict::IdDict)
         Ref(p.mod[]), 
         Base.deepcopy_internal(p.contents, stackdict), 
         Ref(p.rev[]),
-        Ref(p.parent[])
+        Base.deepcopy_internal(p.refs, stackdict)
     )
     stackdict[p] = p_copy
     return p_copy
@@ -257,23 +257,16 @@ peval(::Parameters, val) = val
 peval(::Parameters, par::ModelParam) = par.value
 peval(params::Parameters, sym::Symbol) = haskey(params, sym) ? peval(params, params[sym]) : sym
 function peval(params::Parameters, expr::Expr)
-    # this approach works, but isn't much cleaner than @replaceparameterlinks
-    # it notably leaves a variable in the module space, which may be the Main module.
     get_val = Expr(:block)
-    cleanup = Expr(:block)
-    push!(get_val.args, :(_parent = $params.parent[]))
+    for key in keys(params.refs)
+        push!(get_val.args, :(local $key = $(params.refs[key])[]))
+    end
+    
     params_expr = Expr(expr.head)
     params_expr.args = [peval(params, a) for a in expr.args]
     push!(get_val.args, params_expr)
-    if isdefined(params.mod[], :_parent)
-        insert!(get_val.args, 1, :(_this_is_a_long_temporary_variable_used_by_ModelBaseEcon = _parent))
-        push!(cleanup.args, :(_parent = _this_is_a_long_temporary_variable_used_by_ModelBaseEcon))
-        push!(cleanup.args, :(_this_is_a_long_temporary_variable_used_by_ModelBaseEcon = nothing))
-    else
-        push!(cleanup.args, :(_parent = nothing))
-    end
+    
     val = params.mod[].eval(get_val)
-    params.mod[].eval(cleanup)
     return val
 end
 peval(m::AbstractModel, what) = peval(parameters(m), what)

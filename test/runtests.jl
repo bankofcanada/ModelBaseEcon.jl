@@ -1316,7 +1316,7 @@ end
     m1 = E2.newmodel()
 
     m_sattelite = Model()
-    m_sattelite.parameters.parent = Ref(E2.model)
+    m_sattelite.parameters.refs[:_parent] = Ref(E2.model)
 
     @parameters m_sattelite begin
        cx = @link _parent.cp
@@ -1327,7 +1327,7 @@ end
     m1.cp = [0.6, 0.03]
     @test m1.cp == [0.6, 0.03]
 
-    m_sattelite.parameters.parent = Ref(m1)
+    m_sattelite.parameters.refs[:_parent] = Ref(m1)
     update_links!(m_sattelite)
     @test m_sattelite.cx == [0.6, 0.03]
 
