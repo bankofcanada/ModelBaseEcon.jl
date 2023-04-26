@@ -86,7 +86,12 @@ function export_model(model::Model, name::AbstractString, fio::IO)
     if !isempty(parameters(model))
         println(fio, "@parameters model begin")
         for (n, p) in model.parameters
-            println(fio, "    ", n, " = ", p)
+            if typeof(p.value) <: AbstractModel || typeof(p.value) <: Parameters
+                @warn """The parameter "$n" is a $(typeof(p.value)) struct and is being excluded from the export.
+                         The resulting model may not compile."""
+            else
+                println(fio, "    ", n, " = ", p)
+            end
         end
         println(fio, "end # parameters")
         println(fio)
