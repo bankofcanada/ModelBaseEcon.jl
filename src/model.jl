@@ -275,7 +275,7 @@ function fullprint(io::IO, model::Model)
     nprm = length(model.parameters)
     neqn = length(model.equations)
     nvarshk = nvar + nshk
-    function print_things(io, things...; len=0, maxlen=40, last=false)
+    function print_things(io, things...; len=0, maxlen=displaysize(io)[2], last=false)
         s = sprint(print, things...; context=io, sizehint=0)
         print(io, s)
         len += length(s) + 2
@@ -311,10 +311,19 @@ function fullprint(io::IO, model::Model)
         else
             params = collect(model.parameters)
             for (k, v) in params[1:end-1]
-                len = print_things(io, k, " = ", v; len=len)
+                if typeof(v.value) <: Model || typeof(v.value) <: Parameters
+                    len = print_things(io, k, " = [ref. $(typeof(v.value))]"; len=len)
+                else
+                    len = print_things(io, k, " = ", v; len=len)
+                end
             end
             k, v = params[end]
-            len = print_things(io, k, " = ", v; len=len, last=true)
+            if typeof(v.value) <: Model || typeof(v.value) <: Parameters
+                len = print_things(io, k, " = [ref. $(typeof(v.value))]"; len=len, last=true)
+            else
+                len = print_things(io, k, " = ", v; len=len, last=true)
+            end
+            # len = print_things(io, k, " = ", v; len=len, last=true)
         end
     end
     print(io, length(model.equations), " equations(s)")
