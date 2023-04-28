@@ -849,7 +849,7 @@ function delete_sstate_equations!(model::Model, keys_vector)
         end
     end
 end
-delete_sstate_equation!(model::Model, key::Symbol) = delete_sstate_equations!(model, [symbol])
+delete_sstate_equation!(model::Model, key::Symbol) = delete_sstate_equations!(model, [key])
 
 
 
