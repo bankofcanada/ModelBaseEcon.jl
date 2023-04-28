@@ -708,10 +708,38 @@ end
 
 function deleteautoexogenize!(autoexogdict, entries)
     for entry in entries
-        if entry[1] ∈ keys(autoexogdict)
-            if autoexogdict[entry[1]] == entry[2]
-                delete!(autoexogdict, entry[1])
-            end
+        key_in_keys = entry[1] ∈ keys(autoexogdict)
+        value_in_values = entry[2] ∈ values(autoexogdict)
+        value_in_keys = entry[2] ∈ keys(autoexogdict)
+        key_in_values = entry[1] ∈ values(autoexogdict)
+        if key_in_keys && value_in_values && autoexogdict[entry[1]] == entry[2]
+            delete!(autoexogdict, entry[1])
+            continue
+        elseif value_in_keys && key_in_values && autoexogdict[entry[2]] == entry[1]
+            delete!(autoexogdict, entry[2])
+            continue
+        elseif key_in_keys
+            @warn """Cannot remove autoexogenize $(entry[1]) => $(entry[2]).
+            The paired symbol for $(entry[1]) is $(autoexogdict[entry[1]])."""
+            continue
+        elseif value_in_keys
+            @warn """Cannot remove autoexogenize $(entry[1]) => $(entry[2]).
+            The paired symbol for $(entry[2]) is $(autoexogdict[entry[2]])."""
+            continue
+        elseif value_in_values
+            k = [k for (k,v) in autoexogdict if v==entry[2]]
+            @warn """Cannot remove autoexogenize $(entry[1]) => $(entry[2]).
+            The paired symbol for $(entry[2]) is $(k[1])."""
+            continue
+        elseif key_in_values
+            k = [k for (k,v) in autoexogdict if v==entry[1]]
+            @warn """Cannot remove autoexogenize $(entry[1]) => $(entry[2]).
+            The paired symbol for $(entry[1]) is $(k[1])."""
+            continue
+        else
+            @warn """Cannot remove autoexogenize $(entry[1]) => $(entry[2]).
+            Neither $(entry[1]) nor $(entry[2]) are entries in the autoexogenize list."""
+            continue
         end
     end
 end

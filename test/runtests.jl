@@ -1248,6 +1248,29 @@ end
     end
     @test length(m.autoexogenize) == 3
     @test m.autoexogenize[:ygap] == :ygap_shk 
+
+    # using shock to remove key
+    m = E2.newmodel()
+    @autoexogenize m begin
+        @delete ygap_shk = ygap
+    end
+    @test length(m.autoexogenize) == 2
+    @test !haskey(m.autoexogenize, :ygap)
+
+    m = E2.newmodel()
+    @autoexogenize m begin
+        @delete ygap_shk => ygap
+    end
+    @test length(m.autoexogenize) == 2
+    @test !haskey(m.autoexogenize, :ygap)
+
+    m = E2.newmodel()
+    @test_logs (:warn, r"Cannot remove autoexogenize ygap2 => ygap2_shk.\nNeither ygap2 nor ygap2_shk are entries in the autoexogenize list."i) @autoexogenize m @delete ygap2 = ygap2_shk
+    @test_logs (:warn, r"Cannot remove autoexogenize ygap => ygap2_shk.\nThe paired symbol for ygap is ygap_shk."i) @autoexogenize m @delete ygap = ygap2_shk
+    @test_logs (:warn, r"Cannot remove autoexogenize ygap2_shk => ygap.\nThe paired symbol for ygap is ygap_shk."i) @autoexogenize m @delete ygap2_shk = ygap
+    @test_logs (:warn, r"Cannot remove autoexogenize ygap_shk => ygap2.\nThe paired symbol for ygap_shk is ygap."i) @autoexogenize m @delete ygap_shk = ygap2
+    @test_logs (:warn, r"Cannot remove autoexogenize ygap2 => ygap_shk.\nThe paired symbol for ygap_shk is ygap."i) @autoexogenize m @delete ygap2 = ygap_shk
+
 end
 
 @testset "Model edits, variables" begin
@@ -1318,7 +1341,7 @@ end
     m_sattelite = Model()
     
     @parameters m_sattelite begin
-       _parent = E2.model.parameters
+       _parent = E2.model
        cx = @link _parent.cp
     end
     @test m1.cp == [0.5, 0.02]
