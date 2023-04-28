@@ -1249,6 +1249,14 @@ end
     @test length(m.autoexogenize) == 3
     @test m.autoexogenize[:ygap] == :ygap_shk 
 
+    m = E2.newmodel()
+    @autoexogenize m begin
+        @delete (ygap = ygap_shk) (pinf = pinf_shk)
+    end 
+    @test length(m.autoexogenize) == 1
+    @test !haskey(m.autoexogenize, :ygap)
+    @test !haskey(m.autoexogenize, :pinf)
+
     # using shock to remove key
     m = E2.newmodel()
     @autoexogenize m begin
