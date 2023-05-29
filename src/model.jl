@@ -868,7 +868,11 @@ end
 
 function delete_sstate_equations!(model::Model, keys_vector)
     ss = sstate(model)
+    keys_vector_copy = copy(keys_vector)
     for key in keys_vector
+        push!(keys_vector_copy, Symbol("$(key)_tshift"))
+    end
+    for key in keys_vector_copy
         if key ∈ keys(ss.equations)
             delete!(ss.equations, key)
         end
