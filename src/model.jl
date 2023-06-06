@@ -398,7 +398,7 @@ function parse_deletes(block::Expr)
         # whole block is one delete line
         args = filter(a -> !isa(a, LineNumberNode), block.args[2:end])
         push!(removals.args, args...)
-    elseif !has_lines
+    elseif !has_lines && !(block isa Expr)
         push!(additions.args, block...)
     else
         for expr in block.args
@@ -851,8 +851,8 @@ function process_new_equations!(model::Model, modelmodule::Module)
     var_to_idx = _make_var_to_idx(model.allvars)
     for (key, e) in alleqns(model)
         if e.eval_resid == eqnnotready
+            delete_sstate_equations!(model, key)
             delete_aux_equations!(model, key)
-            delete_sstate_equation!(model, key)
             add_equation!(model, key, e.expr; modelmodule=modelmodule, var_to_idx=var_to_idx)
         end
     end
@@ -860,8 +860,8 @@ end
 
 function deleteequations!(model::Model, eqn_keys)
     for key in eqn_keys
+        delete_sstate_equations!(model, key)
         delete_aux_equations!(model, key)
-        delete_sstate_equation!(model, key)
         delete!(model.equations, key)
     end
 end
@@ -871,6 +871,10 @@ function delete_sstate_equations!(model::Model, keys_vector)
     keys_vector_copy = copy(keys_vector)
     for key in keys_vector
         push!(keys_vector_copy, Symbol("$(key)_tshift"))
+        for auxkey in get_aux_equation_keys(model, key)
+            push!(keys_vector_copy, auxkey)
+            push!(keys_vector_copy, Symbol("$(auxkey)_tshift"))
+        end
     end
     for key in keys_vector_copy
         if key ∈ keys(ss.equations)
@@ -881,7 +885,7 @@ function delete_sstate_equations!(model::Model, keys_vector)
         end
     end
 end
-delete_sstate_equation!(model::Model, key::Symbol) = delete_sstate_equations!(model, [key])
+delete_sstate_equations!(model::Model, key::Symbol) = delete_sstate_equations!(model, [key])
 
 
 
@@ -1423,8 +1427,8 @@ function reinitialize!(model::Model, modelmodule::Module)
     var_to_idx = _make_var_to_idx(model.allvars)
     for (key, e) in alleqns(model)
         if e.eval_resid == eqnnotready
+            delete_sstate_equations!(model, key)
             delete_aux_equations!(model, key)
-            delete_sstate_equation!(model, key)
             add_equation!(model, key, e.expr; modelmodule=modelmodule, var_to_idx=var_to_idx)
         else
             model.maxlag = max(model.maxlag, e.maxlag)
@@ -1558,7 +1562,7 @@ Returns a vector of symbol keys for the Aux equations used for the given equatio
 """
 function get_aux_equation_keys(model::Model, eqn_key::Symbol)
     key_string = string(eqn_key)
-    aux_keys = filter(x -> contains(string(x), key_string), keys(model.auxeqns))
+    aux_keys = filter(x -> contains(string(x)*"_AUX", key_string), keys(model.auxeqns))
     return aux_keys
 end
 
@@ -1568,8 +1572,22 @@ end
 Removes the aux equations associated with a given equation from the model.
 """
 function delete_aux_equations!(model::Model, eqn_key::Symbol)
-    for k in get_aux_equation_keys(model, eqn_key)
+    eqn_keys = get_aux_equation_keys(model, eqn_key)
+    for k in eqn_keys
         delete!(model.auxeqns, k)
+    end
+    if length(eqn_keys) >= 1
+        eqn_map = equation_map(model)
+        for var in keys(eqn_map)
+            eqn_map[var] = filter(x -> x ∉ [eqn_key, eqn_keys...], eqn_map[var])
+        end
+        removalindices = []
+        for (i,v) in enumerate(model.auxvars)
+            if v.name ∉ keys(eqn_map) || length(eqn_map[v.name]) == 0
+                push!(removalindices, i)
+            end
+        end
+        unique!(deleteat!(model.auxvars, removalindices));
     end
 end
 
