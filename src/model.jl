@@ -818,12 +818,10 @@ macro equations(model, block::Expr)
             elseif expr.args[1] isa Expr && expr.args[1].args[1] == :(=>)
                 sym = expr.args[1].args[2]
                 push!(ret.args, :($(thismodule).changeequations!($model.equations, $sym => $(Meta.quot(eqn)))))
-            elseif expr.args[1] isa GlobalRef 
-                #need to find the implication (if any)
-                args_string = string(expr.args[end])
-                implication_range = findfirst("=>", args_string)
-                if implication_range !== nothing
-                    sym = QuoteNode(Symbol(strip(replace(args_string[begin:first(implication_range)-1], ":" => ""))))
+            elseif expr.head == :macrocall
+                # This situation happens when the equation has a docstring, 
+                 if expr.args[end].head == :call && expr.args[end].args[1] == :(=>)
+                    sym = expr.args[end].args[2]
                     push!(ret.args, :($(thismodule).changeequations!($model.equations, $(sym) => $(Meta.quot(eqn)))))
                 else
                     push!(ret.args, :($(thismodule).changeequations!($model.equations, :_unnamed_equation_ => $(Meta.quot(eqn)))))
