@@ -467,12 +467,12 @@ end
     @test ModelBaseEcon.at_movavew(:(x[t]), 3, :y) == :(((x[t] + (y^1 * x[t-1] + y^2 * x[t-2])) * (1 - y)) / (1 - y^3))
 end
 module MetaTest
-using ModelBaseEcon
-params = @parameters
-custom(x) = x + one(x)
-const val = 12.0
-params.b = custom(val)
-params.a = @link custom(val)
+    using ModelBaseEcon
+    params = @parameters
+    custom(x) = x + one(x)
+    const val = 12.0
+    params.b = custom(val)
+    params.a = @link custom(val)
 end
 
 @testset "Parameters" begin
