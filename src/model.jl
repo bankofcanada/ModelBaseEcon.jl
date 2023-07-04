@@ -469,17 +469,19 @@ with `@delete`.
 
 """
 macro variables(model, block::Expr)
+    thismodule = @__MODULE__
     removals, additions = parse_deletes(block)
     return esc(:(
         unique!(deleteat!($(model).variables, findall(x -> x ∈ $(removals.args), $(model).variables)));
         unique!(append!($(model).variables, $(additions.args)));
-        ModelBaseEcon.update_model_state!($(model)); 
+        $(thismodule).update_model_state!($(model)); 
         nothing
     ))
 end
 
 macro variables(model, vars::Symbol...)
-    return esc(:(unique!(append!($(model).variables, $vars)); ModelBaseEcon.update_model_state!($(model)); nothing))
+    thismodule = @__MODULE__
+    return esc(:(unique!(append!($(model).variables, $vars)); $(thismodule).update_model_state!($(model)); nothing))
 end
 
 """
@@ -489,16 +491,18 @@ Same as [`@variables`](@ref), but the variables declared with `@logvariables`
 are log-transformed.
 """
 macro logvariables(model, block::Expr)
+    thismodule = @__MODULE__
     removals, additions = parse_deletes(block)
     return esc(:(
         unique!(deleteat!($(model).variables, findall(x -> x ∈ $(removals.args), $(model).variables)));
         unique!(append!($(model).variables, to_log.($(additions.args))));
-        ModelBaseEcon.update_model_state!($(model)); 
+        $(thismodule).update_model_state!($(model)); 
         nothing
     ))
 end
 macro logvariables(model, vars::Symbol...)
-    return esc(:(unique!(append!($(model).variables, to_log.($vars))); ModelBaseEcon.update_model_state!($(model)); nothing))
+    thismodule = @__MODULE__
+    return esc(:(unique!(append!($(model).variables, to_log.($vars))); $(thismodule).update_model_state!($(model)); nothing))
 end
 
 """
@@ -508,16 +512,18 @@ Same as [`@variables`](@ref), but the variables declared with `@neglogvariables`
 are negative-log-transformed.
 """
 macro neglogvariables(model, block::Expr)
+    thismodule = @__MODULE__
     removals, additions = parse_deletes(block)
     return esc(:(
         unique!(deleteat!($(model).variables, findall(x -> x ∈ $(removals.args), $(model).variables)));
         unique!(append!($(model).variables, to_neglog.($(additions.args))));
-        ModelBaseEcon.update_model_state!($(model)); 
+        $(thismodule).update_model_state!($(model)); 
         nothing
     ))
 end
 macro neglogvariables(model, vars::Symbol...)
-    return esc(:(unique!(append!($(model).variables, to_neglog.($vars))); ModelBaseEcon.update_model_state!($(model)); nothing))
+    thismodule = @__MODULE__
+    return esc(:(unique!(append!($(model).variables, to_neglog.($vars))); $(thismodule).update_model_state!($(model)); nothing))
 end
 
 """
@@ -528,16 +534,18 @@ have zero slope in their steady state and final conditions.
 
 """
 macro steadyvariables(model, block::Expr)
+    thismodule = @__MODULE__
     removals, additions = parse_deletes(block)
     return esc(:(
         unique!(deleteat!($(model).variables, findall(x -> x ∈ $(removals.args), $(model).variables)));
         unique!(append!($(model).variables, to_steady.($(additions.args))));
-        ModelBaseEcon.update_model_state!($(model)); 
+        $(thismodule).update_model_state!($(model)); 
         nothing
     ))
 end
 macro steadyvariables(model, vars::Symbol...)
-    return esc(:(unique!(append!($(model).variables, to_steady.($vars))); ModelBaseEcon.update_model_state!($(model)); nothing))
+    thismodule = @__MODULE__
+    return esc(:(unique!(append!($(model).variables, to_steady.($vars))); $(thismodule).update_model_state!($(model)); nothing))
 end
 
 """
@@ -547,16 +555,18 @@ Like [`@variables`](@ref), but the names declared with `@exogenous` are
 exogenous.
 """
 macro exogenous(model, block::Expr)
+    thismodule = @__MODULE__
     removals, additions = parse_deletes(block)
     return esc(:(
         unique!(deleteat!($(model).variables, findall(x -> x ∈ $(removals.args), $(model).variables)));
         unique!(append!($(model).variables, to_exog.($(additions.args))));
-        ModelBaseEcon.update_model_state!($(model)); 
+        $(thismodule).update_model_state!($(model)); 
         nothing
     ))
 end
 macro exogenous(model, vars::Symbol...)
-    return esc(:(unique!(append!($(model).variables, to_exog.($vars))); ModelBaseEcon.update_model_state!($(model)); nothing))
+    thismodule = @__MODULE__
+    return esc(:(unique!(append!($(model).variables, to_exog.($vars))); $(thismodule).update_model_state!($(model)); nothing))
 end
 
 """
@@ -566,16 +576,18 @@ Like [`@variables`](@ref), but the names declared with `@shocks` are
 shocks.
 """
 macro shocks(model, block::Expr)
+    thismodule = @__MODULE__
     removals, additions = parse_deletes(block)
     return esc(:(
         unique!(deleteat!($(model).shocks, findall(x -> x ∈ $(removals.args), $(model).shocks)));
         unique!(append!($(model).shocks, to_shock.($(additions.args))));
-        ModelBaseEcon.update_model_state!($(model)); 
+        $(thismodule).update_model_state!($(model)); 
         nothing
     ))
 end
 macro shocks(model, shks::Symbol...)
-    return esc(:(unique!(append!($(model).shocks, to_shock.($shks))); ModelBaseEcon.update_model_state!($(model)); nothing))
+    thismodule = @__MODULE__
+    return esc(:(unique!(append!($(model).shocks, to_shock.($shks))); $(thismodule).update_model_state!($(model)); nothing))
 end
 
 """
@@ -586,6 +598,7 @@ created from a variable name by appending suffix. Default suffix is "_shk", but
 it can be specified as the second argument too.
 """
 macro autoshocks(model, suf="_shk")
+    thismodule = @__MODULE__
     esc(quote
         $(model).shocks = ModelVariable[
             to_shock(Symbol(v.name, $(QuoteNode(suf)))) for v in $(model).variables if !isexog(v) && !isshock(v)
@@ -593,7 +606,7 @@ macro autoshocks(model, suf="_shk")
         push!($(model).autoexogenize, (
             v.name => Symbol(v.name, $(QuoteNode(suf))) for v in $(model).variables if !isexog(v)
         )...)
-        ModelBaseEcon.update_model_state!($(model));
+        $(thismodule).update_model_state!($(model));
         nothing
     end)
 end
@@ -611,6 +624,7 @@ assignment statements wrapped inside a begin-end block. Use `@link` and `@alias`
 to define dynamic links. See [`Parameters`](@ref).
 """
 macro parameters(model, args::Expr...)
+    thismodule = @__MODULE__
     if length(args) == 1 && args[1].head == :block
         args = args[1].args
     end
@@ -628,7 +642,7 @@ macro parameters(model, args::Expr...)
         end
         throw(ArgumentError("Parameter definitions must be assignments, not\n  $a"))
     end
-    push!(ret.args, :(ModelBaseEcon.update_model_state!($(model)); nothing))
+    push!(ret.args, :($(thismodule).update_model_state!($(model)); nothing))
     return esc(ret)
 end
 
@@ -672,7 +686,7 @@ You can also remove pairs from the model by prefacing each removed pair
 with `@delete`.
 """
 macro autoexogenize(model, block::Expr)
-    # removals, additions = parse_deletes(block)
+    thismodule = @__MODULE__
     removals, additions = parse_equation_deletes(block)
     autoexos = Dict{Symbol,Any}()
     removed_autoexos = Dict{Symbol,Any}()
@@ -699,9 +713,9 @@ macro autoexogenize(model, block::Expr)
     end
 
     return esc(:(
-        ModelBaseEcon.deleteautoexogenize!($(model).autoexogenize, $(removed_autoexos));
+        $(thismodule).deleteautoexogenize!($(model).autoexogenize, $(removed_autoexos));
         merge!($(model).autoexogenize, $(autoexos)); 
-        ModelBaseEcon.update_model_state!($(model)); 
+        $(thismodule).update_model_state!($(model)); 
         nothing
     ))
 end
@@ -778,6 +792,7 @@ To find the key for an equation, see [`summarize`](@ref). For equation details, 
 Changes like this should be followed by a call to [`@reinitialize`](@ref) on the model.
 """
 macro equations(model, block::Expr)
+    thismodule = @__MODULE__
     if block.head != :block
         modelerror("A list of equations must be within a begin-end block")
     end
@@ -786,8 +801,8 @@ macro equations(model, block::Expr)
     
     #removals
     if length(removals.args) > 0
-        push!(ret.args, :(ModelBaseEcon.deleteequations!($(model), $(removals.args))))
-        push!(ret.args, :(ModelBaseEcon.update_model_state!($(model)); nothing))
+        push!(ret.args, :($(thismodule).deleteequations!($(model), $(removals.args))))
+        push!(ret.args, :($(thismodule).update_model_state!($(model)); nothing))
     end
     
     # additions
@@ -799,27 +814,27 @@ macro equations(model, block::Expr)
         else
             if expr.args[1] isa Symbol && expr.args[1] == :(=>)
                 sym = expr.args[2]
-                push!(ret.args, :(ModelBaseEcon.changeequations!($model.equations, $sym => $(Meta.quot(eqn)))))
+                push!(ret.args, :($(thismodule).changeequations!($model.equations, $sym => $(Meta.quot(eqn)))))
             elseif expr.args[1] isa Expr && expr.args[1].args[1] == :(=>)
                 sym = expr.args[1].args[2]
-                push!(ret.args, :(ModelBaseEcon.changeequations!($model.equations, $sym => $(Meta.quot(eqn)))))
+                push!(ret.args, :($(thismodule).changeequations!($model.equations, $sym => $(Meta.quot(eqn)))))
             elseif expr.args[1] isa GlobalRef 
                 #need to find the implication (if any)
                 args_string = string(expr.args[end])
                 implication_range = findfirst("=>", args_string)
                 if implication_range !== nothing
                     sym = QuoteNode(Symbol(strip(replace(args_string[begin:first(implication_range)-1], ":" => ""))))
-                    push!(ret.args, :(ModelBaseEcon.changeequations!($model.equations, $(sym) => $(Meta.quot(eqn)))))
+                    push!(ret.args, :($(thismodule).changeequations!($model.equations, $(sym) => $(Meta.quot(eqn)))))
                 else
-                    push!(ret.args, :(ModelBaseEcon.changeequations!($model.equations, :_unnamed_equation_ => $(Meta.quot(eqn)))))
+                    push!(ret.args, :($(thismodule).changeequations!($model.equations, :_unnamed_equation_ => $(Meta.quot(eqn)))))
                 end
             else
-                push!(ret.args, :(ModelBaseEcon.changeequations!($model.equations, :_unnamed_equation_ => $(Meta.quot(eqn)))))
+                push!(ret.args, :($(thismodule).changeequations!($model.equations, :_unnamed_equation_ => $(Meta.quot(eqn)))))
             end
             eqn = Expr(:block)
         end
     end
-    push!(ret.args, :(ModelBaseEcon.process_new_equations!($(model),  $(__module__)); ModelBaseEcon.update_model_state!($(model)); nothing))
+    push!(ret.args, :($(thismodule).process_new_equations!($(model),  $(__module__)); $(thismodule).update_model_state!($(model)); nothing))
     return esc(ret)
 end
 
@@ -1154,7 +1169,8 @@ function process_equation(model::Model, expr::Expr;
     funcs_expr = makefuncs(eqn_name, residual, tssyms, sssyms, psyms, modelmodule)
     resid, RJ, resid_param, chunk = modelmodule.eval(funcs_expr)
     _update_eqn_params!(resid, model.parameters)
-    modelmodule.eval(:($(@__MODULE__).precompilefuncs($resid, $RJ, $resid_param, $chunk)))
+    thismodule = @__MODULE__
+    modelmodule.eval(:($(thismodule).precompilefuncs($resid, $RJ, $resid_param, $chunk)))
     tsrefs′ = LittleDict{Tuple{ModelSymbol,Int},Symbol}()
     for ((modsym, i), sym) in tsrefs
         tsrefs′[(ModelSymbol(modsym), i)] = sym
@@ -1464,10 +1480,11 @@ Prepare a model instance for analysis. Call this macro after all parameters,
 variable names, shock names and equations have been declared and defined.
 """
 macro initialize(model::Symbol)
+    thismodule = @__MODULE__
     # @__MODULE__ is this module (ModelBaseEcon)
     # __module__ is the module where this macro is called (the module where the model exists)
     return quote
-        $(@__MODULE__).initialize!($(model), $(__module__))
+        $(thismodule).initialize!($(model), $(__module__))
     end |> esc
 end
 """
@@ -1480,10 +1497,11 @@ equations, autoexogenize lists, and removed steadystate equations have been decl
 Additional/new steadystate constraints can be added after the call to `@reinitialize`.
 """
 macro reinitialize(model::Symbol)
+    thismodule = @__MODULE__
     # @__MODULE__ is this module (ModelBaseEcon)
     # __module__ is the module where this macro is called (the module where the model exists)
     return quote
-        $(@__MODULE__).reinitialize!($(model), $(__module__))
+        $(thismodule).reinitialize!($(model), $(__module__))
     end |> esc
 end
 
@@ -1788,6 +1806,7 @@ m_sattelite = deepcopy(FRBUS_VAR.sattelitemodel)
 Changes like this should be followed by a call to [`@reinitialize`](@ref) on the model.
 """
 macro replaceparameterlinks(model, expr)
+    thismodule = @__MODULE__
     if expr.args[1] !== :(=>)
         error("The replacement must by of the form oldmodel => newmodel")
     end
@@ -1795,7 +1814,7 @@ macro replaceparameterlinks(model, expr)
     new_string = string(expr.args[3])
     model_name = string(model)
     return esc(:(
-        params_string = ModelBaseEcon.corrected_parameters_block($model, $old_string, $new_string, $model_name);
+        params_string = $(thismodule).corrected_parameters_block($model, $old_string, $new_string, $model_name);
         eval(Meta.parse(params_string));
         nothing
         ));

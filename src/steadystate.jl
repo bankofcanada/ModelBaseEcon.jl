@@ -687,17 +687,17 @@ macro steadystate(model, type::Symbol, equation::Expr)
 end
 
 macro steadystate(model, block::Expr)
+    thismodule = @__MODULE__
     ret = Expr(:block)
     removals, additions = parse_equation_deletes(block)
     
     #removals
     if length(removals.args) > 0
-        push!(ret.args, :(ModelBaseEcon.delete_sstate_equations!($(model), $(removals.args))))
-        push!(ret.args, :(ModelBaseEcon.update_model_state!($(model)); nothing))
+        push!(ret.args, :($(thismodule).delete_sstate_equations!($(model), $(removals.args))))
+        push!(ret.args, :($(thismodule).update_model_state!($(model)); nothing))
     end
     
     # additions
-    thismodule = @__MODULE__
     for expr in additions.args
         if isa(expr, LineNumberNode)
             continue
