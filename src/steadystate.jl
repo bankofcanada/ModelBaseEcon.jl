@@ -440,8 +440,6 @@ model.
     directly by users.
 """
 function make_sseqn(model::AbstractModel, eqn::Equation, shift::Bool, eqn_name::Symbol, var_to_idx=get_var_to_idx(model))
-    local allvars = model.allvars
-    tvalue(t) = shift ? t + model.shift : t
     # ssind converts the dynamic index (v, t) into
     # the corresponding indexes of steady state unknowns.
     # Returned value is a list of length 1, or 2.
