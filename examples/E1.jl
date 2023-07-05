@@ -8,6 +8,7 @@ module E1
 using ModelBaseEcon
 
 model = Model()
+model.flags.linear = true
 
 @parameters model begin
     α = 0.5

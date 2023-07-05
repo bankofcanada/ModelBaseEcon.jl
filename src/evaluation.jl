@@ -1,16 +1,17 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020-2022, Bank of Canada
+# Copyright (c) 2020-2023, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
 ###########################################################
 # Part 1: Helper functions
 
+struct ModelBaseEconTag end
 
 """
-    precompilefuncs(resid, RJ, ::Val{N}, tag) where N
+    precompilefuncs(resid, RJ, resid_param, N::Int)
 
 Pre-compiles the given `resid` and `RJ` functions together
 with the dual-number arithmetic required by ForwardDiff.
@@ -19,36 +20,26 @@ with the dual-number arithmetic required by ForwardDiff.
     Internal function. Do not call directly
 
 """
-function precompilefuncs(resid, RJ, ::Val{N}, tag) where {N}
+function precompilefuncs(resid, RJ, resid_param, N::Int)
     ccall(:jl_generating_output, Cint, ()) == 1 || return nothing
 
-    # tag = MyTag # ForwardDiff.Tag{resid,Float64}
-    dual = ForwardDiff.Dual{tag,Float64,N}
-    duals = Array{dual,1}
-    cfg = ForwardDiff.GradientConfig{tag,Float64,N,duals}
-    mdr = DiffResults.MutableDiffResult{1,Float64,Tuple{Array{Float64,1}}}
+    tagtype = ModelBaseEconTag
+    dual = ForwardDiff.Dual{tagtype,Float64,N}
+    duals = Vector{dual}
 
-    precompile(resid, (Array{Float64,1},)) || error("precompile")
+    precompile(resid, (Vector{Float64},)) || error("precompile")
     precompile(resid, (duals,)) || error("precompile")
-    precompile(RJ, (Array{Float64,1},)) || error("precompile")
+    precompile(RJ, (Vector{Float64},)) || error("precompile")
 
-    for pred in (ForwardDiff.UNARY_PREDICATES ∪ Symbol[:-, :+, :log, :exp])
-        pred ∈ (:iseven, :isodd) || precompile(getfield(Base, pred), (Float64,)) || error("precompile")
-        precompile(getfield(Base, pred), (dual,)) || error("precompile")
+    # We precompile a version of the "function barrier" for the inital types
+    # of the parameters. This is a good apprixmimation of what will be evaluated
+    # in practice. If a user updates the parameter to a different type, a new version
+    # of the function barrier will have to be compiled but this should be fairly rare in
+    # practice.
+    type_params = typeof.(values(resid.params))
+    if !isempty(type_params)
+        precompile(resid_param, (duals, type_params...)) || error("precompile")
     end
-
-    for pred in ForwardDiff.BINARY_PREDICATES ∪ Symbol[:+, :-, :*, :/, :^]
-        precompile(getfield(Base, pred), (Float64, Float64)) || error("precompile")
-        precompile(getfield(Base, pred), (dual, Float64)) || error("precompile")
-        precompile(getfield(Base, pred), (Float64, dual)) || error("precompile")
-        precompile(getfield(Base, pred), (dual, dual)) || error("precompile")
-    end
-
-    precompile(ForwardDiff.extract_gradient!, (Type{tag}, mdr, dual)) || error("precompile")
-    precompile(ForwardDiff.vector_mode_gradient!, (mdr, typeof(resid), Array{Float64,1}, cfg)) || error("precompile")
-
-    # precompile(Tuple{typeof(ForwardDiff.extract_gradient!), Type{tag}, mdr, dual}) || error("precompile")
-    # precompile(Tuple{typeof(ForwardDiff.vector_mode_gradient!), mdr, resid, Array{Float64, 1}, cfg}) || error("precompile")
 
     return nothing
 end
@@ -57,7 +48,7 @@ end
     funcsyms(mod::Module)
 
 Create a pair of identifiers that does not conflict with existing identifiers in
-the given module. 
+the given module.
 
 !!! warning
     Internal function. Do not call directly.
@@ -70,24 +61,26 @@ equation and its gradient.
 """
 function funcsyms end
 
-let funcsyms_state = 0
-    global funcsyms_counter() = (funcsyms_state += 1)
-end
 function funcsyms(mod::Module)
-    fn1, fn2 = mod.eval(quote
-        let nms = names(@__MODULE__; all = true)
-            num = $(@__MODULE__).funcsyms_counter()
-            local fn1 = Symbol("resid_", num)
-            local fn2 = Symbol("RJ_", num)
-            while fn1 ∈ nms || fn2 ∈ nms
-                num = $(@__MODULE__).funcsyms_counter()
-                fn1 = Symbol("resid_", num)
-                fn2 = Symbol("RJ_", num)
-            end
-            fn1, fn2
-        end
-    end)
+    if !isdefined(mod, :__counter)
+        Base.eval(mod, :(__counter = Ref{Int}(1)))
+    end
+    num = mod.__counter[]
+    fn1 = Symbol("resid_", num)
+    fn2 = Symbol("RJ_", num)
+    fn3 = Symbol("resid_param_", num)
+    mod.__counter[] += 1
+    return fn1, fn2, fn3
 end
+
+const MAX_CHUNK_SIZE = 4
+
+# Used to avoid specialzing the ForwardDiff functions on
+# every equation.
+struct FunctionWrapper <: Function
+    f::Function
+end
+(f::FunctionWrapper)(x) = f.f(x)
 
 """
     makefuncs(expr, tssyms, sssyms, psyms, mod)
@@ -111,20 +104,46 @@ callable `EquationEvaluator` instance) and a second function that evaluates both
 the residual and its gradient (as a callable `EquationGradient` instance).
 """
 function makefuncs(expr, tssyms, sssyms, psyms, mod)
-    fn1, fn2 = funcsyms(mod)
+    fn1, fn2, fn3 = funcsyms(mod)
     x = gensym("x")
     nargs = length(tssyms) + length(sssyms)
-    return quote
-        function (ee::EquationEvaluator{$(QuoteNode(fn1))})($x::Vector{<:Real})
-            ($(tssyms...), $(sssyms...),) = $x
+    chunk = min(nargs, MAX_CHUNK_SIZE)
+    has_psyms = !isempty(psyms)
+    # This is the expression that goes inside the body of the "outer" function.
+    # If the equation has no parameters, then we just unpack x and evaluate the expressions
+    # Otherwise, we unpack the parameters (which have unknown types) and pass it
+    # to another function that acts like a function barrier where the types are known.
+    psym_expr = if has_psyms
+        quote
             ($(psyms...),) = values(ee.params)
+            $fn3($x, $(psyms...))
+        end
+    else
+        quote
+            ($(tssyms...), $(sssyms...),) = $x
             $expr
         end
+    end
+    # The expression for the function barrier
+    fn3_expr = if has_psyms
+        quote
+            function $fn3($x, $(psyms...))
+                ($(tssyms...), $(sssyms...),) = $x
+                $expr
+            end
+        end
+    else
+        :(const $fn3 = nothing)
+    end
+    return quote
+        function (ee::EquationEvaluator{$(QuoteNode(fn1))})($x::Vector{<:Real})
+            $psym_expr
+        end
         const $fn1 = EquationEvaluator{$(QuoteNode(fn1))}(UInt(0),
-            $(@__MODULE__).LittleDict(p => nothing for p in ($(QuoteNode.(psyms)...),)))
-        const $fn2 = EquationGradient($fn1, Val($nargs))
-        $(@__MODULE__).precompilefuncs($fn1, $fn2, Val($nargs), MyTag)
-        ($fn1, $fn2)
+            $(@__MODULE__).LittleDict(Symbol[$(QuoteNode.(psyms)...)], fill!(Vector{Any}(undef, $(length(psyms))), nothing)))
+        const $fn2 = EquationGradient($FunctionWrapper($fn1), $nargs, Val($chunk))
+        $fn3_expr
+        ($fn1, $fn2, $fn3, $chunk)
     end
 end
 
@@ -147,21 +166,20 @@ together with a `DiffResult` and a `GradientConfig` used by `ForwardDiff`. Its
 call is defined here and computes the residual and the gradient.
 """
 function initfuncs(mod::Module)
-    if :MyTag ∉ names(mod; all = true)
+    if :EquationEvaluator ∉ names(mod; all=true)
         mod.eval(quote
-            struct MyTag end
             struct EquationEvaluator{FN} <: Function
                 rev::Ref{UInt}
-                params::$(@__MODULE__).LittleDict{Symbol,Any}
+                params::$(@__MODULE__).LittleDictVec{Symbol,Any}
             end
             struct EquationGradient{DR,CFG} <: Function
                 fn1::Function
                 dr::DR
                 cfg::CFG
             end
-            EquationGradient(fn1::Function, ::Val{N}) where {N} = EquationGradient(fn1,
-                $(@__MODULE__).DiffResults.DiffResult(zero(Float64), zeros(Float64, N)),
-                $(@__MODULE__).ForwardDiff.GradientConfig(fn1, zeros(Float64, N), $(@__MODULE__).ForwardDiff.Chunk{N}(), MyTag))
+            EquationGradient(fn1::Function, nargs::Int, ::Val{N}) where {N} = EquationGradient(fn1,
+                $(@__MODULE__).DiffResults.DiffResult(zero(Float64), zeros(Float64, nargs)),
+                $(@__MODULE__).ForwardDiff.GradientConfig(fn1, zeros(Float64, nargs), $(@__MODULE__).ForwardDiff.Chunk{N}(), $ModelBaseEconTag()))
             function (s::EquationGradient)(x::Vector{Float64})
                 $(@__MODULE__).ForwardDiff.gradient!(s.dr, s.fn1, x, s.cfg)
                 return s.dr.value, s.dr.derivs[1]
@@ -174,14 +192,14 @@ end
 ###########################################################
 # Part 2: Evaluation data for models and equations
 
-#### Equation evaluation data 
+#### Equation evaluation data
 
 # It's not needed for the normal case. It'll be specialized later for
 # selectively linearized equations.
 
 abstract type AbstractEqnEvalData end
-eval_RJ(eqn, x) = eqn.eval_RJ(x)
-eval_resid(eqn, x) = eqn.eval_resid(x)
+eval_RJ(eqn::AbstractEquation, x) = eqn.eval_RJ(x)
+eval_resid(eqn::AbstractEquation, x) = eqn.eval_resid(x)
 
 abstract type DynEqnEvalData <: AbstractEqnEvalData end
 struct DynEqnEvalData0 <: DynEqnEvalData end
@@ -189,13 +207,13 @@ struct DynEqnEvalDataN <: DynEqnEvalData
     ss::Vector{Float64}
 end
 
-function _fill_ss_values(eqn, ssvals, allvars)
+function _fill_ss_values(eqn, ssvals, var_to_ind)
     ret = fill(0.0, length(eqn.ssrefs))
     bad = ModelSymbol[]
     for (i, v) in enumerate(keys(eqn.ssrefs))
-        vi = _index_of_var(v, allvars)
+        vi = var_to_ind[v]
         ret[i] = ssvals[2vi-1]
-        if !isapprox(ssvals[2vi], 0, atol = 1e-12)
+        if !isapprox(ssvals[2vi], 0, atol=1e-12)
             push!(bad, v)
         end
     end
@@ -205,19 +223,19 @@ function _fill_ss_values(eqn, ssvals, allvars)
     end
     return ret
 end
-function DynEqnEvalData(eqn, model)
+function DynEqnEvalData(eqn, model, var_to_ind=get_var_to_idx(model))
     return length(eqn.ssrefs) == 0 ? DynEqnEvalData0() : DynEqnEvalDataN(
-        _fill_ss_values(eqn, model.sstate.values, model.allvars)
+        _fill_ss_values(eqn, model.sstate.values, var_to_ind)
     )
 end
 
-eval_resid(eqn, x, ed::DynEqnEvalDataN) = eqn.eval_resid(vcat(x, ed.ss))
-@inline function eval_RJ(eqn, x, ed::DynEqnEvalDataN)
+eval_resid(eqn::AbstractEquation, x, ed::DynEqnEvalDataN) = eqn.eval_resid(vcat(x, ed.ss))
+@inline function eval_RJ(eqn::AbstractEquation, x, ed::DynEqnEvalDataN)
     R, J = eqn.eval_RJ(vcat(x, ed.ss))
     return (R, J[1:length(x)])
 end
-eval_resid(eqn, x, ::DynEqnEvalData0) = eqn.eval_resid(x)
-eval_RJ(eqn, x, ::DynEqnEvalData0) = eqn.eval_RJ(x)
+eval_resid(eqn::AbstractEquation, x, ::DynEqnEvalData0) = eqn.eval_resid(x)
+eval_RJ(eqn::AbstractEquation, x, ::DynEqnEvalData0) = eqn.eval_RJ(x)
 
 
 """
@@ -253,7 +271,7 @@ See also: [`eval_RJ`](@ref)
 """
 function eval_R! end
 export eval_R!
-eval_R!(res::AbstractVector{Float64}, point::AbstractMatrix{Float64}, ::AMED) where {AMED<:AbstractModelEvaluationData} = throw(NotImplementedError(AMED))
+eval_R!(res::AbstractVector{Float64}, point::AbstractMatrix{Float64}, ::AMED) where {AMED<:AbstractModelEvaluationData} = modelerror(NotImplementedError, AMED)
 
 """
     eval_RJ(point::AbstractArray{Float64, 2}, ::MED) where MED <: AbstractModelEvaluationData
@@ -277,21 +295,7 @@ See also: [`eval_R!`](@ref)
 """
 function eval_RJ end
 export eval_RJ
-eval_RJ(point::AbstractMatrix{Float64}, ::AMED) where {AMED<:AbstractModelEvaluationData} = throw(NotImplementedError(AMED))
-
-
-##### Model Evaluation Data that doesn't exist.
-"""
-    struct NoModelEvaluationData <: AbstractModelEvaluationData
-
-Specific type that indicates that the model cannot be evaluated. This is used as
-a placeholder while the model is being defined. During initialization, the
-actual model evaluation data is created.
-"""
-struct NoModelEvaluationData <: AbstractModelEvaluationData end
-const NoMED = NoModelEvaluationData()
-eval_R!(res::AbstractVector{Float64}, point::AbstractMatrix{Float64}, ::NoModelEvaluationData) = throw(ModelNotInitError())
-eval_RJ(point::AbstractMatrix{Float64}, ::NoModelEvaluationData) = throw(ModelNotInitError())
+eval_RJ(point::AbstractMatrix{Float64}, ::AMED) where {AMED<:AbstractModelEvaluationData} = modelerror(NotImplementedError, AMED)
 
 ##### The standard Model Evaluation Data used in the general case.
 """
@@ -301,6 +305,7 @@ The standard model evaluation data used in the general case and by default.
 """
 struct ModelEvaluationData{E<:AbstractEquation,I,D<:DynEqnEvalData} <: AbstractModelEvaluationData
     params::Ref{Parameters{ModelParam}}
+    var_to_idx::LittleDictVec{Symbol,Int}
     eedata::Vector{D}
     alleqns::Vector{E}
     allinds::Vector{I}
@@ -311,8 +316,6 @@ struct ModelEvaluationData{E<:AbstractEquation,I,D<:DynEqnEvalData} <: AbstractM
     rowinds::Vector{Vector{Int64}}
 end
 
-_index_of_var(var, allvars) = indexin([var], allvars)[1]
-
 @inline function _update_eqn_params!(ee, params)
     if ee.rev[] !== params.rev[]
         for k in keys(ee.params)
@@ -320,6 +323,11 @@ _index_of_var(var, allvars) = indexin([var], allvars)[1]
         end
         ee.rev[] = params.rev[]
     end
+end
+
+function _make_var_to_idx(allvars)
+    # Precompute index lookup for variables
+    return LittleDictVec{Symbol,Int}(allvars, 1:length(allvars))
 end
 
 """
@@ -332,8 +340,9 @@ function ModelEvaluationData(model::AbstractModel)
     alleqns = model.alleqns
     neqns = length(alleqns)
     allvars = model.allvars
-    nvars = length(allvars)
-    allinds = [[CartesianIndex((time0 + ti, _index_of_var(var, allvars))) for (var, ti) in keys(eqn.tsrefs)] for eqn in alleqns]
+    nvars = length(allvars) 
+    var_to_idx = _make_var_to_idx(allvars)
+    allinds = [[CartesianIndex((time0 + ti, var_to_idx[var])) for (var, ti) in keys(eqn.tsrefs)] for eqn in alleqns]
     ntimes = 1 + model.maxlag + model.maxlead
     LI = LinearIndices((ntimes, nvars))
     II = reduce(vcat, (fill(i, length(eqn.tsrefs)) for (i, eqn) in enumerate(alleqns)))
@@ -341,15 +350,18 @@ function ModelEvaluationData(model::AbstractModel)
     M = SparseArrays.sparse(II, reduce(vcat, JJ), similar(II), neqns, ntimes * nvars)
     M.nzval .= 1:length(II)
     rowinds = [copy(M[i, LI[inds]].nzval) for (i, inds) in enumerate(JJ)]
-    eedata = [DynEqnEvalData(eqn, model) for eqn in alleqns]
+    # this is the only place where we must pass var_to_idx to DynEqnEvalData explicitly
+    # this is because normally var_to_idx is taken from the ModelEvaluationData, but that's 
+    # what's being built here, so it doesn't yet exist in the `model`
+    eedata = [DynEqnEvalData(eqn, model, var_to_idx) for eqn in alleqns]
     if model.dynss && !issssolved(model)
         @warn "Steady state not solved."
     end
-    ModelEvaluationData(Ref(model.parameters), eedata,
+    ModelEvaluationData(Ref(model.parameters), var_to_idx, eedata,
         alleqns, allinds, similar(M, Float64), Vector{Float64}(undef, neqns), rowinds)
 end
 
-function eval_R!(res::AbstractVector{Float64}, point::Matrix{Float64}, med::ModelEvaluationData)
+function eval_R!(res::AbstractVector{Float64}, point::AbstractMatrix{Float64}, med::ModelEvaluationData)
     for (i, eqn, inds, ed) in zip(1:length(med.alleqns), med.alleqns, med.allinds, med.eedata)
         _update_eqn_params!(eqn.eval_resid, med.params[])
         res[i] = eval_resid(eqn, point[inds], ed)
@@ -379,7 +391,7 @@ mutable struct LinEqnEvalData <: AbstractEqnEvalData
     #    f(x) = f(s) + ∇f(s) ⋅ (x-s) + O(|x-s|^2)
     # we store s in sspt, f(s) in resid and ∇f(s) in grad
     # we expect that f(s) should be 0 (because steady state is a solution) and
-    #    warn it in isn't
+    #    warn if it isn't
     # we store it and use it because even with ≠0 it's still a valid Taylor
     #    expansion.
     resid::Float64
@@ -388,8 +400,8 @@ mutable struct LinEqnEvalData <: AbstractEqnEvalData
     LinEqnEvalData(r, g, s) = new(Float64(r), Float64[g...], Float64[s...])
 end
 
-eval_resid(eqn, x, led::LinEqnEvalData) = led.resid + sum(led.grad .* (x - led.sspt))
-eval_RJ(eqn, x, led::LinEqnEvalData) = (eval_resid(eqn, x, led), led.grad)
+eval_resid(eqn::AbstractEquation, x, led::LinEqnEvalData) = led.resid + sum(led.grad .* (x - led.sspt))
+eval_RJ(eqn::AbstractEquation, x, led::LinEqnEvalData) = (eval_resid(eqn, x, led), led.grad)
 
 function LinEqnEvalData(eqn, sspt, ed::DynEqnEvalData)
     return LinEqnEvalData(eval_RJ(eqn, sspt, ed)..., sspt)
@@ -405,17 +417,17 @@ function SelectiveLinearizationMED(model::AbstractModel)
 
     sstate = model.sstate
     if !issssolved(sstate)
-        error("Steady state solution is not available.")
+        linearizationerror("Steady state solution is not available.")
     end
     if maximum(abs, sstate.values[2:2:end]) > getoption(model, :tol, 1e-12)
-        error("Steady state solution has non-zero slope. Not yet implemented.")
+        linearizationerror("Steady state solution has non-zero slope. Not yet implemented.")
     end
 
     med = ModelEvaluationData(model)
 
     sspt = Matrix{Float64}(undef, 1 + model.maxlag + model.maxlead, length(model.varshks))
     for (i, v) in enumerate(model.varshks)
-        sspt[:, i] = transform(sstate[v][-model.maxlag:model.maxlead, ref = 0],v)
+        sspt[:, i] = transform(sstate[v][-model.maxlag:model.maxlead, ref=0], v)
     end
     eedata = Vector{AbstractEqnEvalData}(undef, length(med.alleqns))
     num_lin = 0
@@ -440,7 +452,7 @@ function SelectiveLinearizationMED(model::AbstractModel)
 end
 
 
-function eval_R!(res::AbstractVector{Float64}, point::Matrix{Float64}, slmed::SelectiveLinearizationMED)
+function eval_R!(res::AbstractVector{Float64}, point::AbstractMatrix{Float64}, slmed::SelectiveLinearizationMED)
     med = slmed.med
     for (i, eqn, inds, eed) in zip(1:length(med.alleqns), med.alleqns, med.allinds, slmed.eedata)
         islin(eqn) || _update_eqn_params!(eqn.eval_resid, med.params[])
@@ -467,10 +479,10 @@ end
 Instruct the model instance to use selective linearization. Only equations
 annotated with `@lin` in the model definition will be linearized about the
 current steady state solution while the rest of the eq
-    
+
 """
 function selective_linearize!(model::AbstractModel)
-    model.evaldata = SelectiveLinearizationMED(model)
+    setevaldata!(model, selective_linearize=SelectiveLinearizationMED(model))
     return model
 end
 export selective_linearize!
@@ -481,7 +493,7 @@ export selective_linearize!
 
 Refresh the model evaluation data stored within the given model instance. Most
 notably, this is necessary when the steady state is used in the dynamic
-equations. 
+equations.
 
 Normally there's no need for the end-used to call this function. It should be
 called when necessay by the solver.
@@ -490,10 +502,10 @@ function refresh_med! end
 export refresh_med!
 
 # dispatcher
-refresh_med!(m::AbstractModel) = refresh_med!(m, typeof(m.evaldata))
+refresh_med!(model::AbstractModel, variant::Symbol=model.options.variant) = model.dynss ? refresh_med!(model, Val(variant)) : model
 # catch all and issue a meaningful error message
-refresh_med!(::AbstractModel, T::Type{<:AbstractModelEvaluationData}) = error("Missing method to update MED of type $T")
+refresh_med!(::AbstractModel, V::Val{VARIANT}) where {VARIANT} = modelerror("Missing method to update model variant: $VARIANT")
 # specific cases
-refresh_med!(m::AbstractModel, ::Type{NoModelEvaluationData}) = (m.evaldata = ModelEvaluationData(m); m)
-refresh_med!(m::AbstractModel, ::Type{<:ModelEvaluationData}) = (m.evaldata = ModelEvaluationData(m); m)
-refresh_med!(m::AbstractModel, ::Type{SelectiveLinearizationMED}) = selective_linearize!(m)
+# refresh_med!(m::AbstractModel, ::Type{NoModelEvaluationData}) = (m.evaldata = ModelEvaluationData(m); m)
+refresh_med!(model::AbstractModel, ::Val{:default}) = (setevaldata!(model, default=ModelEvaluationData(model)); model)
+refresh_med!(model::AbstractModel, ::Val{:selective_linearize}) = selective_linearize!(model)

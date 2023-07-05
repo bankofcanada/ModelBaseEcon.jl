@@ -14,6 +14,7 @@ using ModelBaseEcon
 
 # start with an empty model
 model = Model()
+model.flags.linear = false
 model.options.maxiter = 200
 
 # add parameters

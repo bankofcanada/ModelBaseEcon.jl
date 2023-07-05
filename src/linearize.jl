@@ -33,20 +33,20 @@ struct LinearizedModelEvaluationData <: AbstractModelEvaluationData
 end
 
 """
-    islinearized(m::Model)
+    islinearized(model::Model)
 
 Return `true` if the given model is linearized and `false` otherwise.
 """
-islinearized(m::Model) = isa(m.evaldata, LinearizedModelEvaluationData)
+islinearized(model::Model) = hasevaldata(model, :linearize)
 export islinearized
 
 # Specialize eval_R! for the new model evaluation type
-function eval_R!(RES::AbstractVector{Float64}, point::AbstractMatrix{Float64}, lmed::LinearizedModelEvaluationData)
+function eval_R!(res::AbstractVector{Float64}, point::AbstractMatrix{Float64}, lmed::LinearizedModelEvaluationData)
     med = lmed.med
     if lmed.deviation
-        RES .= med.R .+ med.J * vec(point)
+        res .= med.R .+ med.J * vec(point)
     else
-        RES .= med.R .+ med.J * vec(point .- lmed.sspt)
+        res .= med.R .+ med.J * vec(point .- lmed.sspt)
     end
     return nothing
 end
@@ -79,6 +79,8 @@ msg(le::LinearizationError) = "Cannot linearize model because $(le.reason)"
 hint(le::LinearizationError) = le.hint
 # export LinearizationError
 
+linearizationerror(args...) = modelerror(LinearizationError, args...)
+
 export linearize!
 function linearize!(model::Model;
     # Idea:
@@ -90,36 +92,33 @@ function linearize!(model::Model;
     # the stored steady state Jacobian by the deviation of the given point from 
     # the steady state and add the stored steady state residual.
 
-    sstate::SteadyStateData = model.sstate,
-    deviation::Bool = false)
+    sstate::SteadyStateData=model.sstate,
+    deviation::Bool=false)
 
     if !isempty(model.auxvars) || !isempty(model.auxeqns)
-        throw(LinearizationError("there are auxiliary variables.",
-            "Try setting `model.options.substitutions=false` in your model file."))
+        linearizationerror("there are auxiliary variables.",
+            "Try setting `model.options.substitutions=false` in your model file.")
     end
     if !all(sstate.mask)
-        throw(LinearizationError("the steady state is unknown.", "Solve for the steady state first."))
+        linearizationerror("the steady state is unknown.", "Solve for the steady state first.")
     end
     if maximum(abs, sstate.values[2:2:end]) > 1e-10
-        throw(LinearizationError("the steady state has a non-zero linear growth."))
+        linearizationerror("the steady state has a non-zero linear growth.")
     end
 
     # We need a ModelEvaluationData in order to proceed
-    med = model.evaldata
-    if !isa(model.evaldata, ModelEvaluationData)
-        med = ModelEvaluationData(model)
-    end
+    med = ModelEvaluationData(model)
 
     ntimes = 1 + model.maxlag + model.maxlead
     nvars = length(model.variables)
     nshks = length(model.shocks)
-    sspt = [repeat(sstate.values[1:2:(2nvars)], inner = ntimes); zeros(ntimes * nshks)]
+    sspt = [repeat(sstate.values[1:2:(2nvars)], inner=ntimes); zeros(ntimes * nshks)]
     sspt = reshape(sspt, ntimes, nvars + nshks)
-    
+
     res, _ = eval_RJ(sspt, med)  # updates med.J in place, returns updated R and J
     med.R .= res
-    
-    model.evaldata = LinearizedModelEvaluationData(deviation, sspt, med)
+
+    setevaldata!(model, linearize=LinearizedModelEvaluationData(deviation, sspt, med))
     return model
 end
 @assert precompile(linearize!, (Model,))
@@ -139,10 +138,7 @@ to is as deviation from the steady state
 
 See also: [`linearize!`](@ref) and [`with_linearized`](@ref)
 """
-function linearized(model::Model; kwargs...)
-    m = deepcopy(model)
-    linearize!(m; kwargs...)
-end
+linearized(model::Model; kwargs...) = linearize!(deepcopy(model); kwargs...)
 
 export with_linearized
 """
@@ -170,7 +166,8 @@ end
 """
 function with_linearized(F::Function, model::Model; kwargs...)
     # store the evaluation data
-    ed = model.evaldata
+    variant = model.options.variant
+    lmed = get(model.evaldata, :linearize, nothing)
     ret = try
         # linearize 
         linearize!(model; kwargs...)
@@ -178,11 +175,77 @@ function with_linearized(F::Function, model::Model; kwargs...)
         F(model)
     catch
         # restore the original model evaluation data
-        model.evaldata = ed
+        if lmed === nothing
+            delete!(model.evaldata, :linearize)
+        else
+            setevaldata!(model, linearize=lmed)
+        end
+        model.options.variant = variant
         rethrow()
     end
-    model.evaldata = ed
+    if lmed === nothing
+        delete!(model.evaldata, :linearize)
+    else
+        setevaldata!(model, linearize=lmed)
+    end
+    model.options.variant = variant
     return ret
 end
 
-refresh_med!(m::AbstractModel, ::Type{LinearizedModelEvaluationData}) = linearize!(m, ; deviation = m.evaldata.deviation)
+refresh_med!(m::AbstractModel, ::Val{:linearize}) = linearize!(m; deviation=getevaldata(m, :linearize).deviation)
+
+"""
+    print_linearized(io, model)
+    print_linearized(model)
+
+Write the system of equations of the linearized model.
+"""
+function print_linearized end
+export print_linearized
+@inline print_linearized(model::Model; compact::Bool=true) = print_linearized(Base.stdout, model; compact)
+function print_linearized(io::IO, model::Model; compact::Bool=true)
+
+    if !islinearized(model)
+        throw(ArgumentError("Model not linearized"))
+    end
+
+    # Jacobian matrix of the linearized model
+    ed = getevaldata(model, :linearize)::LinearizedModelEvaluationData
+    jay = ed.med.J
+
+    # sort the non-zero entries of J by equation and by variable within each equation
+    base = size(jay, 2)
+    nonzerosofjay = [zip(findnz(jay)...)...]
+    sort!(nonzerosofjay, by=x -> x[1] * base^2 + x[2])
+
+    # names of variables corresponding to columns of J
+    var_from_col = map(string, (
+        ModelBaseEcon.normal_ref(var.name, lag) for var in model.varshks for lag in -model.maxlag:model.maxlead
+    ))
+
+    io = IOContext(io, :compact=>get(io, :compact, compact))
+
+    # loop over the non-zeros of J and print
+    this_r = 0
+    for (r, c, v) in nonzerosofjay
+        @assert r ∈ (this_r, this_r + 1) "r=$r, this_r=$this_r"
+        if r == this_r + 1
+            # finish printing current equation
+            this_r > 0 && println(io)
+            # start printing next equation
+            print(io, " 0 =")
+            this_r = r
+        end
+        if v == 1
+            print(io, " +", var_from_col[c])
+        elseif v == -1
+            print(io, " -", var_from_col[c])
+        elseif v < 0
+            print(io, " ", v, "*", var_from_col[c])
+        else
+            print(io, " +", v, "*", var_from_col[c])
+        end
+    end
+    println(io)
+    return
+end

@@ -8,6 +8,7 @@ using ModelBaseEcon
 
 # start with an empty model
 model = Model()
+model.flags.linear = true
 
 # add parameters
 @parameters model begin

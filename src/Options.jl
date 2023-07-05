@@ -120,7 +120,7 @@ Base.setproperty!(opts::Options, name::Symbol, val) = opts.contents[name] = val
 Base.getproperty(opts::Options, name::Symbol) = 
     name ∈ fieldnames(Options) ? getfield(opts, name) :
     name ∈ keys(opts.contents) ? opts.contents[name]  :
-                                 error("option $name not set.");
+                                 error("Option $name not set.");
 
 ############
 # Pretty printing
