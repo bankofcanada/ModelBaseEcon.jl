@@ -38,9 +38,8 @@ Return the hint message - a suggestion of how the problem might be fixed.
 """
 hint(::ModelErrorBase) = ""
 
-# TODO: check if this is strictly necessary to have, test efficiency
-# Helper function for getting an indexed item out of an ordered dict
-Base.get(i::Integer, d::Union{OrderedDict,LittleDict}) = d[collect(keys(d))[i]]
+# d.vals[i] would be faster, but uses an internal property of OrderedCollections
+Base.get(d::Union{OrderedDict,LittleDict}, i::Integer) = d[first(Iterators.drop(keys(d), i-1))]
 
 function Base.showerror(io::IO, me::ME) where {ME<:ModelErrorBase}
     # MEstr = split("$(ME)", ".")[end]

@@ -241,7 +241,7 @@ end
 """
 function geteqn(i::Integer, ssd::SteadyStateData)
     ci = i - length(ssd.constraints)
-    return ci > 0 ? get(ci, ssd.equations) : get(i, ssd.constraints)
+    return ci > 0 ? get(ssd.equations, ci) : get(ssd.constraints, i)
 end
 geteqn(i::Integer, m::AbstractModel) = geteqn(i, m.sstate)
 function geteqn(key::Symbol, ssd::SteadyStateData)
