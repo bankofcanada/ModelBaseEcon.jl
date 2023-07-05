@@ -51,8 +51,9 @@ end
 Data structure that represents a macroeconomic model.
 """
 mutable struct Model <: AbstractModel
-    "State determines whether the model is ready to be solved/run. One of :new, :ready, :dev"
-    state::Symbol
+    "State determines whether the model is ready to be solved/run. One of :new, :ready, :dev. 
+    Should not be directly manipulated."
+    _state::Symbol
     "Options are various hyper-parameters for tuning the algorithms"
     options::Options
     "Flags contain meta information about the type of model"
@@ -387,7 +388,7 @@ export @parameters, @equations, @autoshocks, @autoexogenize
 export update_model_state!
 
 function update_model_state!(m)
-    m.state = m.state == :ready ? :dev : m.state
+    m._state = m._state == :ready ? :dev : m._state
 end
 
 function parse_deletes(block::Expr)
@@ -857,7 +858,7 @@ end
 
 function process_new_equations!(model::Model, modelmodule::Module)
     # only process at this point if model is not new
-    if model.state == :new
+    if model._state == :new
         return
     end
     initfuncs(modelmodule)
@@ -1414,7 +1415,7 @@ function initialize!(model::Model, modelmodule::Module)
     if length(unused[:shocks]) > 0
         @warn "Model contains unused shocks: $(unused[:shocks])"
     end
-    model.state = :ready
+    model._state = :ready
     return nothing
 end
 
@@ -1467,7 +1468,7 @@ function reinitialize!(model::Model, modelmodule::Module)
     if length(unused[:shocks]) > 0
         @warn "Model contains unused shocks: $(unused[:shocks])"
     end
-    model.state = :ready
+    model._state = :ready
     return nothing
 end
 
