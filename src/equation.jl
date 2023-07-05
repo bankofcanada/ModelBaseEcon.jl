@@ -122,3 +122,29 @@ end
 
 # Allows us to pass a Number of a Symbol or a raw Expr to calls where Equation is expected.
 Base.convert(::Type{Equation}, e::ExtExpr) = Equation(e)
+
+function Base.show(io::IO, eqn::Equation)
+    keystr = ""
+    namestr = string(eqn.name)
+    m = match(r"^_S?S?EQ\d+(_AUX\d+)?$", namestr)
+    if m === nothing || m.match != namestr
+        keystr = ":$(namestr) => "
+    end
+
+    docstr = ""
+    if !isempty(doc(eqn))
+        docstr = "\"$(doc(eqn))\"\n"
+    end
+    # eqn_string = sprint(print, docstr, keystr, flagstr, expr(eqn))
+    print(io, docstr, keystr, eqn.flags, expr(eqn))
+end
+
+function Base.show(io::IO, flags::EqnFlags)
+    flagstr = ""
+    for f in fieldnames(typeof(flags))
+        if getfield(flags, f)
+            flagstr *= "@$(f) "
+        end
+    end
+    print(io, flagstr)
+end

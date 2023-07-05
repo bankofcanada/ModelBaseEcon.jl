@@ -341,7 +341,7 @@ function fullprint(io::IO, model::Model)
         println(io, "  $(" "^longest_key) |-> ", v.expr)
     end
     for (key, eq) in model.equations
-        println(io, "  :$(rpad(key, longest_key+1))=> ", eq)
+        println(io, "  :$(rpad(key, longest_key+1))=> ", eq.flags, expr(eq))
         allvars = model.allvars
         for aux_key in get_aux_equation_keys(model, key)
             print_aux_eq(aux_key)
