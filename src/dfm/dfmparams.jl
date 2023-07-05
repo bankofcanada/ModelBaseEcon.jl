@@ -99,15 +99,21 @@ end
 export new_estimdata
 new_estimdata(m::DFMModel) = DFMEstimData(m)
 
-nparams(ed::DFMEstimData, m::DFMModel) =
+@inline pack_params(m::DFMModel) = pack_params(new_estimdata(m), m)
+
+@inline pack_params!(vec::AbstractVector{<:Real}, m::DFMModel) = pack_params!(vec,new_estimdata(m), m)
+
+@inline nparams(m::DFMModel) = nparams(new_estimdata(m), m)
+
+@inline nparams(ed::DFMEstimData, m::DFMModel) =
     sum(ed.mean) + sum(ed.covariance) +
     sum(nparams(args...) for args in zip(_blocks(ed), _blocks(m)))
 
-nparams(ed::FBEstimData, ic::IdiosyncraticComponents) =
+@inline nparams(ed::FBEstimData, ic::IdiosyncraticComponents) =
     ed.arcoefs * ic.nfactors * ic.order +
     ed.covariance * ic.nfactors
 
-nparams(ed::FBEstimData, fb::FactorBlock) =
+@inline nparams(ed::FBEstimData, fb::FactorBlock) =
     ed.loadings * fb.nobserved * fb.nfactors +
     ed.arcoefs * fb.nfactors * fb.nfactors * fb.order +
     ed.covariance * fb.nfactors * fb.nfactors
@@ -142,7 +148,7 @@ function prepare_estimdata!(ed::DFMEstimData, m::DFMModel, offset=Ref(0))
     return ed
 end
 
-function pack_params!(vec::AbstractVector{Float64}, ed::FBEstimData, fb::ARFactorBlock)
+function pack_params!(vec::AbstractVector{<:Real}, ed::FBEstimData, fb::ARFactorBlock)
     @assert ed.ready
     if !isempty(ed.loadings_inds)
         vec[ed.loadings_inds] .= fb.loadings[:]
@@ -158,7 +164,7 @@ function pack_params!(vec::AbstractVector{Float64}, ed::FBEstimData, fb::ARFacto
     return vec
 end
 
-function pack_params!(vec::AbstractVector{Float64}, ed::FBEstimData, fb::IdiosyncraticComponents)
+function pack_params!(vec::AbstractVector{<:Real}, ed::FBEstimData, fb::IdiosyncraticComponents)
     @assert ed.ready
     if !isempty(ed.arcoefs_inds)
         for i = 1:fb.order
@@ -171,7 +177,7 @@ function pack_params!(vec::AbstractVector{Float64}, ed::FBEstimData, fb::Idiosyn
     return vec
 end
 
-function pack_params!(vec::AbstractVector{Float64}, ed::DFMEstimData, m::DFMModel)
+function pack_params!(vec::AbstractVector{<:Real}, ed::DFMEstimData, m::DFMModel)
     if !(ed.ready && all(x.ready for x in _blocks(ed)))
         prepare_estimdata!(ed, m)
     end
@@ -187,7 +193,7 @@ function pack_params!(vec::AbstractVector{Float64}, ed::DFMEstimData, m::DFMMode
     return vec
 end
 
-function unpack_params!(fb::ARFactorBlock, ed::FBEstimData, vec::AbstractVector{Float64})
+function unpack_params!(fb::ARFactorBlock, ed::FBEstimData, vec::AbstractVector{<:Real})
     @assert ed.ready
     if !isempty(ed.loadings_inds)
         fb.loadings[:] .= vec[ed.loadings_inds]
@@ -204,7 +210,7 @@ function unpack_params!(fb::ARFactorBlock, ed::FBEstimData, vec::AbstractVector{
 
 end
 
-function unpack_params!(fb::IdiosyncraticComponents, ed::FBEstimData, vec::AbstractVector{Float64})
+function unpack_params!(fb::IdiosyncraticComponents, ed::FBEstimData, vec::AbstractVector{<:Real})
     @assert ed.ready
     if !isempty(ed.arcoefs_inds)
         for i = 1:fb.order
@@ -218,7 +224,7 @@ function unpack_params!(fb::IdiosyncraticComponents, ed::FBEstimData, vec::Abstr
 
 end
 
-function unpack_params!(m::DFMModel, ed::DFMEstimData, vec::AbstractVector{Float64})
+function unpack_params!(m::DFMModel, ed::DFMEstimData, vec::AbstractVector{<:Real})
     if !(ed.ready && all(x.ready for x in _blocks(ed)))
         prepare_estimdata!(ed, m)
     end
