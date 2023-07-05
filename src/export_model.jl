@@ -141,10 +141,9 @@ function export_model(model::Model, name::AbstractString, fio::IO)
     println(fio, "@initialize model")
 
     sd = sstate(model)
-    for cons in sd.constraints
+    for cons_pair in sd.constraints
         println(fio)
-        cons_string = export_equation(cons)
-        println(fio, "@steadystate model ", cons_string)
+        println(fio, "@steadystate model ", cons_pair[2])
     end
 
     println(fio)
