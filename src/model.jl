@@ -839,15 +839,8 @@ end
 
 function changeequations!(eqns::OrderedDict{Symbol,Equation}, p::Pair{Symbol,Expr})
     sym, e = p
-    # println(length(eqns))
-    eqnkeys = Set(keys(eqns))
     if sym == :_unnamed_equation_
-        eqn_name = Symbol("_EQ"*string(length(eqnkeys)+1))
-        incrementer = 1
-        while eqn_name ∈ eqnkeys
-            incrementer += 1
-            eqn_name = Symbol("_EQ"*string(length(eqnkeys)+incrementer))
-        end
+        eqn_name = get_next_equation_name(eqns)
         push!(eqns, eqn_name => Equation(e))
     elseif sym ∈ eqnkeys
         eqns[sym] = Equation(e)
