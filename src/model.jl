@@ -1802,25 +1802,37 @@ macro replaceparameterlinks(model, expr)
     if expr.args[1] !== :(=>)
         error("The replacement must by of the form oldmodel => newmodel")
     end
-    old_string = string(expr.args[2])
+    old = expr.args[2]
     new_string = string(expr.args[3])
-    model_name = string(model)
     return esc(:(
-        params_string = $(thismodule).corrected_parameters_block($model, $old_string, $new_string, $model_name);
-        eval(Meta.parse(params_string));
+        $(thismodule).replaceparameterlinks!($model, $old, Meta.parse($new_string), $__module__);
         nothing
         ));
 end
 export @replaceparameterlinks
-    
-function corrected_parameters_block(model::Model, s1::String, s2::String, model_name::String)
-    str = sprint(println, "@parameters $model_name begin")
-    for (n, p) in model.parameters
-        str = str*sprint(println, "    ", n, " = ", p)
+
+
+function replaceparameterlinks!(model::Model, old::Model, new_expr::Union{Symbol,Expr}, mod)
+    model.parameters.mod[] = mod
+    for p in values(model.parameters)
+        if p.link isa Expr
+            p.link = replace_in_expr(p.link, old, new_expr, model.parameters)
+        end
     end
-    str = str*sprint(println, "end # parameters")
-    str = replace(str, s1 => s2)
-    return str
+    update_links!(model.parameters)
+end
+
+function replace_in_expr(e::Expr, old::Model, new::Union{Symbol,Expr}, params::Parameters)
+    for i in 1:length(e.args)
+        if e.args[i] isa Expr
+            if peval(params, e.args[i]) == old
+                e.args[i] = new
+            else
+                e.args[i] = replace_in_expr(e.args[i], old, new, params)
+            end
+        end
+    end
+    return e
 end
 
 """
