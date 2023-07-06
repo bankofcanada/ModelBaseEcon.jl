@@ -262,7 +262,7 @@ Base.show(io::IO, ssd::SteadyStateData) = begin
     else
         println(io, len, " additional constraint", ifelse(len > 1, "s.", "."))
         for c in ssd.constraints
-            println(io, "    ", c)
+            println(io, "    ", c[2])
         end
     end
 end

@@ -27,18 +27,24 @@ doc(eqn::AbstractEquation) = :doc in fieldnames(typeof(eqn)) ? getfield(eqn, :do
 
 #
 function Base.show(io::IO, eqn::AbstractEquation)
+    keystr = ""
+    namestr = string(eqn.name)
+    if !get(io, :compact, false)
+        keystr = ":$(namestr) => "
+    end
+
     flagstr = ""
-    flgs = flags(eqn)
-    for f in fieldnames(typeof(flgs))
-        if getfield(flgs, f)
+    for f in fieldnames(typeof(flags))
+        if getfield(flags, f)
             flagstr *= "@$(f) "
         end
     end
+
     docstr = ""
     if !isempty(doc(eqn)) && !get(io, :compact, false)
-        docstr = "\"$(doc(eqn))\" "
+        docstr = "\"$(doc(eqn))\"\n"
     end
-    print(io, docstr, flagstr, expr(eqn))
+    print(io, docstr, keystr, flagstr, expr(eqn))
 end
 
 Base.:(==)(e1::AbstractEquation, e2::AbstractEquation) = flags(e1) == flags(e2) && expr(e1) == expr(e2)

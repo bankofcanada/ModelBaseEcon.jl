@@ -131,7 +131,8 @@ function export_model(model::Model, name::AbstractString, fio::IO)
         println(fio, "@equations model begin")
         for eqn_pair in alleqns
             str = sprint(print, eqn_pair[2], context=fio, sizehint=0)
-            str = replace(str, r"(\s*\".*\"\n)" => s"\1    ") 
+            str = replace(str, r"(\s*\".*\"\n)" => s"\1    ")
+            str = replace(str, r":_S?S?EQ\d+(_AUX\d+)? => " => "") 
             println(fio, "    ", unescape_string(str))
         end
         println(fio, "end # equations")
@@ -143,7 +144,9 @@ function export_model(model::Model, name::AbstractString, fio::IO)
     sd = sstate(model)
     for cons_pair in sd.constraints
         println(fio)
-        println(fio, "@steadystate model ", cons_pair[2])
+        str = sprint(print, cons_pair[2], context=fio, sizehint=0)
+        str = replace(str, r":_S?S?EQ\d+(_AUX\d+)? => " => "") 
+        println(fio, "@steadystate model ", str)
     end
 
     println(fio)
