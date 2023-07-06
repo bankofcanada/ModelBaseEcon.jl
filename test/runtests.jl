@@ -1364,6 +1364,50 @@ end
 
 end
 
+@testset "Model edits, equations" begin
+    m = S1.newmodel()
+
+    @equations m begin
+        @delete _EQ2
+    end
+
+    @test length(m.equations) == 2
+    @test collect(keys(m.equations)) == [:_EQ1, :_EQ3]
+
+    @test_logs (:warn,"Model contains unused shocks: [:b_shk]") @reinitialize m
+    
+    @equations m begin
+        b[t] = @sstate(b) * (1 - α) + α * b[t-1] + b_shk[t]
+    end
+
+    @test length(m.equations) == 3
+    @test collect(keys(m.equations)) == [:_EQ1, :_EQ3, :_EQ4]
+
+    m = S1.newmodel()
+    @equations m begin
+        @delete _EQ1
+    end
+    @steadystate m begin
+        @delete _SSEQ1
+    end
+    @test_logs (:warn,"Model contains unused variables: [:a]") @reinitialize m
+
+
+    maux = deepcopy(AUX.model)
+    @test length(maux.equations) == 2
+    @test length(maux.alleqns) == 4
+    @equations maux begin
+        @delete _EQ1
+    end
+    @test length(maux.equations) == 1
+    @test length(maux.alleqns) == 2
+    @equations maux begin
+        x[t+1] = log(x[t] - x[t-1])
+    end
+    @test length(maux.equations) == 2
+    @test length(maux.alleqns) == 4
+end
+
 @using_example E2sat
 m2_for_sattelite_tests = E2sat.newmodel()
 @testset "sattelite models" begin
