@@ -66,7 +66,7 @@ function export_model(model::Model, name::AbstractString, fio::IO)
             if typeof(p.value) <: AbstractModel || typeof(p.value) <: Parameters
                 @warn """The parameter "$n" is a $(typeof(p.value)) struct and is being exported as nothing.
                          The resulting model may not compile."""
-                println(fio, "    ", """# the parameter :$n was a $(typeof(p.value)) which is not a supproted type.""")
+                println(fio, "    ", """# the parameter :$n was a $(typeof(p.value)) which is not a supported type.""")
                 println(fio, "    ", n, " = ", nothing)
             else
                 println(fio, "    ", n, " = ", p)
