@@ -766,13 +766,13 @@ end
 Returns the next available equation name of the form `:_EQ#`.
 The initial guess is at the number of equations + 1.
 """
-function get_next_equation_name(eqns::OrderedDict{Symbol,Equation})
+function get_next_equation_name(eqns::OrderedDict{Symbol,<:Union{Equation,SteadyStateEquation}}, prefix::String="_EQ")
     existing_keys = keys(eqns)
-    iterator = length(existing_keys) + 1
-    eqn_key = Symbol("_EQ", iterator)
+    incrementer = length(existing_keys) + 1
+    eqn_key = Symbol(prefix, incrementer)
     while eqn_key ∈ existing_keys
-        iterator += 1
-        eqn_key = Symbol("_EQ", iterator)
+        incrementer += 1
+        eqn_key = Symbol(prefix, incrementer)
     end
     return eqn_key
 end

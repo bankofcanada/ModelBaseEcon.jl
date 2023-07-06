@@ -503,13 +503,7 @@ addition to the equations generated automatically from the dynamic system.
 """
 function setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Module=moduleof(model), eqn_key=:_undefined_, var_to_idx=get_var_to_idx(model))
     if eqn_key == :_undefined_
-        allkeys = collect(keys(model.sstate.constraints))
-        incrementer = length(allkeys)+1
-        eqn_key = Symbol("_SSEQ$(incrementer)")
-        while eqn_key ∈ allkeys
-            incrementer += 1
-            eqn_key = Symbol("_SSEQ$(incrementer)")
-        end
+        eqn_key = get_next_equation_name(model.sstate.constraints, "_SSEQ")
     end
 
     if expr.head != :(=)
