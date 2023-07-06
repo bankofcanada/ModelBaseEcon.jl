@@ -666,6 +666,7 @@ end
             x
         end
         @shocks m sx
+        @autoexogenize m s => sx
         @equations m begin
             "This equation is super cool"
             a * @d(x) = b * @d(x[t+1]) + sx
@@ -825,6 +826,7 @@ end
 @testset "E1.params" begin
     let m = E1.newmodel()
         @test propertynames(m.parameters) == (:α, :β)
+        @test m.nvarshks == 2 
         @test peval(m, :α) == 0.5
         m.β = @link 1.0 - α
         m.parameters.beta = @alias β
@@ -1343,6 +1345,27 @@ end
 
 end
 
+@testset "Model edits, steadystate" begin
+    m = S1.newmodel()
+
+    @test length(m.sstate.constraints) == 1
+    @parameters m begin
+        b_ss = 1.2 
+    end
+    @steadystate m begin
+        @delete _SSEQ1;
+        @level a = a_ss
+        @slope b = b_ss
+    end
+    @test length(m.sstate.constraints) == 2
+    
+    # @test_throws MethodError @steadystate @somethingelse b = b_ss
+
+
+end
+
+@using_example E2sat
+m2_for_sattelite_tests = E2sat.newmodel()
 @testset "sattelite models" begin
     m1 = E2.newmodel()
 
@@ -1362,5 +1385,39 @@ end
     update_links!(m_sattelite)
     @test m_sattelite.cx == [0.6, 0.03]
 
+    # m2_for_sattelite_tests = E2sat.newmodel()
+    m2_sattelite = deepcopy(E2sat.satmodel)
+
+    m2_for_sattelite_tests.cp = [0.7, 0.05]
+
+    @test m2_for_sattelite_tests.cp == [0.7, 0.05]
+    @test m2_sattelite.cz == [0.5, 0.02]
+    @replaceparameterlinks m2_sattelite E2sat.model => m2_for_sattelite_tests
+    @test m2_sattelite.cz == [0.7, 0.05]
+    m2_for_sattelite_tests.cp = [0.3, 0.08]
+    update_links!(m2_sattelite.parameters)
+    @test m2_sattelite.cz == [0.3, 0.08]
+
+end
+m2_for_sattelite_tests = nothing
+
+@testset "Model find" begin
+    m = E3.newmodel()
+    findequations(m, :cr)
+    @test length(findequations(m, :cr)) == 1
+    @test length(findequations(m, :pinf)) == 3
+
+    @test get_main_equation(m, :rate) == :_EQ2
+
+    @test findequations(S1.model, :a) == [:_EQ1, :_SSEQ1]
+
 end
 
+@testset "misc codecoverage" begin
+    m = E2.newmodel()
+    @test_throws ErrorException m.pinf_shk = m.rate_shk
+
+    pinf = ModelVariable(:pinf)
+    m.pinf = pinf
+    @test m.pinf isa ModelVariable
+end
