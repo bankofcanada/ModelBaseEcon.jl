@@ -842,7 +842,7 @@ function changeequations!(eqns::OrderedDict{Symbol,Equation}, p::Pair{Symbol,Exp
     if sym == :_unnamed_equation_
         eqn_name = get_next_equation_name(eqns)
         push!(eqns, eqn_name => Equation(e))
-    elseif sym ∈ eqnkeys
+    elseif sym ∈ keys(eqns)
         eqns[sym] = Equation(e)
     else
         push!(eqns, sym => Equation(e))
