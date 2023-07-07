@@ -1820,12 +1820,14 @@ export @replaceparameterlinks
 
 
 function replaceparameterlinks!(model::Model, old::Model, new_expr::Union{Symbol,Expr}, mod)
-    model.parameters.mod[] = mod
     for p in values(model.parameters)
         if p.link isa Expr
             p.link = replace_in_expr(p.link, old, new_expr, model.parameters)
         end
     end
+    # We need to replace the parameters module, but only after making the replacements
+    # Otherwise, the old links may not evaluate correctly.
+    model.parameters.mod[] = mod
     update_links!(model.parameters)
 end
 
