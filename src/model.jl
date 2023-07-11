@@ -339,17 +339,11 @@ function fullprint(io::IO, model::Model)
     end
     function print_aux_eq(aux_key)
         v = model.auxeqns[aux_key]
-        println(io, "  $(" "^longest_key) |-> ", v.expr)
+        println(io, "  ", " "^longest_key, " |-> ", v.expr)
     end
     for (key, eq) in model.equations
-        flags = eq.flags
-        flagstr = ""
-        for f in fieldnames(typeof(flags))
-            if getfield(flags, f)
-                flagstr *= "@$(f) "
-            end
-        end
-        println(io, "  :$(rpad(key, longest_key+1))=> ", flagstr, expr(eq))
+        seq = sprint(show, eq; context=io, sizehint=0)
+        println(io, "  :", rpad(key, longest_key), " => ", split(seq, "=>")[end])
         allvars = model.allvars
         for aux_key in get_aux_equation_keys(model, key)
             print_aux_eq(aux_key)
