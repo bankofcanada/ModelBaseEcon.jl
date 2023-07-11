@@ -1624,7 +1624,13 @@ function findequations(model::Model, sym::Symbol; verbose=true)
     return sym_eqs
 end
 
-function get_main_equation(model::Model, var::Symbol)
+"""
+    find_main_equation(model, var)
+
+Return the name of the first equation that contains `var[t]`. Return `nothing`
+if there's no such equation.
+"""
+function find_main_equation(model::Model, var::Symbol)
     for (eqn_name, eqn) in pairs(model.equations)
         for (t, sym) in eqn.tsrefs
             if t[1].name == var && t[2] == 0
@@ -1634,7 +1640,7 @@ function get_main_equation(model::Model, var::Symbol)
     end
     return nothing
 end
-export get_main_equation
+export find_main_equation
 
 """
     prettyprint_equation(m::Model, eq::Equation; target::Symbol, eq_symbols::Vector{Any}=[])

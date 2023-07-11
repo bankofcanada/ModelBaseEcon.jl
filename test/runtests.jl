@@ -1449,13 +1449,13 @@ m2_for_sattelite_tests = nothing
 
 @testset "Model find" begin
     m = E3.newmodel()
-    findequations(m, :cr)
-    @test length(findequations(m, :cr)) == 1
-    @test length(findequations(m, :pinf)) == 3
+    findequations(m, :cr; verbose=false)
+    @test length(findequations(m, :cr; verbose=false)) == 1
+    @test length(findequations(m, :pinf; verbose=false)) == 3
 
     @test get_main_equation(m, :rate) == :_EQ2
 
-    @test findequations(S1.model, :a) == [:_EQ1, :_SSEQ1]
+    @test findequations(S1.model, :a; verbose=false) == [:_EQ1, :_SSEQ1]
 
 end
 
