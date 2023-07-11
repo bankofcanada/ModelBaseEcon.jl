@@ -1645,13 +1645,13 @@ export find_main_equation
 """
     prettyprint_equation(m::Model, eq::Equation; target::Symbol, eq_symbols::Vector{Any}=[])
     
-    Print the provided equation with the variables colored according to their type.
+Print the provided equation with the variables colored according to their type.
 
-    ### Keyword arguments
-      * `m`::Model - The model which contains the variables and equations.
-      * `eq`::Equation - The equation in question
-      * `target`::Symbol - if provided, the specified symbol will be presented in bright green.
-      * `eq_symbols`::Vector{Any} - a vector of symbols present in the equation. Can slightly speed up processing if provided.
+### Keyword arguments
+    * `m`::Model - The model which contains the variables and equations.
+    * `eq`::Equation - The equation in question
+    * `target`::Symbol - if provided, the specified symbol will be presented in bright green.
+    * `eq_symbols`::Vector{Any} - a vector of symbols present in the equation. Can slightly speed up processing if provided.
 """
 function prettyprint_equation(m::Model, eq::Union{Equation,SteadyStateEquation}; target::Symbol=nothing, eq_symbols::Vector{Symbol} = Symbol[])
     target_color = "#f4C095"
@@ -1841,8 +1841,7 @@ end
 """
     get_unused_symbols(model::Model)
 
-    Returns a dictionary with vectors of the unused variables, shocks, and parameters.
-
+Returns a dictionary with vectors of the unused variables, shocks, and parameters.
 """
 function get_unused_symbols(model::Model)
     eqmap = equation_map(model)
