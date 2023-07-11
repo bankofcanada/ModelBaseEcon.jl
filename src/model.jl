@@ -838,16 +838,12 @@ macro equations(model, block::Expr)
     return esc(ret)
 end
 
-function changeequations!(eqns::OrderedDict{Symbol,Equation}, p::Pair{Symbol,Expr})
-    sym, e = p
+function changeequations!(eqns::OrderedDict{Symbol,Equation}, (sym, e)::Pair{Symbol,Expr})
     if sym == :_unnamed_equation_
-        eqn_name = get_next_equation_name(eqns)
-        push!(eqns, eqn_name => Equation(e))
-    elseif sym ∈ keys(eqns)
-        eqns[sym] = Equation(e)
-    else
-        push!(eqns, sym => Equation(e))
+        sym = get_next_equation_name(eqns)
     end
+    eqns[sym] = Equation(e)
+    return eqns
 end
 
 function process_new_equations!(model::Model, modelmodule::Module)
