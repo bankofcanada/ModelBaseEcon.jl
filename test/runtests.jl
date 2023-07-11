@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020-2022, Bank of Canada
+# Copyright (c) 2020-2023, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -728,7 +728,9 @@ end
             @log X[t] = rho * X[t-1] + EX[t]
         end
         @initialize m
-        @test length(m.equations) == 1 && islog(m.equations[:_EQ1])
+        eq = m.equations[:_EQ1]
+        @test length(m.equations) == 1 && islog(eq)
+        @test contains(sprint(show, eq), "=> @log X[t]")
     end
 end
 

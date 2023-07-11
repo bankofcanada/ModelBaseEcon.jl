@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020-2022, Bank of Canada
+# Copyright (c) 2020-2023, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -34,8 +34,9 @@ function Base.show(io::IO, eqn::AbstractEquation)
     end
 
     flagstr = ""
-    for f in fieldnames(typeof(flags))
-        if getfield(flags, f)
+    eqn_flags = flags(eqn)
+    for f in fieldnames(typeof(eqn_flags))
+        if getfield(eqn_flags, f)
             flagstr *= "@$(f) "
         end
     end
