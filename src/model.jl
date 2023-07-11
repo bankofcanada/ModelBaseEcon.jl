@@ -1610,19 +1610,19 @@ their keys. Only returns the vector if verbose is set to `false`.
 """
 function findequations(model::Model, sym::Symbol; verbose=true)
     eqmap = equation_map(model)
-    if sym ∉ keys(eqmap)
+    sym_eqs = get(eqmap, sym, Symbol[])
+    if isempty(sym_eqs)
         verbose && println("$sym not found in model.")
-        return Vector{Symbol}()
+        return sym_eqs
     end
-    sym_eqs = eqmap[sym]
 
     if verbose
         for val in sym_eqs
-            if val in keys(model.equations)
-                prettyprint_equation(model, model.equations[val]; target=sym, eq_symbols=Vector{Symbol}())
-            elseif val ∈ keys(model.sstate.constraints)
-                prettyprint_equation(model, model.sstate.constraints[val]; target=sym, eq_symbols=Vector{Symbol}())
+            eqn = get(model.equations, val, nothing)
+            if isnothing(eqn)
+                eqn = model.sstate.constraints[val]
             end
+            prettyprint_equation(model, eqn; target=sym)
         end
     end
     return sym_eqs
@@ -1639,6 +1639,7 @@ function get_main_equation(model::Model, var::Symbol)
     return nothing
 end
 export get_main_equation
+
 """
     prettyprint_equation(m::Model, eq::Equation; target::Symbol, eq_symbols::Vector{Any}=[])
     
@@ -1650,7 +1651,7 @@ export get_main_equation
       * `target`::Symbol - if provided, the specified symbol will be presented in bright green.
       * `eq_symbols`::Vector{Any} - a vector of symbols present in the equation. Can slightly speed up processing if provided.
 """
-function prettyprint_equation(m::Model, eq::Union{Equation,SteadyStateEquation}; target::Symbol=nothing, eq_symbols::Vector{Symbol} = [])
+function prettyprint_equation(m::Model, eq::Union{Equation,SteadyStateEquation}; target::Symbol=nothing, eq_symbols::Vector{Symbol} = Symbol[])
     target_color = "#f4C095"
     var_color = "#1D7874"
     shock_color = "#EE2E31"
@@ -1659,22 +1660,17 @@ function prettyprint_equation(m::Model, eq::Union{Equation,SteadyStateEquation};
         eq_symbols = equation_symbols(eq)
     end
     sort!(eq_symbols, by=symbol_length, rev=true)
-    eq_str = ":$(eq.name) => $eq"
+    eq_str = sprint(show, eq)
 
     for sym in eq_symbols
         if (sym == target)
-            eq_str = replace(eq_str, Regex("([^_a-zA-Z])($sym)([^_a-zA-Z])") => s"""\1|||crayon"#f4C095 bold"|||\2|||crayon"default !bold"|||\3""")
-            eq_str = replace(eq_str, Regex("([^_a-zA-Z])($sym)\$") => s"""\1|||crayon"#f4C095 bold"|||\2|||crayon"default !bold"|||""")
+            eq_str = replace(eq_str, Regex("(\\W)($sym)(\\W|\$)") => s"""\1|||crayon"#f4C095 bold"|||\2|||crayon"default !bold"|||\3""")
         elseif (sym in variables(m))
-            eq_str = replace(eq_str, Regex("([^_a-zA-Z])($sym)([^_a-zA-Z])") => s"""\1|||crayon"#1D7874"|||\2|||crayon"default"|||\3""")
-            eq_str = replace(eq_str, Regex("([^_a-zA-Z])($sym)\$") => s"""\1|||crayon"#1D7874"|||\2|||crayon"default"|||""")
+            eq_str = replace(eq_str, Regex("(\\W)($sym)(\\W|\$)") => s"""\1|||crayon"#1D7874"|||\2|||crayon"default"|||\3""")
         elseif (sym in shocks(m))
-            eq_str = replace(eq_str, Regex("([^_a-zA-Z])($sym)([^_a-zA-Z])") => s"""\1|||crayon"#EE2E31"|||\2|||crayon"default"|||\3""")
-            eq_str = replace(eq_str, Regex("([^_a-zA-Z])($sym)\$") => s"""\1|||crayon"#EE2E31"|||\2|||crayon"default"|||""")
+            eq_str = replace(eq_str, Regex("(\\W)($sym)(\\W|\$)") => s"""\1|||crayon"#EE2E31"|||\2|||crayon"default"|||\3""")
         else
-            eq_str = replace(eq_str, Regex("([^_a-zA-Z])($sym)([^_a-zA-Z])") => s"""\1|||crayon"#91C7B1"|||\2|||crayon"default"|||\3""")
-            eq_str = replace(eq_str, Regex("([^_a-zA-Z])($sym)\$") => s"""\1|||crayon"#91C7B1"|||\2|||crayon"default"|||""")
-            
+            eq_str = replace(eq_str, Regex("(\\W)($sym)(\\W|\$)") => s"""\1|||crayon"#91C7B1"|||\2|||crayon"default"|||\3""")
         end
     end
     print_array = Vector{Any}()
@@ -1693,25 +1689,27 @@ end
 """
     find_symbols!(dest::Vector, v::Vector{Any})
     
-    Take a vector of equation arguments and add the non-mathematical ones to the destination vector. 
+Take a vector of equation arguments and add the non-mathematical ones to the
+destination vector.
 """
 function find_symbols!(dest::Vector{Symbol}, v::Vector{Any})
     for el in v
         if el isa Expr
             find_symbols!(dest, el.args)  
-        elseif el isa Symbol && !(el in [:+, :-, :*, :/, :^, :max, :min, :t]) && !(el in dest)
+        elseif el isa Symbol && !(el in [:+, :-, :*, :/, :^, :max, :min, :t, :log, :exp]) && !(el in dest)
             push!(dest, el) 
         end
     end
 end
 
-symbol_length(sym::Symbol) = length("$sym")
+symbol_length(sym::Symbol) = length(string(sym))
 
 
 """
     equation_symbols(e::Equation)
     
-    The a vector of symbols of the non-mathematical arguments in the provided equation. 
+The a vector of symbols of the non-mathematical arguments in the provided
+equation.
 """
 function equation_symbols(e::Union{Equation,SteadyStateEquation})
     vars = Vector{Symbol}()
@@ -1724,8 +1722,8 @@ export findequations
 """
     equation_map(e::Model)
     
-    Returns a dictionary with the keys beign the symbols used in the models equations 
-    and the values being a vector of equation keys for equations which use these symbols. 
+Returns a dictionary with the keys being the symbols used in the models equations 
+and the values being a vector of equation keys for equations which use these symbols. 
 """
 function equation_map(m::Model)
     eqmap = Dict{Symbol, Any}()
