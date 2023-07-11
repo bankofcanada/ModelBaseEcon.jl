@@ -1453,7 +1453,7 @@ m2_for_sattelite_tests = nothing
     @test length(findequations(m, :cr; verbose=false)) == 1
     @test length(findequations(m, :pinf; verbose=false)) == 3
 
-    @test get_main_equation(m, :rate) == :_EQ2
+    @test find_main_equation(m, :rate) == :_EQ2
 
     @test findequations(S1.model, :a; verbose=false) == [:_EQ1, :_SSEQ1]
 
