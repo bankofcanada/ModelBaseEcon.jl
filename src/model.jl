@@ -1604,7 +1604,7 @@ end
 Prints the equations which use the the given symbol in the provided model and returns a vector with
 their keys. Only returns the vector if verbose is set to `false`.
 """
-function findequations(model::Model, sym::Symbol; verbose=true)
+function findequations(model::Model, sym::Symbol; verbose=true, light=false)
     eqmap = equation_map(model)
     sym_eqs = get(eqmap, sym, Symbol[])
     if isempty(sym_eqs)
@@ -1618,7 +1618,7 @@ function findequations(model::Model, sym::Symbol; verbose=true)
             if isnothing(eqn)
                 eqn = model.sstate.constraints[val]
             end
-            prettyprint_equation(model, eqn; target=sym)
+            prettyprint_equation(model, eqn; target=sym, light=light)
         end
     end
     return sym_eqs
@@ -1653,11 +1653,21 @@ Print the provided equation with the variables colored according to their type.
     * `target`::Symbol - if provided, the specified symbol will be presented in bright green.
     * `eq_symbols`::Vector{Any} - a vector of symbols present in the equation. Can slightly speed up processing if provided.
 """
-function prettyprint_equation(m::Model, eq::Union{Equation,SteadyStateEquation}; target::Symbol=nothing, eq_symbols::Vector{Symbol} = Symbol[])
-    target_color = "#f4C095"
-    var_color = "#1D7874"
-    shock_color = "#EE2E31"
-    param_color = "#91C7B1"
+function prettyprint_equation(m::Model, eq::Union{Equation,SteadyStateEquation}; target::Symbol=nothing, eq_symbols::Vector{Symbol} = Symbol[], light::Bool=false)
+    colors = [
+        "#pp_target_color" => "#f4C095",
+        "#pp_var_color" => "#1D7874",
+        "#pp_shock_color" => "#EE2E31",
+        "#pp_param_color" => "#91C7B1",
+    ]
+    if light
+        colors = [
+            "#pp_target_color" => "#FF00FF",
+            "#pp_var_color" => "#0096FF",
+            "#pp_shock_color" => "#EE2E31",
+            "#pp_param_color" => "#89CFF0",
+        ]
+    end
     if length(eq_symbols) == 0
         eq_symbols = equation_symbols(eq)
     end
@@ -1666,15 +1676,20 @@ function prettyprint_equation(m::Model, eq::Union{Equation,SteadyStateEquation};
 
     for sym in eq_symbols
         if (sym == target)
-            eq_str = replace(eq_str, Regex("(\\W)($sym)(\\W|\$)") => s"""\1|||crayon"#f4C095 bold"|||\2|||crayon"default !bold"|||\3""")
+            eq_str = replace(eq_str, Regex("(\\W)($sym)(\\W|\$)") => s"""\1|||crayon"#pp_target_color bold"|||\2|||crayon"default !bold"|||\3""")
         elseif (sym in variables(m))
-            eq_str = replace(eq_str, Regex("(\\W)($sym)(\\W|\$)") => s"""\1|||crayon"#1D7874"|||\2|||crayon"default"|||\3""")
+            eq_str = replace(eq_str, Regex("(\\W)($sym)(\\W|\$)") => s"""\1|||crayon"#pp_var_color"|||\2|||crayon"default"|||\3""")
         elseif (sym in shocks(m))
-            eq_str = replace(eq_str, Regex("(\\W)($sym)(\\W|\$)") => s"""\1|||crayon"#EE2E31"|||\2|||crayon"default"|||\3""")
+            eq_str = replace(eq_str, Regex("(\\W)($sym)(\\W|\$)") => s"""\1|||crayon"#pp_shock_color"|||\2|||crayon"default"|||\3""")
         else
-            eq_str = replace(eq_str, Regex("(\\W)($sym)(\\W|\$)") => s"""\1|||crayon"#91C7B1"|||\2|||crayon"default"|||\3""")
+            eq_str = replace(eq_str, Regex("(\\W)($sym)(\\W|\$)") => s"""\1|||crayon"#pp_param_color"|||\2|||crayon"default"|||\3""")
         end
     end
+
+    for p in colors
+        eq_str = replace(eq_str, p)
+    end
+    
     print_array = Vector{Any}()
     for part in split(eq_str, "|||")
         cray = findfirst("crayon", part)
