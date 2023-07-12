@@ -38,6 +38,9 @@ Return the hint message - a suggestion of how the problem might be fixed.
 """
 hint(::ModelErrorBase) = ""
 
+# d.vals[i] would be faster, but uses an internal property of OrderedCollections
+Base.get(d::Union{OrderedDict,LittleDict}, i::Integer) = d[first(Iterators.drop(keys(d), i-1))]
+
 function Base.showerror(io::IO, me::ME) where {ME<:ModelErrorBase}
     # MEstr = split("$(ME)", ".")[end]
     # println(io, MEstr, ": ", msg(me))

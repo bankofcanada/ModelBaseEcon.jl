@@ -20,6 +20,7 @@ using SparseArrays
 using DiffResults
 using ForwardDiff
 using Printf
+using Crayons
 
 # Note: The full type specification for `LittleDict` has 4 parameters.
 # Specifying only the first two in a struct as:

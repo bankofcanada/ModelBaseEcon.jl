@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020-2022, Bank of Canada
+# Copyright (c) 2020-2023, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -27,18 +27,25 @@ doc(eqn::AbstractEquation) = :doc in fieldnames(typeof(eqn)) ? getfield(eqn, :do
 
 #
 function Base.show(io::IO, eqn::AbstractEquation)
+    keystr = ""
+    namestr = string(eqn.name)
+    if !get(io, :compact, false)
+        keystr = ":$(namestr) => "
+    end
+
     flagstr = ""
-    flgs = flags(eqn)
-    for f in fieldnames(typeof(flgs))
-        if getfield(flgs, f)
+    eqn_flags = flags(eqn)
+    for f in fieldnames(typeof(eqn_flags))
+        if getfield(eqn_flags, f)
             flagstr *= "@$(f) "
         end
     end
+
     docstr = ""
     if !isempty(doc(eqn)) && !get(io, :compact, false)
-        docstr = "\"$(doc(eqn))\" "
+        docstr = "\"$(doc(eqn))\"\n"
     end
-    print(io, docstr, flagstr, expr(eqn))
+    print(io, docstr, keystr, flagstr, expr(eqn))
 end
 
 Base.:(==)(e1::AbstractEquation, e2::AbstractEquation) = flags(e1) == flags(e2) && expr(e1) == expr(e2)
@@ -96,5 +103,5 @@ function moduleof(m::AbstractModel)
     if isempty(eqns)
         error("Unable to determine the module containing the given model. Try adding equations to it and call `@initialize`.")
     end
-    return moduleof(first(eqns))
+    return moduleof(first(eqns)[2])
 end

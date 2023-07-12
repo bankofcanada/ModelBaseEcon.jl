@@ -46,4 +46,6 @@ end
 @steadystate model linv = lc - 7;
 @steadystate model lc = 14;
 
+newmodel() = deepcopy(model)
+
 end

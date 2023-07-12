@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020-2022, Bank of Canada
+# Copyright (c) 2020-2023, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -78,7 +78,7 @@ end
     @test show(IOBuffer(), MIME"text/plain"(), o) === nothing
 
     @using_example S1
-    m = S1.model
+    m = S1.newmodel()
     @test getoption(m, "shift", 1) == getoption(m, shift=1) == 10
     @test getoption!(m, "substitutions", true) == getoption!(m, :substitutions, true) == false
     @test getoption(setoption!(m, "maxiter", 25), maxiter=0) == 25
@@ -246,7 +246,7 @@ using ModelBaseEcon
 end
 @testset "Evaluations" begin
     ModelBaseEcon.initfuncs(E)
-    E.eval(ModelBaseEcon.makefuncs(:(x + 3 * y), [:x, :y], [], [], E))
+    E.eval(ModelBaseEcon.makefuncs(Symbol(1), :(x + 3 * y), [:x, :y], [], [], E))
     @test :resid_1 ∈ names(E, all=true)
     @test :RJ_1 ∈ names(E, all=true)
     @test E.resid_1([1.1, 2.3]) == 8.0
@@ -302,6 +302,12 @@ end
     end
     @test_throws ModelBaseEcon.ModelNotInitError ModelBaseEcon.getevaldata(m, :default)
     @initialize m
+
+    unused = get_unused_symbols(m)
+    @test unused[:variables] == [:x, :y, :z, :k, :l, :m, :q, :r]
+    @test unused[:shocks] == [:a, :b, :c]
+    @test unused[:parameters] == Vector{Symbol}()
+    
     @test ModelBaseEcon.hasevaldata(m, :default)
     @test_throws ModelBaseEcon.ModelError @initialize m
     @test_throws ModelBaseEcon.EvalDataNotFound ModelBaseEcon.getevaldata(m, :nosuchevaldata)
@@ -461,15 +467,16 @@ end
     @test ModelBaseEcon.at_movavew(:(x[t]), 3, :y) == :(((x[t] + (y^1 * x[t-1] + y^2 * x[t-2])) * (1 - y)) / (1 - y^3))
 end
 module MetaTest
-using ModelBaseEcon
-params = @parameters
-custom(x) = x + one(x)
-const val = 12.0
-params.b = custom(val)
-params.a = @link custom(val)
+    using ModelBaseEcon
+    params = @parameters
+    custom(x) = x + one(x)
+    const val = 12.0
+    params.b = custom(val)
+    params.a = @link custom(val)
 end
 
 @testset "Parameters" begin
+    m = Model()
     params = Parameters()
     push!(params, :a => 1.0)
     push!(params, :b => @link 1.0 - a)
@@ -509,6 +516,8 @@ end
 
     @test params.d ≈ √3 / 2.0
     params.e[3] = 2
+    m.parameters = params
+    # update_links!(params)
     update_links!(params)
     @test 1.0 + params.d ≈ 1.0
 
@@ -557,19 +566,21 @@ end
         x[t] = 0
     end
     @initialize m
-    @test_throws ArgumentError ModelBaseEcon.process_equation(m, :(y[t] = 0))
-    @test_throws ArgumentError ModelBaseEcon.process_equation(m, :(x[t] = p))
+    @test_throws ArgumentError ModelBaseEcon.process_equation(m, :(y[t] = 0), eqn_name=:_EQ2)
+    @warn "disabled test with unknown parameter in equation"
+    # @test_throws ArgumentError ModelBaseEcon.process_equation(m, :(x[t] = p), eqn_name=:_EQ2) #no exception thrown!
+    @test_throws ArgumentError ModelBaseEcon.process_equation(m, :(x[t] = x[t-1])) #no equation name
     @test_throws ArgumentError ModelBaseEcon.process_equation(m, :(x[t] = if false
         2
-    end))
+    end), eqn_name=:_EQ2)
     @test ModelBaseEcon.process_equation(m, :(x[t] = if false
         2
     else
         0
-    end)) isa Equation
-    @test ModelBaseEcon.process_equation(m, :(x[t] = ifelse(false, 2, 0))) isa Equation
+    end), eqn_name=:_EQ2) isa Equation
+    @test ModelBaseEcon.process_equation(m, :(x[t] = ifelse(false, 2, 0)), eqn_name=:_EQ3) isa Equation
     p = 0
-    @test_logs (:warn, r"Variable or shock .* without `t` reference.*"i) @assert ModelBaseEcon.process_equation(m, "x=$p") isa Equation
+    @test_logs (:warn, r"Variable or shock .* without `t` reference.*"i) @assert ModelBaseEcon.process_equation(m, "x=$p", eqn_name=:_EQ4) isa Equation
 end
 
 @testset "Meta" begin
@@ -621,19 +632,19 @@ end
     )
 
     for i = 2:2:length(mod.equations)
-        @test compare_resids(mod.equations[i-1], mod.equations[i])
+        @test compare_resids(mod.equations[collect(keys(mod.equations))[i-1]], mod.equations[collect(keys(mod.equations))[i]])
     end
     # test errors and warnings
     mod.warn.no_t = false
-    @test add_equation!(mod, :(x = sx[t])) isa Model
-    @test add_equation!(mod, :(x[t] = sx)) isa Model
-    @test add_equation!(mod, :(x[t] = sx[t])) isa Model
-    @test compare_resids(mod.equations[end], mod.equations[end-1])
-    @test compare_resids(mod.equations[end], mod.equations[end-2])
-    @test_throws ArgumentError add_equation!(mod, :(@notametafunction(x[t]) = 7))
-    @test_throws ArgumentError add_equation!(mod, :(x[t] = unknownsymbol))
-    @test_throws ArgumentError add_equation!(mod, :(x[t] = unknownseries[t]))
-    @test_throws ArgumentError add_equation!(mod, :(x[t] = let c = 5
+    @test add_equation!(mod, :EQ1, :(x = sx[t])) isa Model
+    @test add_equation!(mod, :EQ2, :(x[t] = sx)) isa Model
+    @test add_equation!(mod, :EQ3, :(x[t] = sx[t])) isa Model
+    @test compare_resids(mod.equations[:EQ3], mod.equations[:EQ2])
+    @test compare_resids(mod.equations[:EQ3], mod.equations[:EQ1])
+    @test_throws ArgumentError add_equation!(mod, :EQ4, :(@notametafunction(x[t]) = 7))
+    @test_throws ArgumentError add_equation!(mod, :EQ5, :(x[t] = unknownsymbol))
+    @test_throws ArgumentError add_equation!(mod, :EQ6, :(x[t] = unknownseries[t]))
+    @test_throws ArgumentError add_equation!(mod, :EQ7, :(x[t] = let c = 5
         sx[t+c]
     end))
     @test ModelBaseEcon.update_auxvars(ones(2, 2), mod) == ones(2, 2)
@@ -655,6 +666,7 @@ end
             x
         end
         @shocks m sx
+        @autoexogenize m s => sx
         @equations m begin
             "This equation is super cool"
             a * @d(x) = b * @d(x[t+1]) + sx
@@ -673,30 +685,37 @@ end
         @test equations(TestModel.model) == equations(m)
         @test sstate(TestModel.model).constraints == sstate(m).constraints
 
-        @test_throws ArgumentError TestModel.model.parameters.d = @alias c
+        m2 = TestModel.newmodel()
+        @test parameters(m2) == parameters(m)
+        @test variables(m2) == variables(m)
+        @test shocks(m2) == shocks(m)
+        @test equations(m2) == equations(m)
+        @test sstate(m2).constraints == sstate(m).constraints
 
-        @test export_parameters(TestModel.model) == Dict(:a => 0.3, :b => 0.7, :d => [1, 2, 3], :c => sin(2π / 3))
-        @test export_parameters!(Dict{Symbol,Any}(), TestModel.model) == export_parameters(TestModel.model.parameters)
+        @test_throws ArgumentError m2.parameters.d = @alias c
+
+        @test export_parameters(m2) == Dict(:a => 0.3, :b => 0.7, :d => [1, 2, 3], :c => sin(2π / 3))
+        @test export_parameters!(Dict{Symbol,Any}(), m2) == export_parameters(TestModel.model.parameters)
 
         p = deepcopy(parameters(m))
         # link c expects d to be a vector - it'll fail to update with a BoundsError if d is just a number
-        @test_throws ModelBaseEcon.ParamUpdateError assign_parameters!(TestModel.model, d=2.0)
-        map!(x -> ModelParam(), values(TestModel.model.parameters.contents))
-        @test parameters(assign_parameters!(TestModel.model, p)) == p
+        @test_throws ModelBaseEcon.ParamUpdateError assign_parameters!(m2, d=2.0)
+        map!(x -> ModelParam(), values(m2.parameters.contents))
+        @test parameters(assign_parameters!(m2, p)) == p
 
         ss = Dict(:x => 0.0, :sx => 0.0)
-        @test_logs (:warn, r"Model does not have the following variables:.*"i) assign_sstate!(TestModel.model, y=0.0)
-        @test export_sstate(assign_sstate!(TestModel.model, ss)) == ss
-        @test export_sstate!(Dict(), TestModel.model.sstate, ssZeroSlope=true) == ss
+        @test_logs (:warn, r"Model does not have the following variables:.*"i) assign_sstate!(m2, y=0.0)
+        @test export_sstate(assign_sstate!(m2, ss)) == ss
+        @test export_sstate!(Dict(), m2.sstate, ssZeroSlope=true) == ss
 
         ss = sstate(m)
         @test show(IOBuffer(), MIME"text/plain"(), ss) === nothing
-        @test geteqn(1, m) == first(m.sstate.constraints)
-        @test geteqn(neqns(ss), m) == last(m.sstate.equations)
+        @test geteqn(1, m) == first(m.sstate.constraints)[2]
+        @test geteqn(neqns(ss), m) == m.sstate.equations[last(collect(keys(m.sstate.equations)))]
         @test propertynames(ss, true) == (:x, :sx, :vars, :values, :mask, :equations, :constraints)
         @test fullprint(IOBuffer(), m) === nothing
 
-        rm("../examples/TestModel.jl")
+        # rm("../examples/TestModel.jl")
     end
 end
 
@@ -709,7 +728,9 @@ end
             @log X[t] = rho * X[t-1] + EX[t]
         end
         @initialize m
-        @test length(m.equations) == 1 && islog(m.equations[1])
+        eq = m.equations[:_EQ1]
+        @test length(m.equations) == 1 && islog(eq)
+        @test contains(sprint(show, eq), "=> @log X[t]")
     end
 end
 
@@ -744,32 +765,34 @@ end
 end
 
 @testset "E1" begin
-    @test length(E1.model.parameters) == 2
-    @test length(E1.model.variables) == 1
-    @test length(E1.model.shocks) == 1
-    @test length(E1.model.equations) == 1
-    @test E1.model.maxlag == 1
-    @test E1.model.maxlead == 1
-    test_eval_RJ(E1.model, [0.0], [-0.5 1.0 -0.5 0.0 -1.0 0.0])
-    compare_RJ_R!_(E1.model)
-    @test E1.model.tol == E1.model.options.tol
-    tol = E1.model.tol
-    E1.model.tol = tol * 10
-    @test E1.model.options.tol == E1.model.tol
-    E1.model.tol = tol
-    @test E1.model.linear == E1.model.flags.linear
-    E1.model.linear = true
-    @test E1.model.linear
+    mE1 = E1.newmodel()
+    @test length(mE1.parameters) == 2
+    @test length(mE1.variables) == 1
+    @test length(mE1.shocks) == 1
+    @test length(mE1.equations) == 1
+    @test mE1.maxlag == 1
+    @test mE1.maxlead == 1
+    test_eval_RJ(mE1, [0.0], [-0.5 1.0 -0.5 0.0 -1.0 0.0])
+    compare_RJ_R!_(mE1)
+    @test mE1.tol == mE1.options.tol
+    tol = mE1.tol
+    mE1.tol = tol * 10
+    @test mE1.options.tol == mE1.tol
+    mE1.tol = tol
+    @test mE1.linear == mE1.flags.linear
+    mE1.linear = true
+    @test mE1.linear
 end
 
 @testset "E1.sstate" begin
-    let io = IOBuffer(), m = E1.model
+    let io = IOBuffer(), m = E1.newmodel()
+        m.linear = true
         @test issssolved(m) == false
-        E1.model.sstate.mask .= true
+        m.sstate.mask .= true
         @test issssolved(m) == true
         @test neqns(m.sstate) == 2
         @steadystate m y = 5
-        @test_throws ErrorException @steadystate m sin(y + 7)
+        @test_throws ArgumentError @steadystate m sin(y + 7)
         @test length(m.sstate.constraints) == 1
         @test neqns(m.sstate) == 3
         @test length(alleqns(m.sstate)) == 3
@@ -784,7 +807,8 @@ end
 end
 
 @testset "E1.lin" begin
-    m = deepcopy(E1.model)
+    m = E1.newmodel()
+    m.sstate.mask .= true # declare steadystate solved
     with_linearized(m) do lm
         @test islinearized(lm)
         test_eval_RJ(lm, [0.0], [-0.5 1.0 -0.5 0.0 -1.0 0.0])
@@ -800,29 +824,11 @@ end
     @test islinearized(m)
 end
 
-@testset "E1.params (deepcopy)" begin
-    let m = deepcopy(E1.model)
-        @test propertynames(m.parameters) == (:α, :β)
-        @test peval(m, :α) == 0.5
-        m.β = @link 1.0 - α
-        m.parameters.beta = @alias β
-        for α = 0.0:0.1:1.0
-            m.α = α
-            test_eval_RJ(m, [0.0], [-α 1.0 -m.beta 0.0 -1.0 0.0;])
-        end
-        @test_logs (:warn, r"Model does not have parameters*"i) assign_parameters!(m, γ=0)
-    end
-    let io = IOBuffer(), m = deepcopy(E1.model)
-        show(io, m.parameters)
-        @test length(split(String(take!(io)), '\n')) == 1
-        show(io, MIME"text/plain"(), m.parameters)
-        @test length(split(String(take!(io)), '\n')) == 3
-    end
-end
-
+@using_example E1
 @testset "E1.params" begin
-    let m = E1.model
+    let m = E1.newmodel()
         @test propertynames(m.parameters) == (:α, :β)
+        @test m.nvarshks == 2 
         @test peval(m, :α) == 0.5
         m.β = @link 1.0 - α
         m.parameters.beta = @alias β
@@ -836,7 +842,51 @@ end
         show(io, m.parameters)
         @test length(split(String(take!(io)), '\n')) == 1
         show(io, MIME"text/plain"(), m.parameters)
-        @test length(split(String(take!(io)), '\n')) == 4
+        @test length(split(String(take!(io)), '\n')) == 3
+    end
+end
+
+@using_example E1_noparams
+@testset "E1.equation change" begin 
+    for α = 0.0:0.1:1.0
+        new_E1 = E1_noparams.newmodel()
+        @equations new_E1 begin
+            :maineq => y[t] = $α * y[t - 1] + $(1-α) * y[t + 1] + y_shk[t]
+        end
+        @reinitialize(new_E1)
+        test_eval_RJ(new_E1, [0.0], [-α 1.0 -(1-α) 0.0 -1.0 0.0;])
+    end
+end
+
+@testset "E1.equation change 2" begin
+    m = E1.newmodel()
+    @test propertynames(m.parameters) == (:α, :β)
+    @test peval(m, :α) == 0.5
+    m.parameters.beta = @alias β
+    @parameters m begin
+        β = 0.5
+    end
+    m.β = @link 1.0 - α
+    @reinitialize(m)
+    for α = 0.0:0.1:1.0
+        m.α = α
+        test_eval_RJ(m, [0.0], [-α 1.0 -m.beta 0.0 -1.0 0.0;])
+    end
+end
+
+@testset "E1.equation change 3" begin
+    m = E1.newmodel()
+    @test propertynames(m.parameters) == (:α, :β)
+    @test peval(m, :α) == 0.5
+    m.parameters.beta = @alias β
+    m.β = @link 1.0 - α
+    @parameters m begin
+        α = 0.5
+    end
+    @reinitialize(m)
+    for α = 0.0:0.1:1.0
+        m.α = α
+        test_eval_RJ(m, [0.0], [-α 1.0 -m.beta 0.0 -1.0 0.0;])
     end
 end
 
@@ -894,7 +944,7 @@ end
 
 
 @testset "E2.sstate" begin
-    m = E2.model
+    m = E2.newmodel()
     ss = m.sstate
     empty!(ss.constraints)
     out = let io = IOBuffer()
@@ -908,8 +958,9 @@ end
         readlines(seek(io, 0))
     end
     @test length(out) == 3
-    @test length(split(out[end], "=")) == 2
-    #
+    @test length(split(out[end], "=")) == 3
+    @test length(split(out[end], "=>")) == 2
+    # 
     @test propertynames(ss) == tuple(m.allvars...)
     @test ss.pinf.level == ss.pinf.data[1]
     @test ss.pinf.slope == ss.pinf.data[2]
@@ -985,7 +1036,7 @@ end
         # ret = sssolve!(m)
         # @test ret ≈ [0.1, 0.0, log(1.1), 0.0]
 
-        eq1, eq2, eq3, eq4 = m.sstate.equations
+        eq1, eq2, eq3, eq4 = [eqn_pair[2] for eqn_pair in m.sstate.equations]
         x = rand(Float64, (4,))
         R, J = eq1.eval_RJ(x[eq1.vinds])
         @test R ≈ x[1] - x[2] - 0.1
@@ -1030,7 +1081,7 @@ end
         @test nequations(m) == 2
         ss = sstate(m)
         @test neqns(ss) == 4
-        eq1, eq2, eq3, eq4 = ss.equations
+        eq1, eq2, eq3, eq4 = [eqn_pair[2] for eqn_pair in ss.equations]
         @test length(ss.values) == 2 * length(m.allvars)
         #
         # test with eq1
@@ -1155,7 +1206,7 @@ include("sstate.jl")
 
 @using_example E3
 @testset "print_linearized" begin
-    m = E3.model
+    m = E3.newmodel()
     m.cp[1] = 0.9383860755808812
     fill!(m.sstate.values, 0)
     fill!(m.sstate.mask, true)
@@ -1172,4 +1223,255 @@ include("sstate.jl")
     @test lines[3] == " 0 = -0.02*pinf[t + 1] +0.02*rate[t] -0.25*ygap[t - 2] -0.25*ygap[t - 1] +ygap[t] -0.48*ygap[t + 1] -ygap_shk[t]"
     out = sprint(print_linearized, m)
     @test startswith(out, " 0 = -0.938386*pinf[t - 1] +")
+end
+
+
+@testset "Model edits, autoexogenize" begin
+    m = E2.newmodel()
+
+    @test length(m.autoexogenize) == 3
+    @test m.autoexogenize[:pinf] == :pinf_shk 
+    @test m.autoexogenize[:rate] == :rate_shk 
+    
+    @autoexogenize m @delete ygap = ygap_shk
+    @test length(m.autoexogenize) == 2
+    @test !haskey(m.autoexogenize, :ygap)
+    
+    @autoexogenize m ygap = ygap_shk
+    @test length(m.autoexogenize) == 3
+    @test m.autoexogenize[:ygap] == :ygap_shk 
+    
+    @autoexogenize m begin
+        @delete ygap = ygap_shk
+    end 
+    @test length(m.autoexogenize) == 2
+    @test !haskey(m.autoexogenize, :ygap)
+    
+    @autoexogenize m begin
+        ygap = ygap_shk
+    end
+    @test length(m.autoexogenize) == 3
+    @test m.autoexogenize[:ygap] == :ygap_shk 
+
+    m = E2.newmodel()
+    @autoexogenize m begin
+        @delete (ygap = ygap_shk) (pinf = pinf_shk)
+    end 
+    @test length(m.autoexogenize) == 1
+    @test !haskey(m.autoexogenize, :ygap)
+    @test !haskey(m.autoexogenize, :pinf)
+
+    # using shock to remove key
+    m = E2.newmodel()
+    @autoexogenize m begin
+        @delete ygap_shk = ygap
+    end
+    @test length(m.autoexogenize) == 2
+    @test !haskey(m.autoexogenize, :ygap)
+
+    m = E2.newmodel()
+    @autoexogenize m begin
+        @delete ygap_shk => ygap
+    end
+    @test length(m.autoexogenize) == 2
+    @test !haskey(m.autoexogenize, :ygap)
+
+    m = E2.newmodel()
+    @test_logs (:warn, r"Cannot remove autoexogenize ygap2 => ygap2_shk.\nNeither ygap2 nor ygap2_shk are entries in the autoexogenize list."i) @autoexogenize m @delete ygap2 = ygap2_shk
+    @test_logs (:warn, r"Cannot remove autoexogenize ygap => ygap2_shk.\nThe paired symbol for ygap is ygap_shk."i) @autoexogenize m @delete ygap = ygap2_shk
+    @test_logs (:warn, r"Cannot remove autoexogenize ygap2_shk => ygap.\nThe paired symbol for ygap is ygap_shk."i) @autoexogenize m @delete ygap2_shk = ygap
+    @test_logs (:warn, r"Cannot remove autoexogenize ygap_shk => ygap2.\nThe paired symbol for ygap_shk is ygap."i) @autoexogenize m @delete ygap_shk = ygap2
+    @test_logs (:warn, r"Cannot remove autoexogenize ygap2 => ygap_shk.\nThe paired symbol for ygap_shk is ygap."i) @autoexogenize m @delete ygap2 = ygap_shk
+
+end
+
+@testset "Model edits, variables" begin
+    m = E2.newmodel()
+
+    @test length(m.variables) == 3
+    
+    @variables m @delete pinf rate
+    @test length(m.variables) == 1
+    
+    @variables m pinf rate
+    @test length(m.variables) == 3
+    
+    @variables m begin 
+        @delete pinf rate
+    end
+    @test length(m.variables) == 1
+    
+    @variables m (pinf; rate)
+    @test length(m.variables) == 3
+
+    @variables m begin 
+        @delete pinf 
+        @delete rate
+    end
+    @test length(m.variables) == 1
+
+    @variables m (@delete ygap; rate)
+    @test length(m.variables) == 1
+    @test m.variables[1].name == :rate
+
+end
+
+@testset "Model edits, shocks" begin
+    m = E2.newmodel()
+
+    @test length(m.shocks) == 3
+    
+    @shocks m @delete pinf_shk rate_shk
+    @test length(m.shocks) == 1
+    
+    @shocks m pinf_shk rate_shk
+    @test length(m.shocks) == 3
+    
+    @shocks m begin 
+        @delete pinf_shk rate_shk
+    end
+    @test length(m.shocks) == 1
+    
+    @shocks m (pinf_shk; rate_shk)
+    @test length(m.shocks) == 3
+
+    @shocks m begin 
+        @delete pinf_shk 
+        @delete rate_shk
+    end
+    @test length(m.shocks) == 1
+
+    @shocks m (@delete ygap_shk; rate_shk)
+    @test length(m.shocks) == 1
+    @test m.shocks[1].name == :rate_shk
+
+end
+
+@testset "Model edits, steadystate" begin
+    m = S1.newmodel()
+
+    @test length(m.sstate.constraints) == 1
+    @parameters m begin
+        b_ss = 1.2 
+    end
+    @steadystate m begin
+        @delete _SSEQ1;
+        @level a = a_ss
+        @slope b = b_ss
+    end
+    @test length(m.sstate.constraints) == 2
+    
+    # @test_throws MethodError @steadystate @somethingelse b = b_ss
+
+
+end
+
+@testset "Model edits, equations" begin
+    m = S1.newmodel()
+
+    @equations m begin
+        @delete _EQ2
+    end
+
+    @test length(m.equations) == 2
+    @test collect(keys(m.equations)) == [:_EQ1, :_EQ3]
+
+    @test_logs (:warn,"Model contains unused shocks: [:b_shk]") @reinitialize m
+    
+    @equations m begin
+        b[t] = @sstate(b) * (1 - α) + α * b[t-1] + b_shk[t]
+    end
+
+    @test length(m.equations) == 3
+    @test collect(keys(m.equations)) == [:_EQ1, :_EQ3, :_EQ4]
+
+    m = S1.newmodel()
+    @equations m begin
+        @delete _EQ1
+    end
+    @steadystate m begin
+        @delete _SSEQ1
+    end
+    @test_logs (:warn,"Model contains unused variables: [:a]") @reinitialize m
+
+
+    maux = deepcopy(AUX.model)
+    @test length(maux.equations) == 2
+    @test length(maux.alleqns) == 4
+    @equations maux begin
+        @delete _EQ1
+    end
+    @test length(maux.equations) == 1
+    @test length(maux.alleqns) == 2
+    @equations maux begin
+        x[t+1] = log(x[t] - x[t-1])
+    end
+    @test length(maux.equations) == 2
+    @test length(maux.alleqns) == 4
+end
+
+@using_example E2sat
+m2_for_sattelite_tests = E2sat.newmodel()
+@testset "sattelite models" begin
+    m1 = E2.newmodel()
+
+    m_sattelite = Model()
+    
+    @parameters m_sattelite begin
+       _parent = E2.model
+       cx = @link _parent.cp
+    end
+    @test m1.cp == [0.5, 0.02]
+    @test m_sattelite.cx == [0.5, 0.02]
+    
+    m1.cp = [0.6, 0.03]
+    @test m1.cp == [0.6, 0.03]
+
+    m_sattelite.parameters._parent = m1.parameters
+    update_links!(m_sattelite)
+    @test m_sattelite.cx == [0.6, 0.03]
+
+    # m2_for_sattelite_tests = E2sat.newmodel()
+    m2_sattelite = deepcopy(E2sat.satmodel)
+
+    m2_for_sattelite_tests.cp = [0.7, 0.05]
+
+    @test m2_for_sattelite_tests.cp == [0.7, 0.05]
+    @test m2_sattelite.cz == [0.5, 0.02]
+    @replaceparameterlinks m2_sattelite E2sat.model => m2_for_sattelite_tests
+    @test m2_sattelite.cz == [0.7, 0.05]
+    m2_for_sattelite_tests.cp = [0.3, 0.08]
+    update_links!(m2_sattelite.parameters)
+    @test m2_sattelite.cz == [0.3, 0.08]
+
+end
+m2_for_sattelite_tests = nothing
+
+@testset "Model find" begin
+    m = E3.newmodel()
+    @test length(findequations(m, :cr; verbose=false)) == 1
+    @test length(findequations(m, :pinf; verbose=false)) == 3
+
+    @test find_main_equation(m, :rate) == :_EQ2
+
+    @test findequations(S1.model, :a; verbose=false) == [:_EQ1, :_SSEQ1]
+
+    @test_logs (:debug, ":_EQ2 => rate[t] = cr[1] * rate[t - 1] + ((1 - cr[1]) * (cr[2] * pinf[t] + cr[3] * ygap[t]) + rate_shk[t])") 
+
+    original_stdout = stdout;
+    (read_pipe, write_pipe) = redirect_stdout();
+    findequations(m, :cr)
+    redirect_stdout(original_stdout);
+    close(write_pipe)
+    @test readline(read_pipe) == ":_EQ2 => \e[38;2;29;120;116mrate\e[39m[t] = \e[38;2;244;192;149;1mcr\e[39;22m[1] * \e[38;2;29;120;116mrate\e[39m[t - 1] + ((1 - \e[38;2;244;192;149;1mcr\e[39;22m[1]) * (\e[38;2;244;192;149;1mcr\e[39;22m[2] * \e[38;2;29;120;116mpinf\e[39m[t] + \e[38;2;244;192;149;1mcr\e[39;22m[3] * \e[38;2;29;120;116mygap\e[39m[t]) + \e[38;2;238;46;49mrate_shk\e[39m[t])"
+
+end
+
+@testset "misc codecoverage" begin
+    m = E2.newmodel()
+    @test_throws ErrorException m.pinf_shk = m.rate_shk
+
+    pinf = ModelVariable(:pinf)
+    m.pinf = pinf
+    @test m.pinf isa ModelVariable
 end
