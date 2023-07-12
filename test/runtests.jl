@@ -1449,13 +1449,21 @@ m2_for_sattelite_tests = nothing
 
 @testset "Model find" begin
     m = E3.newmodel()
-    findequations(m, :cr; verbose=false)
     @test length(findequations(m, :cr; verbose=false)) == 1
     @test length(findequations(m, :pinf; verbose=false)) == 3
 
     @test find_main_equation(m, :rate) == :_EQ2
 
     @test findequations(S1.model, :a; verbose=false) == [:_EQ1, :_SSEQ1]
+
+    @test_logs (:debug, ":_EQ2 => rate[t] = cr[1] * rate[t - 1] + ((1 - cr[1]) * (cr[2] * pinf[t] + cr[3] * ygap[t]) + rate_shk[t])") 
+
+    original_stdout = stdout;
+    (read_pipe, write_pipe) = redirect_stdout();
+    findequations(m, :cr)
+    redirect_stdout(original_stdout);
+    close(write_pipe)
+    @test readline(read_pipe) == ":_EQ2 => \e[38;2;29;120;116mrate\e[39m[t] = \e[38;2;244;192;149;1mcr\e[39;22m[1] * \e[38;2;29;120;116mrate\e[39m[t - 1] + ((1 - \e[38;2;244;192;149;1mcr\e[39;22m[1]) * (\e[38;2;244;192;149;1mcr\e[39;22m[2] * \e[38;2;29;120;116mpinf\e[39m[t] + \e[38;2;244;192;149;1mcr\e[39;22m[3] * \e[38;2;29;120;116mygap\e[39m[t]) + \e[38;2;238;46;49mrate_shk\e[39m[t])"
 
 end
 
