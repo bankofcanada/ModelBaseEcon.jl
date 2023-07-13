@@ -93,13 +93,13 @@ macro parameters()
 end
 
 # To deepcopy() Parameters, we make a new Ref to the same module and a deepcopy of contents.
-function Base.deepcopy_internal(p::Parameters, stackdict::IdDict) 
+function Base.deepcopy_internal(p::Parameters, stackdict::IdDict)
     if haskey(stackdict, p)
         return stackdict[p]::typeof(p)
     end
     p_copy = Parameters(
-        Ref(p.mod[]), 
-        Base.deepcopy_internal(p.contents, stackdict), 
+        Ref(p.mod[]),
+        Base.deepcopy_internal(p.contents, stackdict),
         Ref(p.rev[]),
     )
     stackdict[p] = p_copy
@@ -245,11 +245,19 @@ See also: [`Parameters`](@ref), [`@alias`](@ref), [`@link`](@ref),
 function peval end
 peval(::Parameters, val) = val
 peval(::Parameters, par::ModelParam) = par.value
-peval(params::Parameters, sym::Symbol) = haskey(params, sym) ? peval(params, params[sym]) : sym
+peval(params::Parameters, sym::Symbol) =
+    haskey(params, sym) ?
+    peval(params, params[sym]) :
+    try
+        Core.eval(params.mod[], sym)
+    catch
+        sym
+    end
+
 function peval(params::Parameters, expr::Expr)
     ret = Expr(expr.head)
     ret.args = [peval(params, a) for a in expr.args]
-    params.mod[].eval(ret)
+    Core.eval(params.mod[], ret)
 end
 peval(m::AbstractModel, what) = peval(parameters(m), what)
 
