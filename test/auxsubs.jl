@@ -41,8 +41,10 @@ end
 
 @initialize model 
 
+newmodel() = deepcopy(model)
+
 end"""))
-    m = ASUBS.model
+    m = ASUBS.newmodel()
     @test length(m.variables) == 3
     @test length(m.shocks) == 1
     @test length(m.equations) == 6
@@ -63,7 +65,8 @@ end"""))
     @test Set(m1.variables) == Set(vcat(m.variables, m.auxvars))
     @test m1.shocks == m.shocks
     @test isempty(m1.auxvars)
-    @test Set(m1.equations) == Set(m.alleqns)
+    m1_set = Set(values(m1.equations))
+    @test Set(values(m1.equations)) == Set(values(m.alleqns))
     @test isempty(m1.auxeqns)
 end
 

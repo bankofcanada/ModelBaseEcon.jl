@@ -29,4 +29,6 @@ end
 
 @initialize model
 
+newmodel() = deepcopy(model)
+
 end

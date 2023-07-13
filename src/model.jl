@@ -51,6 +51,9 @@ end
 Data structure that represents a macroeconomic model.
 """
 mutable struct Model <: AbstractModel
+    "State determines whether the model is ready to be solved/run. One of :new, :ready, :dev. 
+    Should not be directly manipulated."
+    _state::Symbol
     "Options are various hyper-parameters for tuning the algorithms"
     options::Options
     "Flags contain meta information about the type of model"
@@ -63,8 +66,8 @@ mutable struct Model <: AbstractModel
     # shock variables
     shocks::Vector{ModelVariable}
     # transition equations
-    equations::Vector{Equation}
-    # parameters
+    equations::OrderedDict{Symbol,Equation}
+    # parameters 
     parameters::Parameters
     # auto-exogenize mapping of variables and shocks
     autoexogenize::Dict{Symbol,Symbol}
@@ -74,18 +77,18 @@ mutable struct Model <: AbstractModel
     # auxiliary variables
     auxvars::Vector{ModelVariable}
     # auxiliary equations
-    auxeqns::Vector{Equation}
+    auxeqns::OrderedDict{Symbol,Equation}
     # data related to evaluating residuals and Jacobian of the model equations
     evaldata::LittleDictVec{Symbol,AbstractModelEvaluationData}
     # data slot to be used by the solver (in StateSpaceEcon)
     solverdata::LittleDictVec{Symbol,Any}
     #
     # constructor of an empty model
-    Model(opts::Options) = new(merge(defaultoptions, opts),
-        ModelFlags(), SteadyStateData(), false, [], [], [], Parameters(), Dict(), 0, 0, [], [],
+    Model(opts::Options) = new(:new, merge(defaultoptions, opts),
+        ModelFlags(), SteadyStateData(), false, [], [], OrderedDict{Symbol,Equation}(), Parameters(), Dict(), 0, 0, [], OrderedDict{Symbol,Equation}(),
         LittleDict{Symbol,AbstractModelEvaluationData}(), LittleDict{Symbol,Any}())
-    Model() = new(deepcopy(defaultoptions),
-        ModelFlags(), SteadyStateData(), false, [], [], [], Parameters(), Dict(), 0, 0, [], [],
+    Model() = new(:new, deepcopy(defaultoptions),
+        ModelFlags(), SteadyStateData(), false, [], [], OrderedDict{Symbol,Equation}(), Parameters(), Dict(), 0, 0, [], OrderedDict{Symbol,Equation}(),
         LittleDict{Symbol,AbstractModelEvaluationData}(), LittleDict{Symbol,Any}())
 end
 
@@ -96,7 +99,7 @@ nauxvars(model::Model) = length(auxvars(model))
 allvars(model::Model) = vcat(variables(model), shocks(model), auxvars(model))
 nallvars(model::Model) = length(variables(model)) + length(shocks(model)) + length(auxvars(model))
 
-alleqns(model::Model) = vcat(equations(model), getfield(model, :auxeqns))
+alleqns(model::Model) = OrderedDict{Symbol,Equation}(key => eqn for (key, eqn) in vcat(pairs(equations(model))..., pairs(getfield(model, :auxeqns))...))
 nalleqns(model::Model) = length(equations(model)) + length(getfield(model, :auxeqns))
 
 hasevaldata(model::Model, variant::Symbol) = haskey(model.evaldata, variant)
@@ -176,7 +179,7 @@ function Base.getproperty(model::Model, name::Symbol)
     elseif name == :nexog
         return sum(isexog, getfield(model, :variables))
     elseif name == :alleqns
-        return vcat(getfield(model, :equations), getfield(model, :auxeqns))
+        return OrderedDict{Symbol,Equation}(key => eqn for (key, eqn) in vcat(pairs(equations(model))..., pairs(getfield(model, :auxeqns))...))
     elseif haskey(getfield(model, :parameters), name)
         return getproperty(getfield(model, :parameters), name)
     elseif name ∈ getfield(model, :options)
@@ -273,7 +276,7 @@ function fullprint(io::IO, model::Model)
     nprm = length(model.parameters)
     neqn = length(model.equations)
     nvarshk = nvar + nshk
-    function print_things(io, things...; len=0, maxlen=40, last=false)
+    function print_things(io, things...; len=0, maxlen=displaysize(io)[2], last=false)
         s = sprint(print, things...; context=io, sizehint=0)
         print(io, s)
         len += length(s) + 2
@@ -309,10 +312,19 @@ function fullprint(io::IO, model::Model)
         else
             params = collect(model.parameters)
             for (k, v) in params[1:end-1]
-                len = print_things(io, k, " = ", v; len=len)
+                if typeof(v.value) <: Model || typeof(v.value) <: Parameters
+                    len = print_things(io, k, " = [ref. $(typeof(v.value))]"; len=len)
+                else
+                    len = print_things(io, k, " = ", v; len=len)
+                end
             end
             k, v = params[end]
-            len = print_things(io, k, " = ", v; len=len, last=true)
+            if typeof(v.value) <: Model || typeof(v.value) <: Parameters
+                len = print_things(io, k, " = [ref. $(typeof(v.value))]"; len=len, last=true)
+            else
+                len = print_things(io, k, " = ", v; len=len, last=true)
+            end
+            # len = print_things(io, k, " = ", v; len=len, last=true)
         end
     end
     print(io, length(model.equations), " equations(s)")
@@ -321,23 +333,20 @@ function fullprint(io::IO, model::Model)
     end
     print(io, ": \n")
     var_to_idx = get_var_to_idx(model)
-    function print_aux_eq(bi)
-        v = model.auxeqns[bi]
-        for (var, _) in keys(v.tsrefs)
-            ai = var_to_idx[var]
-            ci = ai - nvarshk
-            (1 <= ci < bi) && print_aux_eq(ci)
-        end
-        println(io, "   |->A$bi:   ", v)
+    longest_key = 0
+    if length(model.equations) > 0
+        longest_key = maximum(length.(string.(keys(model.equations))))
     end
-    for (i, v) in enumerate(model.equations)
-        println(io, "   E$i:   ", v)
+    function print_aux_eq(aux_key)
+        v = model.auxeqns[aux_key]
+        println(io, "  ", " "^longest_key, " |-> ", v.expr)
+    end
+    for (key, eq) in model.equations
+        seq = sprint(show, eq; context=io, sizehint=0)
+        println(io, "  :", rpad(key, longest_key), " => ", split(seq, "=>")[end])
         allvars = model.allvars
-        for (var, _) in keys(v.tsrefs)
-            ai = var_to_idx[var]
-            if ai > nvarshk
-                print_aux_eq(ai - nvarshk)
-            end
+        for aux_key in get_aux_equation_keys(model, key)
+            print_aux_eq(aux_key)
         end
     end
 end
@@ -370,13 +379,78 @@ function Base.show(io::IO, model::Model)
 end
 
 ################################################################
-# The macros used in the model definition.
+# The macros used in the model definition and alteration.
 
 # Note: These macros simply store the information into the corresponding
 # arrays within the model instance. The actual processing is done in @initialize
 
 export @variables, @logvariables, @neglogvariables, @steadyvariables, @exogenous, @shocks
 export @parameters, @equations, @autoshocks, @autoexogenize
+export update_model_state!
+
+function update_model_state!(m)
+    m._state = m._state == :ready ? :dev : m._state
+end
+
+function parse_deletes(block::Expr)
+    removals = Expr(:block)
+    additions = Expr(:block)
+    has_lines = any(typeof.(block.args) .== LineNumberNode)
+    if typeof(block.args[1]) == Symbol && block.args[1] == Symbol("@delete")
+        # whole block is one delete line
+        args = filter(a -> !isa(a, LineNumberNode), block.args[2:end])
+        push!(removals.args, args...)
+    elseif !has_lines && !(block isa Expr)
+        push!(additions.args, block...)
+    else
+        for expr in block.args
+            if isa(expr, LineNumberNode)
+                continue
+            elseif isa(expr, Symbol)
+                # regular single variable
+                push!(additions.args, expr)
+            elseif expr.args[1] isa Symbol && expr.args[1] == Symbol("@delete")
+                # @delete line
+                args = filter(a -> !isa(a, LineNumberNode), expr.args[2:end])
+                push!(removals.args, args...)
+            else 
+                # regular / complex variable
+                args = filter(a -> !isa(a, LineNumberNode), expr.args)
+                push!(additions.args, expr)
+            end
+        end
+    end
+
+    return removals, additions
+end
+
+function parse_equation_deletes(block::Expr)
+    removals = Expr(:block)
+    additions = Expr(:block)
+    has_lines = any(typeof.(block.args) .== LineNumberNode)
+    if (typeof(block.args[1]) == Symbol && block.args[1] == Symbol("@delete"))
+        args = filter(a -> !isa(a, LineNumberNode), block.args[2:end])
+        push!(removals.args, args...)
+    elseif has_lines == false
+        push!(additions.args, block)
+    else
+        stored_linenumber_node = nothing
+        for expr in block.args
+            if isa(expr, LineNumberNode)
+                stored_linenumber_node = expr
+                continue
+            elseif expr.args[1] isa Symbol && expr.args[1] == Symbol("@delete")
+                # line in a block starting with @delete
+                args = filter(a -> !isa(a, LineNumberNode), expr.args[2:end])
+                push!(removals.args, args...)
+            else
+                push!(additions.args, stored_linenumber_node)
+                push!(additions.args, expr)
+            end
+        end
+    end
+    return removals, additions
+end
 
 """
     @variables model name1 name2 ...
@@ -392,13 +466,24 @@ In the `begin-end` version the variable names can be preceeded by a description
 (like a docstring) and flags like `@log`, `@steady`, `@exog`, etc. See
 [`ModelVariable`](@ref) for details about this.
 
+You can also remove variables from the model by prefacing one or more  variables
+with `@delete`.
+
 """
 macro variables(model, block::Expr)
-    vars = filter(a -> !isa(a, LineNumberNode), block.args)
-    return esc(:(unique!(append!($(model).variables, $vars)); nothing))
+    thismodule = @__MODULE__
+    removals, additions = parse_deletes(block)
+    return esc(:(
+        unique!(deleteat!($(model).variables, findall(x -> x ∈ $(removals.args), $(model).variables)));
+        unique!(append!($(model).variables, $(additions.args)));
+        $(thismodule).update_model_state!($(model)); 
+        nothing
+    ))
 end
+
 macro variables(model, vars::Symbol...)
-    return esc(:(unique!(append!($(model).variables, $vars)); nothing))
+    thismodule = @__MODULE__
+    return esc(:(unique!(append!($(model).variables, $vars)); $(thismodule).update_model_state!($(model)); nothing))
 end
 
 """
@@ -408,11 +493,18 @@ Same as [`@variables`](@ref), but the variables declared with `@logvariables`
 are log-transformed.
 """
 macro logvariables(model, block::Expr)
-    vars = filter(a -> !isa(a, LineNumberNode), block.args)
-    return esc(:(unique!(append!($(model).variables, to_log.($vars))); nothing))
+    thismodule = @__MODULE__
+    removals, additions = parse_deletes(block)
+    return esc(:(
+        unique!(deleteat!($(model).variables, findall(x -> x ∈ $(removals.args), $(model).variables)));
+        unique!(append!($(model).variables, to_log.($(additions.args))));
+        $(thismodule).update_model_state!($(model)); 
+        nothing
+    ))
 end
 macro logvariables(model, vars::Symbol...)
-    return esc(:(unique!(append!($(model).variables, to_log.($vars))); nothing))
+    thismodule = @__MODULE__
+    return esc(:(unique!(append!($(model).variables, to_log.($vars))); $(thismodule).update_model_state!($(model)); nothing))
 end
 
 """
@@ -422,11 +514,18 @@ Same as [`@variables`](@ref), but the variables declared with `@neglogvariables`
 are negative-log-transformed.
 """
 macro neglogvariables(model, block::Expr)
-    vars = filter(a -> !isa(a, LineNumberNode), block.args)
-    return esc(:(unique!(append!($(model).variables, to_neglog.($vars))); nothing))
+    thismodule = @__MODULE__
+    removals, additions = parse_deletes(block)
+    return esc(:(
+        unique!(deleteat!($(model).variables, findall(x -> x ∈ $(removals.args), $(model).variables)));
+        unique!(append!($(model).variables, to_neglog.($(additions.args))));
+        $(thismodule).update_model_state!($(model)); 
+        nothing
+    ))
 end
 macro neglogvariables(model, vars::Symbol...)
-    return esc(:(unique!(append!($(model).variables, to_neglog.($vars))); nothing))
+    thismodule = @__MODULE__
+    return esc(:(unique!(append!($(model).variables, to_neglog.($vars))); $(thismodule).update_model_state!($(model)); nothing))
 end
 
 """
@@ -437,11 +536,18 @@ have zero slope in their steady state and final conditions.
 
 """
 macro steadyvariables(model, block::Expr)
-    vars = filter(a -> !isa(a, LineNumberNode), block.args)
-    return esc(:(unique!(append!($(model).variables, to_steady.($vars))); nothing))
+    thismodule = @__MODULE__
+    removals, additions = parse_deletes(block)
+    return esc(:(
+        unique!(deleteat!($(model).variables, findall(x -> x ∈ $(removals.args), $(model).variables)));
+        unique!(append!($(model).variables, to_steady.($(additions.args))));
+        $(thismodule).update_model_state!($(model)); 
+        nothing
+    ))
 end
 macro steadyvariables(model, vars::Symbol...)
-    return esc(:(unique!(append!($(model).variables, to_steady.($vars))); nothing))
+    thismodule = @__MODULE__
+    return esc(:(unique!(append!($(model).variables, to_steady.($vars))); $(thismodule).update_model_state!($(model)); nothing))
 end
 
 """
@@ -451,11 +557,18 @@ Like [`@variables`](@ref), but the names declared with `@exogenous` are
 exogenous.
 """
 macro exogenous(model, block::Expr)
-    vars = filter(a -> !isa(a, LineNumberNode), block.args)
-    return esc(:(unique!(append!($(model).variables, to_exog.($vars))); nothing))
+    thismodule = @__MODULE__
+    removals, additions = parse_deletes(block)
+    return esc(:(
+        unique!(deleteat!($(model).variables, findall(x -> x ∈ $(removals.args), $(model).variables)));
+        unique!(append!($(model).variables, to_exog.($(additions.args))));
+        $(thismodule).update_model_state!($(model)); 
+        nothing
+    ))
 end
 macro exogenous(model, vars::Symbol...)
-    return esc(:(unique!(append!($(model).variables, to_exog.($vars))); nothing))
+    thismodule = @__MODULE__
+    return esc(:(unique!(append!($(model).variables, to_exog.($vars))); $(thismodule).update_model_state!($(model)); nothing))
 end
 
 """
@@ -465,11 +578,18 @@ Like [`@variables`](@ref), but the names declared with `@shocks` are
 shocks.
 """
 macro shocks(model, block::Expr)
-    shks = filter(a -> !isa(a, LineNumberNode), block.args)
-    return esc(:(unique!(append!($(model).shocks, to_shock.($shks))); nothing))
+    thismodule = @__MODULE__
+    removals, additions = parse_deletes(block)
+    return esc(:(
+        unique!(deleteat!($(model).shocks, findall(x -> x ∈ $(removals.args), $(model).shocks)));
+        unique!(append!($(model).shocks, to_shock.($(additions.args))));
+        $(thismodule).update_model_state!($(model)); 
+        nothing
+    ))
 end
 macro shocks(model, shks::Symbol...)
-    return esc(:(unique!(append!($(model).shocks, to_shock.($shks))); nothing))
+    thismodule = @__MODULE__
+    return esc(:(unique!(append!($(model).shocks, to_shock.($shks))); $(thismodule).update_model_state!($(model)); nothing))
 end
 
 """
@@ -480,6 +600,7 @@ created from a variable name by appending suffix. Default suffix is "_shk", but
 it can be specified as the second argument too.
 """
 macro autoshocks(model, suf="_shk")
+    thismodule = @__MODULE__
     esc(quote
         $(model).shocks = ModelVariable[
             to_shock(Symbol(v.name, $(QuoteNode(suf)))) for v in $(model).variables if !isexog(v) && !isshock(v)
@@ -487,6 +608,7 @@ macro autoshocks(model, suf="_shk")
         push!($(model).autoexogenize, (
             v.name => Symbol(v.name, $(QuoteNode(suf))) for v in $(model).variables if !isexog(v)
         )...)
+        $(thismodule).update_model_state!($(model));
         nothing
     end)
 end
@@ -504,6 +626,7 @@ assignment statements wrapped inside a begin-end block. Use `@link` and `@alias`
 to define dynamic links. See [`Parameters`](@ref).
 """
 macro parameters(model, args::Expr...)
+    thismodule = @__MODULE__
     if length(args) == 1 && args[1].head == :block
         args = args[1].args
     end
@@ -521,8 +644,36 @@ macro parameters(model, args::Expr...)
         end
         throw(ArgumentError("Parameter definitions must be assignments, not\n  $a"))
     end
+    push!(ret.args, :($(thismodule).update_model_state!($(model)); nothing))
     return esc(ret)
 end
+
+# """
+#     @deleteparameters model name1 name2 ...
+#     @deleteparameters model begin
+#         name1
+#         name2
+#         ...
+#     end
+
+# Remove the parameters with the given names from the model. Note that there is no check for whether the removed
+# parameters are linked to other parameters.
+
+# Changes like this should be followed by a call to [`@reinitialize`](@ref) on the model.
+# """
+# macro deleteparameters(model, block::Expr)
+#     params = filter(a -> !isa(a, LineNumberNode), block.args)
+#     return esc(:(ModelBaseEcon.deleteparameters!($(model), $(params)); nothing))
+# end
+# macro deleteparameters(model, params::Symbol...)
+#     return esc(:(ModelBaseEcon.deleteparameters!($(model), $(params)); nothing))
+# end
+
+# function deleteparameters!(model::Model, params)
+#     for param in params
+#         delete!(model.parameters.contents, param)
+#     end
+# end
 
 """
     @autoexogenize model begin
@@ -532,43 +683,215 @@ end
 
 Define a mapping between variables and shocks that can be used to
 conveniently  swap exogenous and endogenous variables.
+
+You can also remove pairs from the model by prefacing each removed pair
+with `@delete`.
 """
-macro autoexogenize(model, args::Expr...)
-    if length(args) == 1 && args[1].head == :block
-        args = args[1].args
+macro autoexogenize(model, block::Expr)
+    thismodule = @__MODULE__
+    removals, additions = parse_equation_deletes(block)
+    autoexos = Dict{Symbol,Any}()
+    removed_autoexos = Dict{Symbol,Any}()
+    for expr in removals.args
+        if expr isa LineNumberNode
+            continue
+        elseif expr isa Expr && expr.head == :(=)
+            removed_autoexos[expr.args[1]] = expr.args[2]
+        elseif expr isa Expr && expr.head == :call && expr.args[1] == :(=>)
+            removed_autoexos[expr.args[2]] = expr.args[3]
+        end
     end
-    args = filter(a -> a isa Expr && a.head == :(=), [args...])
-    autoexos = Dict{Symbol,Any}([ex.args for ex in args])
-    esc(:(merge!($(model).autoexogenize, $(autoexos)); nothing))
+    for expr in additions.args
+        if expr isa LineNumberNode
+            continue
+        elseif expr isa Expr && expr.head == :(=)
+            autoexos[expr.args[1]] = expr.args[2]
+        elseif expr isa Expr && expr.head == :call && expr.args[1] == :(=>)
+            autoexos[expr.args[2]] = expr.args[3]
+        else 
+            err = ArgumentError("Expression does not appear to be an equation or pair: $expr")
+            return esc(:(throw($err)))
+        end
+    end
+
+    return esc(:(
+        $(thismodule).deleteautoexogenize!($(model).autoexogenize, $(removed_autoexos));
+        merge!($(model).autoexogenize, $(autoexos)); 
+        $(thismodule).update_model_state!($(model)); 
+        nothing
+    ))
+end
+
+function deleteautoexogenize!(autoexogdict, entries)
+    for entry in entries
+        key_in_keys = entry[1] ∈ keys(autoexogdict)
+        value_in_values = entry[2] ∈ values(autoexogdict)
+        value_in_keys = entry[2] ∈ keys(autoexogdict)
+        key_in_values = entry[1] ∈ values(autoexogdict)
+        if key_in_keys && value_in_values && autoexogdict[entry[1]] == entry[2]
+            delete!(autoexogdict, entry[1])
+            continue
+        elseif value_in_keys && key_in_values && autoexogdict[entry[2]] == entry[1]
+            delete!(autoexogdict, entry[2])
+            continue
+        elseif key_in_keys
+            @warn """Cannot remove autoexogenize $(entry[1]) => $(entry[2]).
+            The paired symbol for $(entry[1]) is $(autoexogdict[entry[1]])."""
+            continue
+        elseif value_in_keys
+            @warn """Cannot remove autoexogenize $(entry[1]) => $(entry[2]).
+            The paired symbol for $(entry[2]) is $(autoexogdict[entry[2]])."""
+            continue
+        elseif value_in_values
+            k = [k for (k,v) in autoexogdict if v==entry[2]]
+            @warn """Cannot remove autoexogenize $(entry[1]) => $(entry[2]).
+            The paired symbol for $(entry[2]) is $(k[1])."""
+            continue
+        elseif key_in_values
+            k = [k for (k,v) in autoexogdict if v==entry[1]]
+            @warn """Cannot remove autoexogenize $(entry[1]) => $(entry[2]).
+            The paired symbol for $(entry[1]) is $(k[1])."""
+            continue
+        else
+            @warn """Cannot remove autoexogenize $(entry[1]) => $(entry[2]).
+            Neither $(entry[1]) nor $(entry[2]) are entries in the autoexogenize list."""
+            continue
+        end
+    end
 end
 
 
 """
+    get_next_equation_name(eqns::OrderedDict{Symbol,Equation})
+
+Returns the next available equation name of the form `:_EQ#`.
+The initial guess is at the number of equations + 1.
+"""
+function get_next_equation_name(eqns::OrderedDict{Symbol,<:Union{Equation,SteadyStateEquation}}, prefix::String="_EQ")
+    existing_keys = keys(eqns)
+    incrementer = length(existing_keys) + 1
+    eqn_key = Symbol(prefix, incrementer)
+    while eqn_key ∈ existing_keys
+        incrementer += 1
+        eqn_key = Symbol(prefix, incrementer)
+    end
+    return eqn_key
+end
+
+"""
     @equations model begin
-        lhs = rhs
+        :eqnkey => lhs = rhs
         lhs = rhs
         ...
     end
 
-Define model equations. See [`Equation`](@ref).
+Replace equations with the given keys with the equation provided. Equations provided without
+a key or with a non-existing key will be added to the model.
+The keys must be provided with their full symbol reference, including the `:`.
+
+To find the key for an equation, see [`summarize`](@ref). For equation details, see [`Equation`](@ref).
+
+Changes like this should be followed by a call to [`@reinitialize`](@ref) on the model.
 """
 macro equations(model, block::Expr)
+    thismodule = @__MODULE__
     if block.head != :block
         modelerror("A list of equations must be within a begin-end block")
     end
     ret = Expr(:block)
+    removals, additions = parse_equation_deletes(block)
+    
+    #removals
+    if length(removals.args) > 0
+        push!(ret.args, :($(thismodule).deleteequations!($(model), $(removals.args))))
+        push!(ret.args, :($(thismodule).update_model_state!($(model)); nothing))
+    end
+    
+    # additions
     eqn = Expr(:block)
-    for expr in block.args
+    for expr in additions.args
+        push!(eqn.args, expr)
         if isa(expr, LineNumberNode)
-            push!(eqn.args, expr)
+            continue
         else
-            push!(eqn.args, expr)
-            push!(ret.args, :(push!($model.equations, $(Meta.quot(eqn)))))
+            if expr.args[1] isa Symbol && expr.args[1] == :(=>)
+                sym = expr.args[2]
+                push!(ret.args, :($(thismodule).changeequations!($model.equations, $sym => $(Meta.quot(eqn)))))
+            elseif expr.args[1] isa Expr && expr.args[1].args[1] == :(=>)
+                sym = expr.args[1].args[2]
+                push!(ret.args, :($(thismodule).changeequations!($model.equations, $sym => $(Meta.quot(eqn)))))
+            elseif expr.head == :macrocall
+                # This situation happens when the equation has a docstring, 
+                 if expr.args[end].head == :call && expr.args[end].args[1] == :(=>)
+                    sym = expr.args[end].args[2]
+                    push!(ret.args, :($(thismodule).changeequations!($model.equations, $(sym) => $(Meta.quot(eqn)))))
+                else
+                    push!(ret.args, :($(thismodule).changeequations!($model.equations, :_unnamed_equation_ => $(Meta.quot(eqn)))))
+                end
+            else
+                push!(ret.args, :($(thismodule).changeequations!($model.equations, :_unnamed_equation_ => $(Meta.quot(eqn)))))
+            end
             eqn = Expr(:block)
         end
     end
+    push!(ret.args, :($(thismodule).process_new_equations!($(model),  $(__module__)); $(thismodule).update_model_state!($(model)); nothing))
     return esc(ret)
 end
+
+function changeequations!(eqns::OrderedDict{Symbol,Equation}, (sym, e)::Pair{Symbol,Expr})
+    if sym == :_unnamed_equation_
+        sym = get_next_equation_name(eqns)
+    end
+    eqns[sym] = Equation(e)
+    return eqns
+end
+
+function process_new_equations!(model::Model, modelmodule::Module)
+    # only process at this point if model is not new
+    if model._state == :new
+        return
+    end
+    initfuncs(modelmodule)
+    var_to_idx = _make_var_to_idx(model.allvars)
+    for (key, e) in alleqns(model)
+        if e.eval_resid == eqnnotready
+            delete_sstate_equations!(model, key)
+            delete_aux_equations!(model, key)
+            add_equation!(model, key, e.expr; modelmodule=modelmodule, var_to_idx=var_to_idx)
+        end
+    end
+end
+
+function deleteequations!(model::Model, eqn_keys)
+    for key in eqn_keys
+        delete_sstate_equations!(model, key)
+        delete_aux_equations!(model, key)
+        delete!(model.equations, key)
+    end
+end
+
+function delete_sstate_equations!(model::Model, keys_vector)
+    ss = sstate(model)
+    keys_vector_copy = copy(keys_vector)
+    for key in keys_vector
+        push!(keys_vector_copy, Symbol("$(key)_tshift"))
+        for auxkey in get_aux_equation_keys(model, key)
+            push!(keys_vector_copy, auxkey)
+            push!(keys_vector_copy, Symbol("$(auxkey)_tshift"))
+        end
+    end
+    for key in keys_vector_copy
+        if key ∈ keys(ss.equations)
+            delete!(ss.equations, key)
+        end
+        if key ∈ keys(ss.constraints)
+            delete!(ss.constraints, key)
+        end
+    end
+end
+delete_sstate_equations!(model::Model, key::Symbol) = delete_sstate_equations!(model, [key])
+
+
 
 ################################################################
 # The processing of equations during model initialization.
@@ -604,7 +927,8 @@ function process_equation(model::Model, expr::Expr;
     modelmodule::Module=moduleof(model),
     line=LineNumberNode(0),
     flags=EqnFlags(),
-    doc="")
+    doc="",
+    eqn_name=:_unnamed_equation_)
 
     # a list of all known time series
     allvars = model.allvars
@@ -826,10 +1150,16 @@ function process_equation(model::Model, expr::Expr;
     tssyms = values(tsrefs)
     sssyms = values(ssrefs)
     psyms = values(prefs)
-    funcs_expr = makefuncs(residual, tssyms, sssyms, psyms, modelmodule)
+    ######
+    # name
+    if eqn_name == :_unnamed_equation_
+        throw(ArgumentError("No equation name specified"))
+    end
+    funcs_expr = makefuncs(eqn_name, residual, tssyms, sssyms, psyms, modelmodule)
     resid, RJ, resid_param, chunk = modelmodule.eval(funcs_expr)
     _update_eqn_params!(resid, model.parameters)
-    modelmodule.eval(:($(@__MODULE__).precompilefuncs($resid, $RJ, $resid_param, $chunk)))
+    thismodule = @__MODULE__
+    modelmodule.eval(:($(thismodule).precompilefuncs($resid, $RJ, $resid_param, $chunk)))
     tsrefs′ = LittleDict{Tuple{ModelSymbol,Int},Symbol}()
     for ((modsym, i), sym) in tsrefs
         tsrefs′[(ModelSymbol(modsym), i)] = sym
@@ -838,7 +1168,7 @@ function process_equation(model::Model, expr::Expr;
     for (modsym, sym) in ssrefs
         ssrefs′[ModelSymbol(modsym)] = sym
     end
-    return Equation(doc, flags, expr, residual, tsrefs′, ssrefs′, prefs, resid, RJ)
+    return Equation(doc, eqn_name, flags, expr, residual, tsrefs′, ssrefs′, prefs, resid, RJ)
 end
 
 
@@ -877,7 +1207,7 @@ function split_nargs(ex)
 end
 
 """
-    add_equation!(model::Model, expr::Expr; modelmodule::Module)
+    add_equation!(model::Model, eqn_key::Symbol, expr::Expr; modelmodule::Module)
 
 Process the given expression in the context of the given module, create the
 Equation() instance for it, and add it to the model instance.
@@ -885,9 +1215,9 @@ Equation() instance for it, and add it to the model instance.
 Usually there's no need to call this function directly. It is called during
 [`@initialize`](@ref).
 """
-function add_equation!(model::Model, expr::Expr; var_to_idx=get_var_to_idx(model), modelmodule::Module=moduleof(model))
+function add_equation!(model::Model, eqn_key::Symbol, expr::Expr; var_to_idx=get_var_to_idx(model), modelmodule::Module=moduleof(model))
     source = LineNumberNode[]
-    auxeqns = Expr[]
+    auxeqns = OrderedDict{Symbol, Expr}()
     flags = EqnFlags()
     doc = ""
 
@@ -940,6 +1270,10 @@ function add_equation!(model::Model, expr::Expr; var_to_idx=get_var_to_idx(model
             rhs = preprocess(rhs)
             return Expr(:(=), lhs, rhs)
         end
+        if ex.head == :call && ex.args[1] == :(=>)
+            eqn_key = ex.args[2].value
+            return preprocess(ex.args[3])
+        end
         # recursively preprocess all arguments
         ret = Expr(ex.head)
         for i in eachindex(ex.args)
@@ -975,7 +1309,8 @@ function add_equation!(model::Model, expr::Expr; var_to_idx=get_var_to_idx(model
                         @goto skip_substitution
                     end
                 end
-                aux_expr = process_equation(model, Expr(:(=), arg, 0); var_to_idx, modelmodule)
+                aux_name = Symbol("$(eqn_key)_AUX$(length(auxeqns)+1)")
+                aux_expr = process_equation(model, Expr(:(=), arg, 0);  var_to_idx=var_to_idx, modelmodule=modelmodule, eqn_name=aux_name)
                 if isempty(aux_expr.tsrefs)
                     # arg doesn't contain any variables, no need for substitution
                     @goto skip_substitution
@@ -983,7 +1318,7 @@ function add_equation!(model::Model, expr::Expr; var_to_idx=get_var_to_idx(model
                 # substitute log(something) with auxN and add equation exp(auxN) = something
                 push!(model.auxvars, :dummy)  # faster than resize!(model.auxvars, length(model.auxvars)+1)
                 model.auxvars[end] = auxs = Symbol("aux", model.nauxs)
-                push!(auxeqns, Expr(:(=), Expr(:call, :exp, Expr(:ref, auxs, :t)), arg))
+                push!(auxeqns, aux_name => Expr(:(=), Expr(:call, :exp, Expr(:ref, auxs, :t)), arg))
                 # update variables to indexes map
                 push!(var_to_idx, auxs => length(var_to_idx) + 1)
                 return Expr(:ref, auxs, :t)
@@ -1000,27 +1335,27 @@ function add_equation!(model::Model, expr::Expr; var_to_idx=get_var_to_idx(model
     if isempty(source)
         push!(source, LineNumberNode(0))
     end
-    eqn = process_equation(model, new_expr; var_to_idx, modelmodule, line=source[1], flags, doc)
-    push!(model.equations, eqn)
+    eqn = process_equation(model, new_expr; var_to_idx=var_to_idx, modelmodule=modelmodule, line=source[1], flags=flags, doc=doc, eqn_name=eqn_key)
+    push!(model.equations, eqn.name => eqn)
     model.maxlag = max(model.maxlag, eqn.maxlag)
     model.maxlead = max(model.maxlead, eqn.maxlead)
     model.dynss = model.dynss || !isempty(eqn.ssrefs)
-    for i ∈ eachindex(auxeqns)
-        eqn = process_equation(model, auxeqns[i]; var_to_idx, modelmodule, line=source[1])
-        push!(model.auxeqns, eqn)
+    for (k, eq) ∈ auxeqns
+        eqn = process_equation(model, eq; var_to_idx=var_to_idx, modelmodule=modelmodule, line=source[1], eqn_name=k)
+        push!(model.auxeqns, eqn.name => eqn)
         model.maxlag = max(model.maxlag, eqn.maxlag)
         model.maxlead = max(model.maxlead, eqn.maxlead)
     end
     empty!(model.evaldata)
     return model
 end
-@assert precompile(add_equation!, (Model, Expr))
+@assert precompile(add_equation!, (Model, Symbol, Expr))
 
 
 ############################
 ### Initialization routines
 
-export @initialize
+export @initialize, @reinitialize
 
 """
     initialize!(model, modelmodule)
@@ -1047,13 +1382,11 @@ function initialize!(model::Model, modelmodule::Module)
     model.variables = varshks[.!isshock.(varshks)]
     model.shocks = varshks[isshock.(varshks)]
     empty!(model.auxvars)
-    eqns = [e.expr for e in model.equations]
-    empty!(model.equations)
     empty!(model.auxeqns)
     model.dynss = false
     var_to_idx = _make_var_to_idx(model.allvars)
-    for e in eqns
-        add_equation!(model, e; modelmodule, var_to_idx)
+    for (key, e) in alleqns(model)
+        add_equation!(model, key, e.expr; var_to_idx=var_to_idx, modelmodule=modelmodule)
     end
     initssdata!(model)
     update_links!(model.parameters)
@@ -1065,6 +1398,67 @@ function initialize!(model::Model, modelmodule::Module)
         # if dynss is true, then we need the steady state even for the standard MED
         nothing
     end
+    unused = get_unused_symbols(model)
+    if length(unused[:variables]) > 0
+        @warn "Model contains unused variables: $(unused[:variables])"
+    end
+    if length(unused[:shocks]) > 0
+        @warn "Model contains unused shocks: $(unused[:shocks])"
+    end
+    model._state = :ready
+    return nothing
+end
+
+"""
+    reinitialize!(model, modelmodule)
+
+In the model file, after all changes to flags, parameters, variables, shocks,
+autoexogenize pairs, equations, and steadystate equations are done, it is necessary to 
+reinitialize the model instance. Usually it
+is easier to call [`@reinitialize`](@ref), which automatically sets the
+`modelmodule` value. When it is necessary to set the `modelmodule` argument to
+some other module, then this can be done by calling this function instead of the
+macro.
+"""
+function reinitialize!(model::Model, modelmodule::Module)
+    initfuncs(modelmodule)
+    samename = Symbol[intersect(model.allvars, keys(model.parameters))...]
+    if !isempty(samename)
+        modelerror("Found $(length(samename)) names that are both variables and parameters: $(join(samename, ", "))")
+    end
+    model.dynss = false
+    model.maxlag = 0
+    model.maxlead = 0
+    var_to_idx = _make_var_to_idx(model.allvars)
+    for (key, e) in alleqns(model)
+        if e.eval_resid == eqnnotready
+            delete_sstate_equations!(model, key)
+            delete_aux_equations!(model, key)
+            add_equation!(model, key, e.expr; modelmodule=modelmodule, var_to_idx=var_to_idx)
+        else
+            model.maxlag = max(model.maxlag, e.maxlag)
+            model.maxlead = max(model.maxlead, e.maxlead)
+            model.dynss = model.dynss || !isempty(e.ssrefs)
+        end
+    end
+    updatessdata!(model)
+    update_links!(model.parameters)
+    if !model.dynss
+        # Note: we cannot set any other evaluation method yet - they require steady
+        # state solution and we don't have that yet.
+        setevaldata!(model; default=ModelEvaluationData(model))
+    else
+        # if dynss is true, then we need the steady state even for the standard MED
+        nothing
+    end
+    unused = get_unused_symbols(model)
+    if length(unused[:variables]) > 0
+        @warn "Model contains unused variables: $(unused[:variables])"
+    end
+    if length(unused[:shocks]) > 0
+        @warn "Model contains unused shocks: $(unused[:shocks])"
+    end
+    model._state = :ready
     return nothing
 end
 
@@ -1075,10 +1469,28 @@ Prepare a model instance for analysis. Call this macro after all parameters,
 variable names, shock names and equations have been declared and defined.
 """
 macro initialize(model::Symbol)
+    thismodule = @__MODULE__
     # @__MODULE__ is this module (ModelBaseEcon)
     # __module__ is the module where this macro is called (the module where the model exists)
     return quote
-        $(@__MODULE__).initialize!($(model), $(__module__))
+        $(thismodule).initialize!($(model), $(__module__))
+    end |> esc
+end
+"""
+    @reinitialize model
+
+Process the changes made to a model and prepare the model instance for analysis. 
+Call this macro after all changes to parameters, variable names, shock names, 
+equations, autoexogenize lists, and removed steadystate equations have been declared and defined.
+
+Additional/new steadystate constraints can be added after the call to `@reinitialize`.
+"""
+macro reinitialize(model::Symbol)
+    thismodule = @__MODULE__
+    # @__MODULE__ is this module (ModelBaseEcon)
+    # __module__ is the module where this macro is called (the module where the model exists)
+    return quote
+        $(thismodule).reinitialize!($(model), $(__module__))
     end |> esc
 end
 
@@ -1133,16 +1545,326 @@ function update_auxvars(data::AbstractArray{Float64,2}, model::Model;
         modelerror("Insufficient time periods $nt. Expected $mintimes or more.")
     end
     result = [data[:, 1:nvarshk] zeros(nt, nauxs)]
-    for (i, eqn) in enumerate(model.auxeqns)
+    aux_eqn_count = 0
+    for (k, eqn) in model.auxeqns
+        aux_eqn_count += 1
         for t in (eqn.maxlag+1):(nt-eqn.maxlead)
             idx = [CartesianIndex((t + ti, var_to_idx[var])) for (var, ti) in keys(eqn.tsrefs)]
             res = eqn.eval_resid(result[idx])
+            # TODO: what is this logic?
             if res < 1.0
-                result[t, nvarshk+i] = log(1.0 - res)
+                result[t, nvarshk+aux_eqn_count] = log(1.0 - res)
             else
-                result[t, nvarshk+i] = default
+                result[t, nvarshk+aux_eqn_count] = default
             end
         end
     end
     return result
 end
+
+"""
+    get_aux_equation_keys(m::Model, eqn_key::Symbol)
+
+Returns a vector of symbol keys for the Aux equations used for the given equation.
+"""
+function get_aux_equation_keys(model::Model, eqn_key::Symbol)
+    key_string = string(eqn_key)
+    aux_keys = filter(x -> contains(string(x)*"_AUX", key_string), keys(model.auxeqns))
+    return aux_keys
+end
+
+"""
+    delete_aux_equations!(m::Model, eqn_key::Symbol)
+
+Removes the aux equations associated with a given equation from the model.
+"""
+function delete_aux_equations!(model::Model, eqn_key::Symbol)
+    eqn_keys = get_aux_equation_keys(model, eqn_key)
+    for k in eqn_keys
+        delete!(model.auxeqns, k)
+    end
+    if length(eqn_keys) >= 1
+        eqn_map = equation_map(model)
+        for var in keys(eqn_map)
+            eqn_map[var] = filter(x -> x ∉ [eqn_key, eqn_keys...], eqn_map[var])
+        end
+        removalindices = []
+        for (i,v) in enumerate(model.auxvars)
+            if v.name ∉ keys(eqn_map) || length(eqn_map[v.name]) == 0
+                push!(removalindices, i)
+            end
+        end
+        unique!(deleteat!(model.auxvars, removalindices));
+    end
+end
+
+"""
+    findequations(m::Model, sym::Symbol; verbose=true)
+
+Prints the equations which use the the given symbol in the provided model and returns a vector with
+their keys. Only returns the vector if verbose is set to `false`.
+"""
+function findequations(model::Model, sym::Symbol; verbose=true, light=false)
+    eqmap = equation_map(model)
+    sym_eqs = get(eqmap, sym, Symbol[])
+    if isempty(sym_eqs)
+        verbose && println("$sym not found in model.")
+        return sym_eqs
+    end
+
+    if verbose
+        for val in sym_eqs
+            eqn = get(model.equations, val, nothing)
+            if isnothing(eqn)
+                eqn = model.sstate.constraints[val]
+            end
+            prettyprint_equation(model, eqn; target=sym, light=light)
+        end
+    end
+    return sym_eqs
+end
+
+"""
+    find_main_equation(model, var)
+
+Return the name of the first equation that contains `var[t]`. Return `nothing`
+if there's no such equation.
+"""
+function find_main_equation(model::Model, var::Symbol)
+    for (eqn_name, eqn) in pairs(model.equations)
+        for (t, sym) in eqn.tsrefs
+            if t[1].name == var && t[2] == 0
+                return eqn_name
+            end
+        end
+    end
+    return nothing
+end
+export find_main_equation
+
+"""
+    prettyprint_equation(m::Model, eq::Equation; target::Symbol, eq_symbols::Vector{Any}=[])
+    
+Print the provided equation with the variables colored according to their type.
+
+### Keyword arguments
+    * `m`::Model - The model which contains the variables and equations.
+    * `eq`::Equation - The equation in question
+    * `target`::Symbol - if provided, the specified symbol will be presented in bright green.
+    * `eq_symbols`::Vector{Any} - a vector of symbols present in the equation. Can slightly speed up processing if provided.
+"""
+function prettyprint_equation(m::Model, eq::Union{Equation,SteadyStateEquation}; target::Symbol=nothing, eq_symbols::Vector{Symbol} = Symbol[], light::Bool=false)
+    colors = [
+        "#pp_target_color" => "#f4C095",
+        "#pp_var_color" => "#1D7874",
+        "#pp_shock_color" => "#EE2E31",
+        "#pp_param_color" => "#91C7B1",
+    ]
+    if light
+        colors = [
+            "#pp_target_color" => "#FF00FF",
+            "#pp_var_color" => "#0096FF",
+            "#pp_shock_color" => "#EE2E31",
+            "#pp_param_color" => "#89CFF0",
+        ]
+    end
+    if length(eq_symbols) == 0
+        eq_symbols = equation_symbols(eq)
+    end
+    sort!(eq_symbols, by=symbol_length, rev=true)
+    eq_str = sprint(show, eq)
+
+    for sym in eq_symbols
+        if (sym == target)
+            eq_str = replace(eq_str, Regex("(\\W)($sym)(\\W|\$)") => s"""\1|||crayon"#pp_target_color bold"|||\2|||crayon"default !bold"|||\3""")
+        elseif (sym in variables(m))
+            eq_str = replace(eq_str, Regex("(\\W)($sym)(\\W|\$)") => s"""\1|||crayon"#pp_var_color"|||\2|||crayon"default"|||\3""")
+        elseif (sym in shocks(m))
+            eq_str = replace(eq_str, Regex("(\\W)($sym)(\\W|\$)") => s"""\1|||crayon"#pp_shock_color"|||\2|||crayon"default"|||\3""")
+        else
+            eq_str = replace(eq_str, Regex("(\\W)($sym)(\\W|\$)") => s"""\1|||crayon"#pp_param_color"|||\2|||crayon"default"|||\3""")
+        end
+    end
+
+    for p in colors
+        eq_str = replace(eq_str, p)
+    end
+    
+    print_array = Vector{Any}()
+    for part in split(eq_str, "|||")
+        cray = findfirst("crayon", part)
+        if !isnothing(cray) && first(cray) == 1
+            push!(print_array, eval(Meta.parse(part)))
+        else
+            push!(print_array, part)
+        end
+    end
+    println(print_array...)
+end
+
+#TODO: improve this
+"""
+    find_symbols!(dest::Vector, v::Vector{Any})
+    
+Take a vector of equation arguments and add the non-mathematical ones to the
+destination vector.
+"""
+function find_symbols!(dest::Vector{Symbol}, v::Vector{Any})
+    for el in v
+        if el isa Expr
+            find_symbols!(dest, el.args)  
+        elseif el isa Symbol && !(el in [:+, :-, :*, :/, :^, :max, :min, :t, :log, :exp]) && !(el in dest)
+            push!(dest, el) 
+        end
+    end
+end
+
+symbol_length(sym::Symbol) = length(string(sym))
+
+
+"""
+    equation_symbols(e::Equation)
+    
+The a vector of symbols of the non-mathematical arguments in the provided
+equation.
+"""
+function equation_symbols(e::Union{Equation,SteadyStateEquation})
+    vars = Vector{Symbol}()
+    find_symbols!(vars, e.expr.args) 
+    return vars
+end
+
+export findequations
+
+"""
+    equation_map(e::Model)
+    
+Returns a dictionary with the keys being the symbols used in the models equations 
+and the values being a vector of equation keys for equations which use these symbols. 
+"""
+function equation_map(m::Model)
+    eqmap = Dict{Symbol, Any}()
+    for (key, eqn) in pairs(alleqns(m))
+        for (var, time) in keys(eqn.tsrefs)
+            if var.name ∈ keys(eqmap)
+                unique!(push!(eqmap[var.name], key))
+            else
+                eqmap[var.name] = [key]
+            end
+        end
+        for param in keys(eqn.eval_resid.params)
+            if param ∈ keys(eqmap)
+                unique!(push!(eqmap[param], key))
+            else
+                eqmap[param] = [key]
+            end
+        end
+        for var in keys(eqn.ssrefs)
+            if var.name ∈ keys(eqmap)
+                unique!(push!(eqmap[var.name], key))
+            else
+                eqmap[var.name] = [key]
+            end
+        end
+    end 
+    for (key, eqn) in pairs(m.sstate.constraints)
+        for ind in eqn.vinds
+            name = m.sstate.vars[(1+ind)÷2].name.name
+            if name ∈ keys(eqmap)
+                unique!(push!(eqmap[name], key))
+            else
+                eqmap[name] = [key]
+            end
+        end
+        for param in keys(eqn.eval_resid.params)
+            if param ∈ keys(eqmap)
+                unique!(push!(eqmap[param], key))
+            else
+                eqmap[param] = [key]
+            end
+        end
+    end 
+    return eqmap
+end
+
+"""
+    @replaceparameterlinks model oldmodel => newmodel
+    
+
+This function is used when a model uses parameters which link to another model object.
+The function must be called with a pair of models as they appear in the Main module.
+
+This is useful when ones models are modularized and include sattelite models. The function
+can then be used to link the parameters in modified copies of the sattelite model to modified 
+copies of the main model. For example, if the FRBUS_VAR model has a main model and a sattelite model
+the following workflow would make sense.
+
+```
+using FRBUS_VAR
+m = deepcopy(FRBUS_VAR.model)
+m_sattelite = deepcopy(FRBUS_VAR.sattelitemodel)
+
+## INSERT CHANGES to m
+@reinitialize m
+@replaceparameterlinks m_sattelite FRBUS_VAR.model => m
+@reinitialize m_sattelite
+
+```
+
+Changes like this should be followed by a call to [`@reinitialize`](@ref) on the model.
+"""
+macro replaceparameterlinks(model, expr)
+    thismodule = @__MODULE__
+    if expr.args[1] !== :(=>)
+        error("The replacement must by of the form oldmodel => newmodel")
+    end
+    old = expr.args[2]
+    new_string = string(expr.args[3])
+    return esc(:(
+        $(thismodule).replaceparameterlinks!($model, $old, Meta.parse($new_string), $__module__);
+        nothing
+        ));
+end
+export @replaceparameterlinks
+
+
+function replaceparameterlinks!(model::Model, old::Model, new_expr::Union{Symbol,Expr}, mod)
+    for p in values(model.parameters)
+        if p.link isa Expr
+            p.link = replace_in_expr(p.link, old, new_expr, model.parameters)
+        end
+    end
+    # We need to replace the parameters module, but only after making the replacements
+    # Otherwise, the old links may not evaluate correctly.
+    model.parameters.mod[] = mod
+    update_links!(model.parameters)
+end
+
+function replace_in_expr(e::Expr, old::Model, new::Union{Symbol,Expr}, params::Parameters)
+    for i in 1:length(e.args)
+        if e.args[i] isa Expr
+            if peval(params, e.args[i]) == old
+                e.args[i] = new
+            else
+                e.args[i] = replace_in_expr(e.args[i], old, new, params)
+            end
+        end
+    end
+    return e
+end
+
+"""
+    get_unused_symbols(model::Model)
+
+Returns a dictionary with vectors of the unused variables, shocks, and parameters.
+"""
+function get_unused_symbols(model::Model)
+    eqmap = equation_map(model)
+    unused = Dict(
+        :variables => filter(x -> !haskey(eqmap, x), [x.name for x in model.variables]),
+        :shocks => filter(x -> !haskey(eqmap, x), [x.name for x in model.shocks]),
+        :parameters => filter(x -> !haskey(eqmap, x), collect(keys(model.parameters)))
+    )
+    return unused
+end
+export get_unused_symbols

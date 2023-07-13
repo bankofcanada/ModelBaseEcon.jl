@@ -1,11 +1,11 @@
 
 @using_example S1
 @testset "dynss" begin
-    m = S1.model
+    m = S1.newmodel()
     @test m.dynss
-    @test isempty(m.equations[1].ssrefs)
-    @test !isempty(m.equations[2].ssrefs)
-    @test !isempty(m.equations[3].ssrefs)
+    @test isempty(m.equations[:_EQ1].ssrefs)
+    @test !isempty(m.equations[:_EQ2].ssrefs)
+    @test !isempty(m.equations[:_EQ3].ssrefs)
     @test_logs (:warn, r".*steady\s+state.*"i) refresh_med!(m)
     ss = m.sstate
     fill!(ss.values, 0)
@@ -48,7 +48,7 @@
             0 0 0 0 -0.4 1 0 0 0 -1]
     end
     let
-        seq = ss.equations[3]
+        seq = ss.equations[:_EQ3]
         inds = indexin([Symbol("#c#lvl#"), Symbol("#c#slp#"), Symbol("#b#lvl#")], seq.vsyms)
         for i = 1:50
             m.β = β = rand()
@@ -64,9 +64,9 @@ end
 
 @using_example S2
 @testset "dynss2" begin
-    m = S2.model
+    m = S2.newmodel()
     # make sure @sstate(x) was transformed
-    @test m.equations[1].ssrefs[:x] === Symbol("#log#x#ss#")
+    @test m.equations[:_EQ1].ssrefs[:x] === Symbol("#log#x#ss#")
 
     xi = ModelBaseEcon.get_var_to_idx(m)[:x]
     for i = 1:10

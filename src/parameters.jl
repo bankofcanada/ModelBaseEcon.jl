@@ -100,7 +100,7 @@ function Base.deepcopy_internal(p::Parameters, stackdict::IdDict)
     p_copy = Parameters(
         Ref(p.mod[]), 
         Base.deepcopy_internal(p.contents, stackdict), 
-        Ref(p.rev[])
+        Ref(p.rev[]),
     )
     stackdict[p] = p_copy
     return p_copy
