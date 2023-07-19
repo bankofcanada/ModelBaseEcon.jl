@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020-2022, Bank of Canada
+# Copyright (c) 2020-2023, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -25,16 +25,19 @@ function at_lag(expr::Expr, n=1)
         return expr
     elseif expr.head == :ref
         var, index = expr.args
-        if @capture(index, t + lag_) && lag isa Number
-            return normal_ref(var, lag - n)
-        elseif @capture(index, t - lag_) && lag isa Number
-            return normal_ref(var, -lag - n)
-        else
-            return Expr(:ref, var, :($index - $n))
+        if has_t(index)
+            if @capture(index, t + lag_)
+                return normal_ref(var, lag - n)
+            elseif index == :t
+                return normal_ref(var, -n)
+            elseif @capture(index, t - lag_)
+                return normal_ref(var, -lag - n)
+            else
+                error("Must use `t`, `t+n` or `t-n`, not $index")
+            end
         end
-    else
-        return Expr(expr.head, at_lag.(expr.args, n)...)
     end
+    return Expr(expr.head, at_lag.(expr.args, n)...)
 end
 
 """
@@ -63,7 +66,7 @@ function at_d(expr::Expr, n=1, s=0)
         error("In @d call `n` and `s` must not be negative.")
     end
     coefs = zeros(Int, 1 + n + s)
-    coefs[1:n+1] .= binomial.(n, 0:n) .* (-1).^(0:n)
+    coefs[1:n+1] .= binomial.(n, 0:n) .* (-1) .^ (0:n)
     if s > 0
         coefs[1+s:end] .-= coefs[1:n+1]
     end
@@ -124,6 +127,50 @@ See also [`at_lag`](@ref).
 at_movav(expr::Expr, n::Integer) = MacroTools.unblock(:($(at_movsum(expr, n)) / $n))
 
 """
+    at_movsumw(expr, n, weights)
+
+Apply moving weighted sum with n periods backwards to the given expression with
+the given weights.
+For example: `at_movsumw(x[t], w, 3) = w[1]*x[t] + w[2]*x[t-1] + w[3]*x[t-2]`
+
+See also [`at_lag`](@ref).
+"""
+at_movsumw(expr::Expr, n::Integer, p) = MacroTools.unblock(
+    split_nargs(Expr(:call, :+, (Expr(:call, :*, Expr(:ref, p, i), at_lag(expr, i - 1)) for i = 1:n)...))
+)
+
+function at_movsumw(expr::Expr, n::Integer, w1, args...)
+    @assert length(args) == n - 1 "Number of weights does not match"
+    return MacroTools.unblock(
+        split_nargs(Expr(:call, :+,
+            Expr(:call, :*, w1, expr),
+            (Expr(:call, :*, args[i], at_lag(expr, i)) for i = 1:n-1)...
+        )))
+end
+
+"""
+    at_movavw(expr, n, weights)
+    at_movavw(expr, n, w1, w2, ..., wn)
+
+Apply moving weighted average with n periods backwards to the given expression
+with the given weights normalized to sum one.
+For example: `at_movavw(x[t], w, 2) = (w[1]*x[t] + w[2]*x[t-1])/(w[1]+w[2])`
+
+See also [`at_lag`](@ref).
+"""
+function at_movavw(expr::Expr, n::Integer, args...)
+    return MacroTools.unblock(
+        Expr(:call, :/, at_movsumw(expr, n, args...), _sum_w(n, args...))
+    )
+end
+_sum_w(n, p) = MacroTools.unblock(
+    split_nargs(Expr(:call, :+, (Expr(:ref, p, i) for i = 1:n)...))
+)
+_sum_w(n, w1, args...) = MacroTools.unblock(
+    split_nargs(Expr(:call, :+, w1, (args[i] for i = 1:n-1)...))
+)
+
+"""
     at_movsumew(expr, n, r)
 
 Apply moving sum with exponential weights with ratio `r`.
@@ -153,7 +200,7 @@ at_movavew(expr::Expr, n::Integer, r::Real) =
 at_movavew(expr::Expr, n::Integer, r) =
     MacroTools.unblock(:($(at_movsumew(expr, n, r)) * (1 - $r) / (1 - $r^$n)))    #=  isapprox($r, 1.0) ? $(at_movav(expr, n)) :  =#
 
-for sym in (:lag, :lead, :d, :dlog, :movsum, :movav, :movsumew, :movavew)
+for sym in (:lag, :lead, :d, :dlog, :movsum, :movav, :movsumew, :movavew, :movsumw, :movavw)
     fsym = Symbol("at_$sym")
     msym = Symbol("@$sym")
     doc_str = replace(string(eval(:(@doc $fsym))), "at_" => "@")

@@ -307,7 +307,7 @@ end
     @test unused[:variables] == [:x, :y, :z, :k, :l, :m, :q, :r]
     @test unused[:shocks] == [:a, :b, :c]
     @test unused[:parameters] == Vector{Symbol}()
-    
+
     @test ModelBaseEcon.hasevaldata(m, :default)
     @test_throws ModelBaseEcon.ModelError @initialize m
     @test_throws ModelBaseEcon.EvalDataNotFound ModelBaseEcon.getevaldata(m, :nosuchevaldata)
@@ -458,21 +458,35 @@ end
 @testset "metafuncts" begin
     @test ModelBaseEcon.has_t(1) == false
     @test ModelBaseEcon.has_t(:(x[t] - x[t-1])) == true
-    @test ModelBaseEcon.at_lag(:(x[t]), 0) == :(x[t])
-    @test_throws ErrorException ModelBaseEcon.at_d(:(x[t]), 0, -1)
-    @test ModelBaseEcon.at_d(:(x[t]), 3, 0) == :(((x[t] - 3 * x[t-1]) + 3 * x[t-2]) - x[t-3])
-    @test ModelBaseEcon.at_movsumew(:(x[t]), 3, 2.0) == :(x[t] + (2.0 * x[t-1] + 4.0 * x[t-2]))
-    @test ModelBaseEcon.at_movsumew(:(x[t]), 3, :y) == :(x[t] + (y^1 * x[t-1] + y^2 * x[t-2]))
-    @test ModelBaseEcon.at_movavew(:(x[t]), 3, 2.0) == :((x[t] + (2.0 * x[t-1] + 4.0 * x[t-2])) / 7.0)
-    @test ModelBaseEcon.at_movavew(:(x[t]), 3, :y) == :(((x[t] + (y^1 * x[t-1] + y^2 * x[t-2])) * (1 - y)) / (1 - y^3))
+    @test @lag(x[t], 0) == :(x[t])
+    @test_throws ErrorException @macroexpand @d(x[t], 0, -1)
+    @test @d(x[t], 3, 0) == :(((x[t] - 3 * x[t-1]) + 3 * x[t-2]) - x[t-3])
+    @test @movsumew(x[t], 3, 2.0) == :(x[t] + (2.0 * x[t-1] + 4.0 * x[t-2]))
+    @test @movsumew(x[t], 3, y) == :(x[t] + (y^1 * x[t-1] + y^2 * x[t-2]))
+    @test @movavew(x[t], 3, 2.0) == :((x[t] + (2.0 * x[t-1] + 4.0 * x[t-2])) / 7.0)
+    @test @movavew(x[t], 3, y) == :(((x[t] + (y^1 * x[t-1] + y^2 * x[t-2])) * (1 - y)) / (1 - y^3))
+    @test @lag(x[t+4]) == :(x[t+3])
+    @test @lag(x[t-1]) == :(x[t-2])
+    @test @lag(x[3]) == :(x[3])
+    @test_throws ErrorException @macroexpand @lag(x[3+t])
+    @test @movsumw(a[t] + b[t+1], 2, p) == :(p[1] * (a[t] + b[t+1]) + p[2] * (a[t-1] + b[t]))
+    @test @movavw(a[t] + b[t+1], 2, p) == :((p[1] * (a[t] + b[t+1]) + p[2] * (a[t-1] + b[t])) / (p[1] + p[2]))
+    @test @movsumw(a[t] + b[t+1], 2, q, p) == :(q * (a[t] + b[t+1]) + p * (a[t-1] + b[t]))
+    @test @movavw(a[t] + b[t+1], 2, q, p) == :((q * (a[t] + b[t+1]) + p * (a[t-1] + b[t])) / (q + p))
 end
+
 module MetaTest
-    using ModelBaseEcon
-    params = @parameters
-    custom(x) = x + one(x)
-    const val = 12.0
-    params.b = custom(val)
-    params.a = @link custom(val)
+using ModelBaseEcon
+params = @parameters
+custom(x) = x + one(x)
+val = 12.0
+pair = :hello => "world"
+params.b = custom(val)
+params.a = @link custom(val)
+params.c = val
+params.d = @link val
+params.e = @link pair.first
+params.f = @link pair[2]
 end
 
 @testset "Parameters" begin
@@ -529,12 +543,27 @@ end
 
     @test MetaTest.params.a ≈ 13.0
     @test MetaTest.params.b ≈ 13.0
-    MetaTest.eval(quote
-        custom(x) = 2x + one(x)
-    end)
+    @test MetaTest.params.c ≈ 12.0
+    @test MetaTest.params.d ≈ 12.0
+    Core.eval(MetaTest, :(custom(x) = 2x + one(x)))
     update_links!(MetaTest.params)
     @test MetaTest.params.a ≈ 25.0
     @test MetaTest.params.b ≈ 13.0
+    @test MetaTest.params.c ≈ 12.0
+    @test MetaTest.params.d ≈ 12.0
+    Core.eval(MetaTest, :(val = 22))
+    update_links!(MetaTest.params)
+    @test MetaTest.params.a == 45
+    @test MetaTest.params.b ≈ 13.0
+    @test MetaTest.params.c ≈ 12.0
+    @test MetaTest.params.d == 22
+
+    @test MetaTest.params.e == :hello
+    @test MetaTest.params.f == "world"
+    Core.eval(MetaTest, :(pair = 27 => π))
+    update_links!(MetaTest.params)
+    @test MetaTest.params.e == 27
+    @test MetaTest.params.f == π
 
     @test @alias(c) == ModelParam(Set(), :c, nothing)
     @test @link(c) == ModelParam(Set(), :c, nothing)
@@ -571,13 +600,13 @@ end
     # @test_throws ArgumentError ModelBaseEcon.process_equation(m, :(x[t] = p), eqn_name=:_EQ2) #no exception thrown!
     @test_throws ArgumentError ModelBaseEcon.process_equation(m, :(x[t] = x[t-1])) #no equation name
     @test_throws ArgumentError ModelBaseEcon.process_equation(m, :(x[t] = if false
-        2
-    end), eqn_name=:_EQ2)
+            2
+        end), eqn_name=:_EQ2)
     @test ModelBaseEcon.process_equation(m, :(x[t] = if false
-        2
-    else
-        0
-    end), eqn_name=:_EQ2) isa Equation
+            2
+        else
+            0
+        end), eqn_name=:_EQ2) isa Equation
     @test ModelBaseEcon.process_equation(m, :(x[t] = ifelse(false, 2, 0)), eqn_name=:_EQ3) isa Equation
     p = 0
     @test_logs (:warn, r"Variable or shock .* without `t` reference.*"i) @assert ModelBaseEcon.process_equation(m, "x=$p", eqn_name=:_EQ4) isa Equation
@@ -828,7 +857,7 @@ end
 @testset "E1.params" begin
     let m = E1.newmodel()
         @test propertynames(m.parameters) == (:α, :β)
-        @test m.nvarshks == 2 
+        @test m.nvarshks == 2
         @test peval(m, :α) == 0.5
         m.β = @link 1.0 - α
         m.parameters.beta = @alias β
@@ -847,14 +876,14 @@ end
 end
 
 @using_example E1_noparams
-@testset "E1.equation change" begin 
+@testset "E1.equation change" begin
     for α = 0.0:0.1:1.0
         new_E1 = E1_noparams.newmodel()
         @equations new_E1 begin
-            :maineq => y[t] = $α * y[t - 1] + $(1-α) * y[t + 1] + y_shk[t]
+            :maineq => y[t] = $α * y[t-1] + $(1 - α) * y[t+1] + y_shk[t]
         end
         @reinitialize(new_E1)
-        test_eval_RJ(new_E1, [0.0], [-α 1.0 -(1-α) 0.0 -1.0 0.0;])
+        test_eval_RJ(new_E1, [0.0], [-α 1.0 -(1 - α) 0.0 -1.0 0.0;])
     end
 end
 
@@ -960,7 +989,7 @@ end
     @test length(out) == 3
     @test length(split(out[end], "=")) == 3
     @test length(split(out[end], "=>")) == 2
-    # 
+    #
     @test propertynames(ss) == tuple(m.allvars...)
     @test ss.pinf.level == ss.pinf.data[1]
     @test ss.pinf.slope == ss.pinf.data[2]
@@ -1214,7 +1243,7 @@ include("sstate.jl")
     @test_throws ArgumentError print_linearized(m)
     linearize!(m)
     io = IOBuffer()
-    print_linearized(io, m, compact = false)
+    print_linearized(io, m, compact=false)
     seekstart(io)
     lines = readlines(io)
     @test length(lines) == 3
@@ -1230,33 +1259,33 @@ end
     m = E2.newmodel()
 
     @test length(m.autoexogenize) == 3
-    @test m.autoexogenize[:pinf] == :pinf_shk 
-    @test m.autoexogenize[:rate] == :rate_shk 
-    
+    @test m.autoexogenize[:pinf] == :pinf_shk
+    @test m.autoexogenize[:rate] == :rate_shk
+
     @autoexogenize m @delete ygap = ygap_shk
     @test length(m.autoexogenize) == 2
     @test !haskey(m.autoexogenize, :ygap)
-    
+
     @autoexogenize m ygap = ygap_shk
     @test length(m.autoexogenize) == 3
-    @test m.autoexogenize[:ygap] == :ygap_shk 
-    
+    @test m.autoexogenize[:ygap] == :ygap_shk
+
     @autoexogenize m begin
         @delete ygap = ygap_shk
-    end 
+    end
     @test length(m.autoexogenize) == 2
     @test !haskey(m.autoexogenize, :ygap)
-    
+
     @autoexogenize m begin
         ygap = ygap_shk
     end
     @test length(m.autoexogenize) == 3
-    @test m.autoexogenize[:ygap] == :ygap_shk 
+    @test m.autoexogenize[:ygap] == :ygap_shk
 
     m = E2.newmodel()
     @autoexogenize m begin
         @delete (ygap = ygap_shk) (pinf = pinf_shk)
-    end 
+    end
     @test length(m.autoexogenize) == 1
     @test !haskey(m.autoexogenize, :ygap)
     @test !haskey(m.autoexogenize, :pinf)
@@ -1289,23 +1318,23 @@ end
     m = E2.newmodel()
 
     @test length(m.variables) == 3
-    
+
     @variables m @delete pinf rate
     @test length(m.variables) == 1
-    
+
     @variables m pinf rate
     @test length(m.variables) == 3
-    
-    @variables m begin 
+
+    @variables m begin
         @delete pinf rate
     end
     @test length(m.variables) == 1
-    
+
     @variables m (pinf; rate)
     @test length(m.variables) == 3
 
-    @variables m begin 
-        @delete pinf 
+    @variables m begin
+        @delete pinf
         @delete rate
     end
     @test length(m.variables) == 1
@@ -1320,23 +1349,23 @@ end
     m = E2.newmodel()
 
     @test length(m.shocks) == 3
-    
+
     @shocks m @delete pinf_shk rate_shk
     @test length(m.shocks) == 1
-    
+
     @shocks m pinf_shk rate_shk
     @test length(m.shocks) == 3
-    
-    @shocks m begin 
+
+    @shocks m begin
         @delete pinf_shk rate_shk
     end
     @test length(m.shocks) == 1
-    
+
     @shocks m (pinf_shk; rate_shk)
     @test length(m.shocks) == 3
 
-    @shocks m begin 
-        @delete pinf_shk 
+    @shocks m begin
+        @delete pinf_shk
         @delete rate_shk
     end
     @test length(m.shocks) == 1
@@ -1352,15 +1381,15 @@ end
 
     @test length(m.sstate.constraints) == 1
     @parameters m begin
-        b_ss = 1.2 
+        b_ss = 1.2
     end
     @steadystate m begin
-        @delete _SSEQ1;
+        @delete _SSEQ1
         @level a = a_ss
         @slope b = b_ss
     end
     @test length(m.sstate.constraints) == 2
-    
+
     # @test_throws MethodError @steadystate @somethingelse b = b_ss
 
 
@@ -1376,8 +1405,8 @@ end
     @test length(m.equations) == 2
     @test collect(keys(m.equations)) == [:_EQ1, :_EQ3]
 
-    @test_logs (:warn,"Model contains unused shocks: [:b_shk]") @reinitialize m
-    
+    @test_logs (:warn, "Model contains unused shocks: [:b_shk]") @reinitialize m
+
     @equations m begin
         b[t] = @sstate(b) * (1 - α) + α * b[t-1] + b_shk[t]
     end
@@ -1392,7 +1421,7 @@ end
     @steadystate m begin
         @delete _SSEQ1
     end
-    @test_logs (:warn,"Model contains unused variables: [:a]") @reinitialize m
+    @test_logs (:warn, "Model contains unused variables: [:a]") @reinitialize m
 
 
     maux = deepcopy(AUX.model)
@@ -1416,14 +1445,14 @@ m2_for_sattelite_tests = E2sat.newmodel()
     m1 = E2.newmodel()
 
     m_sattelite = Model()
-    
+
     @parameters m_sattelite begin
-       _parent = E2.model
-       cx = @link _parent.cp
+        _parent = E2.model
+        cx = @link _parent.cp
     end
     @test m1.cp == [0.5, 0.02]
     @test m_sattelite.cx == [0.5, 0.02]
-    
+
     m1.cp = [0.6, 0.03]
     @test m1.cp == [0.6, 0.03]
 
@@ -1456,12 +1485,12 @@ m2_for_sattelite_tests = nothing
 
     @test findequations(S1.model, :a; verbose=false) == [:_EQ1, :_SSEQ1]
 
-    @test_logs (:debug, ":_EQ2 => rate[t] = cr[1] * rate[t - 1] + ((1 - cr[1]) * (cr[2] * pinf[t] + cr[3] * ygap[t]) + rate_shk[t])") 
+    @test_logs (:debug, ":_EQ2 => rate[t] = cr[1] * rate[t - 1] + ((1 - cr[1]) * (cr[2] * pinf[t] + cr[3] * ygap[t]) + rate_shk[t])")
 
-    original_stdout = stdout;
-    (read_pipe, write_pipe) = redirect_stdout();
+    original_stdout = stdout
+    (read_pipe, write_pipe) = redirect_stdout()
     findequations(m, :cr)
-    redirect_stdout(original_stdout);
+    redirect_stdout(original_stdout)
     close(write_pipe)
     @test readline(read_pipe) == ":_EQ2 => \e[38;2;29;120;116mrate\e[39m[t] = \e[38;2;244;192;149;1mcr\e[39;22m[1] * \e[38;2;29;120;116mrate\e[39m[t - 1] + ((1 - \e[38;2;244;192;149;1mcr\e[39;22m[1]) * (\e[38;2;244;192;149;1mcr\e[39;22m[2] * \e[38;2;29;120;116mpinf\e[39m[t] + \e[38;2;244;192;149;1mcr\e[39;22m[3] * \e[38;2;29;120;116mygap\e[39m[t]) + \e[38;2;238;46;49mrate_shk\e[39m[t])"
 
