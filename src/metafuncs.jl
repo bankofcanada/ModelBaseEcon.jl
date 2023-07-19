@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020-2022, Bank of Canada
+# Copyright (c) 2020-2023, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -25,17 +25,16 @@ function at_lag(expr::Expr, n=1)
         return expr
     elseif expr.head == :ref
         var, index = expr.args
-        while has_t(index)
+        if has_t(index)
             if @capture(index, t + lag_)
-                nothing
-            elseif @capture(index, t - lag_)
-                lag = -lag
+                return normal_ref(var, lag - n)
             elseif index == :t
-                lag = 0
+                return normal_ref(var, -n)
+            elseif @capture(index, t - lag_)
+                return normal_ref(var, -lag - n)
             else
-                break
+                error("Must use `t`, `t+n` or `t-n`, not $index")
             end
-            return normal_ref(var, lag - n)
         end
     end
     return Expr(expr.head, at_lag.(expr.args, n)...)
@@ -141,11 +140,11 @@ at_movsumw(expr::Expr, n::Integer, p) = MacroTools.unblock(
 )
 
 function at_movsumw(expr::Expr, n::Integer, w1, args...)
-    @assert length(args) == n-1 "Number of weights does not match"
+    @assert length(args) == n - 1 "Number of weights does not match"
     return MacroTools.unblock(
-        split_nargs(Expr(:call, :+, 
+        split_nargs(Expr(:call, :+,
             Expr(:call, :*, w1, expr),
-            (Expr(:call, :*, args[i], at_lag(expr, i)) for i=1:n-1)...
+            (Expr(:call, :*, args[i], at_lag(expr, i)) for i = 1:n-1)...
         )))
 end
 
@@ -165,11 +164,11 @@ function at_movavw(expr::Expr, n::Integer, args...)
     )
 end
 _sum_w(n, p) = MacroTools.unblock(
-        split_nargs(Expr(:call, :+, (Expr(:ref, p, i) for i = 1:n)...))
-    )
+    split_nargs(Expr(:call, :+, (Expr(:ref, p, i) for i = 1:n)...))
+)
 _sum_w(n, w1, args...) = MacroTools.unblock(
-        split_nargs(Expr(:call, :+, w1, (args[i] for i = 1:n-1)...))
-    )
+    split_nargs(Expr(:call, :+, w1, (args[i] for i = 1:n-1)...))
+)
 
 """
     at_movsumew(expr, n, r)

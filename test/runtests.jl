@@ -458,13 +458,21 @@ end
 @testset "metafuncts" begin
     @test ModelBaseEcon.has_t(1) == false
     @test ModelBaseEcon.has_t(:(x[t] - x[t-1])) == true
-    @test ModelBaseEcon.at_lag(:(x[t]), 0) == :(x[t])
-    @test_throws ErrorException ModelBaseEcon.at_d(:(x[t]), 0, -1)
-    @test ModelBaseEcon.at_d(:(x[t]), 3, 0) == :(((x[t] - 3 * x[t-1]) + 3 * x[t-2]) - x[t-3])
-    @test ModelBaseEcon.at_movsumew(:(x[t]), 3, 2.0) == :(x[t] + (2.0 * x[t-1] + 4.0 * x[t-2]))
-    @test ModelBaseEcon.at_movsumew(:(x[t]), 3, :y) == :(x[t] + (y^1 * x[t-1] + y^2 * x[t-2]))
-    @test ModelBaseEcon.at_movavew(:(x[t]), 3, 2.0) == :((x[t] + (2.0 * x[t-1] + 4.0 * x[t-2])) / 7.0)
-    @test ModelBaseEcon.at_movavew(:(x[t]), 3, :y) == :(((x[t] + (y^1 * x[t-1] + y^2 * x[t-2])) * (1 - y)) / (1 - y^3))
+    @test @lag(x[t], 0) == :(x[t])
+    @test_throws ErrorException @macroexpand @d(x[t], 0, -1)
+    @test @d(x[t], 3, 0) == :(((x[t] - 3 * x[t-1]) + 3 * x[t-2]) - x[t-3])
+    @test @movsumew(x[t], 3, 2.0) == :(x[t] + (2.0 * x[t-1] + 4.0 * x[t-2]))
+    @test @movsumew(x[t], 3, y) == :(x[t] + (y^1 * x[t-1] + y^2 * x[t-2]))
+    @test @movavew(x[t], 3, 2.0) == :((x[t] + (2.0 * x[t-1] + 4.0 * x[t-2])) / 7.0)
+    @test @movavew(x[t], 3, y) == :(((x[t] + (y^1 * x[t-1] + y^2 * x[t-2])) * (1 - y)) / (1 - y^3))
+    @test @lag(x[t+4]) == :(x[t+3])
+    @test @lag(x[t-1]) == :(x[t-2])
+    @test @lag(x[3]) == :(x[3])
+    @test_throws ErrorException @macroexpand @lag(x[3+t])
+    @test @movsumw(a[t] + b[t+1], 2, p) == :(p[1] * (a[t] + b[t+1]) + p[2] * (a[t-1] + b[t]))
+    @test @movavw(a[t] + b[t+1], 2, p) == :((p[1] * (a[t] + b[t+1]) + p[2] * (a[t-1] + b[t])) / (p[1] + p[2]))
+    @test @movsumw(a[t] + b[t+1], 2, q, p) == :(q * (a[t] + b[t+1]) + p * (a[t-1] + b[t]))
+    @test @movavw(a[t] + b[t+1], 2, q, p) == :((q * (a[t] + b[t+1]) + p * (a[t-1] + b[t])) / (q + p))
 end
 
 module MetaTest
@@ -981,7 +989,7 @@ end
     @test length(out) == 3
     @test length(split(out[end], "=")) == 3
     @test length(split(out[end], "=>")) == 2
-    # 
+    #
     @test propertynames(ss) == tuple(m.allvars...)
     @test ss.pinf.level == ss.pinf.data[1]
     @test ss.pinf.slope == ss.pinf.data[2]
