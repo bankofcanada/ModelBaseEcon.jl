@@ -1262,7 +1262,7 @@ function add_equation!(model::Model, eqn_key::Symbol, expr::Expr; var_to_idx=get
         end
         if ex.head === :(=)
             # expression is an equation
-            done_equalsign[] && error_process("Multiple equali signs.", expr)
+            done_equalsign[] && error_process("Multiple equal signs.", expr)
             done_equalsign[] = true
             # recursively process the two sides of the equation
             lhs, rhs = ex.args
