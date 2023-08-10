@@ -1420,7 +1420,7 @@ is easier to call [`@reinitialize`](@ref), which automatically sets the
 some other module, then this can be done by calling this function instead of the
 macro.
 """
-function reinitialize!(model::Model, modelmodule::Module)
+function reinitialize!(model::Model, modelmodule::Module=moduleof(model))
     initfuncs(modelmodule)
     samename = Symbol[intersect(model.allvars, keys(model.parameters))...]
     if !isempty(samename)
@@ -1434,7 +1434,7 @@ function reinitialize!(model::Model, modelmodule::Module)
         if e.eval_resid == eqnnotready
             delete_sstate_equations!(model, key)
             delete_aux_equations!(model, key)
-            add_equation!(model, key, e.expr; modelmodule=modelmodule, var_to_idx=var_to_idx)
+            add_equation!(model, key, e.expr; modelmodule, var_to_idx)
         else
             model.maxlag = max(model.maxlag, e.maxlag)
             model.maxlead = max(model.maxlead, e.maxlead)
@@ -1490,7 +1490,7 @@ macro reinitialize(model::Symbol)
     # @__MODULE__ is this module (ModelBaseEcon)
     # __module__ is the module where this macro is called (the module where the model exists)
     return quote
-        $(thismodule).reinitialize!($(model), $(__module__))
+        $(thismodule).reinitialize!($(model))
     end |> esc
 end
 
