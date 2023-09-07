@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020-2022, Bank of Canada
+# Copyright (c) 2020-2023, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -71,7 +71,7 @@ _nstates(fb::AbstractFactorBlock) = error("Not implemented for $(typeof(fb))")
 "Return the number of state shocks in this block"
 _nstateshocks(fb::AbstractFactorBlock) = error("Not implemented for $(typeof(fb))")
 #   The number of shocks U_t does not have to match neither the number of 
-#   factors nor the number of states.  We leave tha to the model developer, just tell us what it is.
+#   factors nor the number of states.  We leave that to the model developer, just tell us what it is.
 "Return the names of the observed variables affected by this block"
 _observed(fb::AbstractFactorBlock) = fb.variables
 "Return the number of observed variables that this block affects"
@@ -138,7 +138,7 @@ abstract type ARFactorBlock <: AbstractFactorBlock end
 _order(fb::ARFactorBlock) = length(fb.ARcoefs)
 # we have a state variable for each relevant lag of each factor
 _nstates(fb::ARFactorBlock) = _nfactors(fb) * _order(fb)
-# we have a shock for each facto, but no shocks for their lags
+# we have a shock for each factor, but no shocks for their lags
 _nstateshocks(fb::ARFactorBlock) = _nfactors(fb)
 """Return a matrix containing the AR coefficient for the given `lag ∈ 1:_order(fb)`."""
 _arcoefs(fb::ARFactorBlock) = fb.ARcoefs
@@ -229,7 +229,7 @@ block are independent AR(p) processes of the same order p. It is allowed to have
 multiple IdiosyncraticComponents blocks in the same factor model, possibly with
 different AR orders. Each observed variable must belong to at most one
 IdiosyncraticComponents block. Variables that do not belong to any
-IdiosyncraticComponents block will have an observation shock instead.
+IdiosyncraticComponents block will automatically receive an observation shock.
 """
 struct IdiosyncraticComponents <: ARFactorBlock
     name::Symbol
@@ -240,7 +240,7 @@ struct IdiosyncraticComponents <: ARFactorBlock
     variables::Vector{ModelSymbol}
     # IdiosyncraticComponents(n, a, s, v) = new(n, Symbol[], a, s, v)
 end
-# Constructor in case matrix-diagonals are given in Vectors
+# Constructor in case matrix-diagonals are given as Vectors
 IdiosyncraticComponents(n::Symbol, arc::AbstractVector{<:AbstractVector{<:Real}},
     sig2::AbstractVector{<:Real}, vars) =
     IdiosyncraticComponents(n, [Diagonal(convert(Vector{Float64}, ar)) for ar in arc],
@@ -297,7 +297,11 @@ end
 "Throw an error if given variables already have idiosyncratic components."
 @inline _check_icvars(model, vars) = begin
     _check_fbvars(model, vars)
-    dup = mapreduce(fb -> intersect(vars, _observed(fb)), union, _blocks(model); init=())
+    dup = ()
+    for fb in _blocks(model)
+        fb isa IdiosyncraticComponents || continue
+        dup = dup ∪ (vars ∩ _observed(fb))
+    end
     isempty(dup) || error("""These variables already have idiosyncratic components: $(join(dup, ", "))""")
 end
 

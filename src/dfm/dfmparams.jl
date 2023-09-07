@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020-2022, Bank of Canada
+# Copyright (c) 2020-2023, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -10,7 +10,7 @@
 #   TODO: 
 #      * provide user-friendly way to specify which means are known
 #      * provide user-friendly way to specify a pattern of known covariance entries
-#      * detect when estimate/known pattern changes and set .ready to false 
+#      * detect when estimate-vs-known pattern changes and set .ready to false 
 #
 #########################################################################
 #  Declaration of API for working with model parameters 
