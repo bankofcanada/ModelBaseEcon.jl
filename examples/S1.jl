@@ -28,4 +28,6 @@ end
 
 @steadystate model a = a_ss
 
+newmodel() = deepcopy(model)
+
 end

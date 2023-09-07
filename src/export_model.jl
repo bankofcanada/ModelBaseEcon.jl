@@ -66,7 +66,14 @@ function export_model(model::Model, name::AbstractString, fio::IO)
     if !isempty(parameters(model))
         println(fio, "@parameters model begin")
         for (n, p) in model.parameters
-            println(fio, "    ", n, " = ", p)
+            if typeof(p.value) <: AbstractModel || typeof(p.value) <: Parameters
+                @warn """The parameter "$n" is a $(typeof(p.value)) struct and is being exported as nothing.
+                         The resulting model may not compile."""
+                println(fio, "    ", """# the parameter :$n was a $(typeof(p.value)) which is not a supported type.""")
+                println(fio, "    ", n, " = ", nothing)
+            else
+                println(fio, "    ", n, " = ", p)
+            end
         end
         println(fio, "end # parameters")
         println(fio)
@@ -113,8 +120,10 @@ function export_model(model::Model, name::AbstractString, fio::IO)
 
     if !isempty(model.autoexogenize)
         println(fio, "@autoexogenize model begin")
-        for (k, v) in pairs(model.autoexogenize)
-            println(fio, "    ", k, " = ", v)
+        vars = collect(keys(model.autoexogenize))
+        sort!(vars)
+        for var in vars
+            println(fio, "    ", var, " = ", model.autoexogenize[var])
         end
         println(fio, "end # autoexogenize")
         println(fio)
@@ -123,9 +132,10 @@ function export_model(model::Model, name::AbstractString, fio::IO)
     alleqns = model.alleqns
     if !isempty(alleqns)
         println(fio, "@equations model begin")
-        for eqn in alleqns
-            str = sprint(print, eqn, context=fio, sizehint=0)
-            str = replace(str, r"(\s*\".*\"\s*)" => s"\1\\n    ")
+        for eqn_pair in alleqns
+            str = sprint(print, eqn_pair[2], context=fio, sizehint=0)
+            str = replace(str, r"(\s*\".*\"\n)" => s"\1    ")
+            str = replace(str, r":_S?S?EQ\d+(_AUX\d+)? => " => "") 
             println(fio, "    ", unescape_string(str))
         end
         println(fio, "end # equations")
@@ -135,14 +145,21 @@ function export_model(model::Model, name::AbstractString, fio::IO)
     println(fio, "@initialize model")
 
     sd = sstate(model)
-    for cons in sd.constraints
+    for cons_pair in sd.constraints
         println(fio)
-        println(fio, "@steadystate model ", cons)
+        str = sprint(print, cons_pair[2], context=fio, sizehint=0)
+        str = replace(str, r":_S?S?EQ\d+(_AUX\d+)? => " => "") 
+        println(fio, "@steadystate model ", str)
     end
 
     println(fio)
-    println(fio, "end # module ", name)
+    println(fio, "newmodel() = deepcopy(model)")
     println(fio)
+
+    println(fio)
+    println(fio, "end # module ", name)
 
     return nothing
 end
+
+    

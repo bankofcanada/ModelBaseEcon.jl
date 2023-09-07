@@ -77,6 +77,7 @@ struct Equation <: AbstractEquation
     # the Model object, which may not be available at the time the equation expression
     # is first read.
     doc::String
+    name::Symbol
     flags::EqnFlags
     "The original expression entered by the user"
     expr::ExtExpr      # original expression
@@ -100,7 +101,7 @@ end
 
 # 
 # dummy constructor - just stores the expresstion without any processing
-Equation(expr::ExtExpr) = Equation("", EqnFlags(), expr, Expr(:block), 
+Equation(expr::ExtExpr) = Equation("", :_unnamed_equation_, EqnFlags(), expr, Expr(:block), 
                                     LittleDict{Tuple{ModelSymbol, Int}, Symbol}(),
                                     LittleDict{ModelSymbol, Symbol}(), 
                                     LittleDict{Symbol, Symbol}(),
