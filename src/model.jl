@@ -391,7 +391,9 @@ export @parameters, @equations, @autoshocks, @autoexogenize
 export update_model_state!
 
 function update_model_state!(m)
+    hasproperty(m, :_state) || return
     m._state = m._state == :ready ? :dev : m._state
+    return
 end
 
 function parse_deletes(block::Expr)
