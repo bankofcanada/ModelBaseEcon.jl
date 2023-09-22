@@ -568,7 +568,11 @@ macro exogenous(model, block::Expr)
 end
 macro exogenous(model, vars::Symbol...)
     thismodule = @__MODULE__
-    return esc(:(unique!(append!($(model).variables, to_exog.($vars))); $(thismodule).update_model_state!($(model)); nothing))
+    return MacroTools.@q(begin
+        unique!(append!($(model).variables, to_exog.($vars)))
+        $thismodule.update_model_state!($(model))
+        nothing
+    end) |> esc
 end
 
 """
@@ -630,7 +634,11 @@ macro parameters(model, args::Expr...)
     if length(args) == 1 && args[1].head == :block
         args = args[1].args
     end
-    ret = Expr(:block, :($(model).parameters.mod[] = $__module__))
+    ret = Expr(:block, :(
+        if $model._state == :new
+            $model.parameters.mod[] = $__module__
+        end
+    ))
     for a in args
         if a isa LineNumberNode
             continue
@@ -644,7 +652,7 @@ macro parameters(model, args::Expr...)
         end
         throw(ArgumentError("Parameter definitions must be assignments, not\n  $a"))
     end
-    push!(ret.args, :($(thismodule).update_model_state!($(model)); nothing))
+    push!(ret.args, :($(thismodule).update_model_state!($(model))), nothing)
     return esc(ret)
 end
 
