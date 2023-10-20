@@ -442,6 +442,25 @@ end
         end
         @initialize m
     end
+
+    # test docstring
+    @test begin
+        local m = Model()
+        @variables m a
+        eq = ModelBaseEcon.process_equation(m, quote
+            "this is equation 1"
+            :E1 => a[t] = 0
+        end, modelmodule=@__MODULE__, eqn_name=:A)
+        eq.doc == "this is equation 1"
+    end
+
+    # test incomplete
+    @test_throws ArgumentError begin
+        local m = Model()
+        @variables m a
+        ModelBaseEcon.add_equation!(m, :A, Meta.parse("a[t] = "); modelmodule=@__MODULE__)
+    end
+
 end
 
 

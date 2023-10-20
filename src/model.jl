@@ -978,8 +978,8 @@ function process_equation(model::Model, expr::Expr;
     #  + remove line numbers from expression, but keep track so we can insert it into the residual functions
     #  + for each time-referenece of variable, create a dummy symbol that will be used in constructing the residual functions
     #
-    # leave numbers alone
-    process(num::Number) = num
+    # leave literal values alone
+    process(num) = num
     # store line number and discard it from the expression
     process(line::LineNumberNode) = (push!(source, line); nothing)
     # Symbols are left alone.
