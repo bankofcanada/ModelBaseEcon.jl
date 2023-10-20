@@ -1075,20 +1075,19 @@ function process_equation(model::Model, expr::Expr;
         # if we're still here, recursively process the arguments
         args = map(process, ex.args)
         # remove `nothing`
-        filter!(args) do a
-            a !== nothing
-        end
+        filter!(!isnothing, args)
         if ex.head == :if
             if length(args) == 3
-                return Expr(:call, :ifelse, args...)
+                return Expr(:call, :if, args...)
             else
                 error_process("Unable to process an `if` statement with a single branch. Use function `ifelse` instead.", expr)
             end
         end
-        if ex.head == :call
-            return Expr(:call, args...)
+        if ex.head ∈ (:call, :(&&), :(||))
+            return Expr(ex.head, args...)
         end
         if ex.head == :block && length(args) == 1
+            # unblock
             return args[1]
         end
         if ex.head == :incomplete

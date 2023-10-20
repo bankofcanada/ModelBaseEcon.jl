@@ -610,6 +610,8 @@ end
     @test ModelBaseEcon.process_equation(m, :(x[t] = ifelse(false, 2, 0)), eqn_name=:_EQ3) isa Equation
     p = 0
     @test_logs (:warn, r"Variable or shock .* without `t` reference.*"i) @assert ModelBaseEcon.process_equation(m, "x=$p", eqn_name=:_EQ4) isa Equation
+    @test ModelBaseEcon.process_equation(m, :(x[t] = if true && true 1 else 2 end), eqn_name=:_EQ2) isa Equation
+    @test ModelBaseEcon.process_equation(m, :(x[t] = if true || x[t]==1 2 else 1 end), eqn_name=:_EQ2) isa Equation
 end
 
 @testset "Meta" begin
