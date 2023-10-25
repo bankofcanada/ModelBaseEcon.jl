@@ -4,6 +4,7 @@ authors = ["Boyan Bejanov <bbejanov@bankofcanada.ca>", "Nicholas Labelle St-Pier
 version = "0.6.5"
 
 [deps]
+ComponentArrays = "b0b7db55-cfe3-40fc-9ded-d10e2dbeff66"
 Crayons = "a8cc5b0e-0ffa-5ad4-8c14-923d3ee1735f"
 DiffResults = "163ba53b-c6d8-5494-b064-1a9d43ac40c5"
 ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
@@ -14,6 +15,7 @@ Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 
 [compat]
+ComponentArrays = "0.15"
 Crayons = "4"
 DiffResults = "1.0"
 ForwardDiff = "0.10"
