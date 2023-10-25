@@ -77,7 +77,9 @@ export @using_example, @load_example
 
 ######################################################################
 
-include("dfm/dfmmodel.jl")
-include("dfm/dfmparams.jl")
+# include("dfm/dfmmodel.jl")
+# include("dfm/dfmparams.jl")
+
+include("dfm/DFMModels.jl")
 
 end # module
