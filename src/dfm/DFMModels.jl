@@ -7,13 +7,20 @@
 
 module DFMModels
 
+import ..ModelVariable
 import ..shocks
 import ..nshocks
+import ..allvars
+import ..nallvars
 
 import ..eval_resid
 import ..eval_RJ
 import ..eval_R!
 # import ..eval_RJ!
+
+import ..to_shock
+
+import ..AbstractModel
 
 using LinearAlgebra
 using OrderedCollections
@@ -24,7 +31,7 @@ using FillArrays
 ####################################################
 
 const LittleDictVec{K,V} = LittleDict{K,V,Vector{K},Vector{V}}
-const Sym = Union{AbstractString,Symbol}
+const Sym = Union{AbstractString,Symbol,ModelVariable}
 const LikeVec{T} = Union{Vector{T},NTuple{N,T} where {N},NamedTuple{NT,NTuple{N,T} where {N}} where {NT}}
 const SymVec = LikeVec{<:Sym}
 const DiagonalF64 = Diagonal{Float64,Vector{Float64}}
@@ -75,7 +82,7 @@ DFMModels
 
 ####################################################
 
-export DFMModel
+export DFMModel, DFMParams
 export DFMBlock, ComponentsBlock, ObservedBlock, CommonComponents, IdiosyncraticComponents
 export observed, nobserved, states, nstates
 export varshks, nvarshks, endog, nendog, exog, nexog
@@ -94,8 +101,8 @@ See also [`CommonComponents`](@ref), [`IdiosyncraticComponents`](@ref) and
 [`ObservedBlock`](@ref).
 """
 mutable struct ComponentsBlock{TYPE} <: DFMBlock
-    vars::Vector{Symbol}
-    shks::Vector{Symbol}
+    vars::Vector{ModelVariable}
+    shks::Vector{ModelVariable}
     size::Int
     order::Int
 end
@@ -103,7 +110,7 @@ end
 ComponentsBlock{TYPE}(name::Sym, size::Integer, order::Integer) where {TYPE} =
     begin
         vars = _make_factor_names(name, size)
-        shks = [Symbol(var, "_shk") for var in vars]
+        shks = [to_shock(Symbol(var, "_shk")) for var in vars]
         ComponentsBlock{TYPE}(vars, shks, Int(size), Int(order))
     end
 
@@ -137,8 +144,8 @@ A struct representing the observed variables in a DFM model.
 See also [`ComponentBlock`](@ref).
 """
 mutable struct ObservedBlock <: DFMBlock
-    vars::Vector{Symbol}
-    shks::Vector{Symbol}
+    vars::Vector{ModelVariable}
+    shks::Vector{ModelVariable}
     size::Int
     # order is always 0
     components::LittleDictVec{Symbol,ComponentsBlock}
@@ -148,7 +155,7 @@ mutable struct ObservedBlock <: DFMBlock
 end
 
 @inline ObservedBlock() = ObservedBlock(
-    Symbol[], Symbol[], 0,
+    ModelVariable[], ModelVariable[], 0,
     LittleDictVec{Symbol,ComponentsBlock}(),
     LittleDictVec{Symbol,Vector{Symbol}}(),
     LittleDictVec{Symbol,Vector{Symbol}}(),
@@ -161,7 +168,7 @@ end
 A struct representing a DFM model. It contains an [`ObservedBlock`](@ref) and 
 a collection of [`ComponentBlock`](@ref)s. 
 """
-mutable struct DFMModel
+mutable struct DFMModel <: AbstractModel
     name::Symbol
     _state::Symbol
     observed_block::ObservedBlock
@@ -175,14 +182,14 @@ const DFMBlockOrModel = Union{DFMModel,DFMBlock}
 #    functions 
 
 # info related to state-space representation of model
-@inline observed(::ComponentsBlock) = Symbol[]
+@inline observed(::ComponentsBlock) = ModelVariable[]
 @inline nobserved(::ComponentsBlock) = 0
 @inline observed(b::ObservedBlock) = b.vars
 @inline nobserved(b::ObservedBlock) = b.size
 @inline observed(m::DFMModel) = observed(m.observed_block)
 @inline nobserved(m::DFMModel) = nobserved(m.observed_block)
 
-@inline states(::ObservedBlock) = Symbol[]
+@inline states(::ObservedBlock) = ModelVariable[]
 @inline nstates(::ObservedBlock) = 0
 @inline states(b::ComponentsBlock) = b.vars
 @inline nstates(b::ComponentsBlock) = b.size
@@ -209,13 +216,15 @@ const DFMBlockOrModel = Union{DFMModel,DFMBlock}
 @inline endog(b::DFMBlock) = b.vars
 @inline nendog(b::DFMBlock) = b.size
 
-@inline exog(::ComponentsBlock) = Symbol[]
+@inline exog(::ComponentsBlock) = ModelVariable[]
 @inline nexog(::ComponentsBlock) = 0
-@inline exog(b::ObservedBlock) = mapfoldl(endog, append!, values(b.components), init=Symbol[])
+@inline exog(b::ObservedBlock) = mapfoldl(endog, append!, values(b.components), init=ModelVariable[])
 @inline nexog(b::ObservedBlock) = sum(nendog, values(b.components))
-@inline exog(::DFMModel) = Symbol[]
+@inline exog(::DFMModel) = ModelVariable[]
 @inline nexog(::DFMModel) = 0
 
+@inline allvars(bm::DFMBlockOrModel) = varshks(bm)
+@inline nallvars(bm::DFMBlockOrModel) = nvarshks(bm)
 
 for f = (:states, :shocks, :endog)
     nf = Symbol("n", f)
@@ -342,7 +351,7 @@ function _init_observed!(b::ObservedBlock)
     unique!(b.vars)
     b.size = length(b.vars)
     empty!(b.shks)
-    append!(b.shks, values(b.var2shk))
+    append!(b.shks, to_shock.(values(b.var2shk)))
     # build the inverse loadings map
     empty!(b.comp2vars)
     for (var, components) in b.var2comps
@@ -362,7 +371,7 @@ function _init_observed!(b::ObservedBlock)
         block isa IdiosyncraticComponents || continue
         block.size = length(vars)
         block.vars = map(v -> Symbol(v, "_cor"), vars)
-        block.shks = map(v -> Symbol(v, "_shk"), vars)
+        block.shks = map(v -> to_shock(Symbol(v, "_shk")), vars)
     end
     return b
 end
@@ -385,5 +394,32 @@ include("params.jl")
 include("evals.jl")
 include("utils.jl")
 
+export DFM
+mutable struct DFM <: AbstractModel
+    model::DFMModel
+    params::DFMParams
+end
+DFM() = DFM(DFMModel(), DFMParams())
+
+@inline eval_resid(point::AbstractMatrix, dfm::DFM) = eval_resid(point, dfm.model, dfm.params)
+@inline eval_RJ(point::AbstractMatrix, dfm::DFM) = eval_RJ(point, dfm.model, dfm.params)
+@inline eval_R!(R::AbstractVector, point::AbstractMatrix, dfm::DFM) = eval_R!(R, point, dfm.model, dfm.params)
+@inline eval_RJ!(R::AbstractVector, J::AbstractMatrix, point::AbstractMatrix, dfm::DFM) = eval_RJ!(R, J, point, dfm.model, dfm.params)
+@inline add_components!(dfm::DFM; kwargs...) = (add_components!(dfm.model, kwargs...); dfm)
+@inline add_components!(dfm::DFM, args...) = (add_components!(dfm.model, args...); dfm)
+@inline map_loadings!(dfm::DFM, args::Pair...) = (map_loadings!(dfm.model, args...); dfm)
+@inline add_shocks!(dfm::DFM, args...) = (add_shocks!(dfm.model, args...); dfm)
+@inline initialize_dfm!(dfm::DFM) = (initialize_dfm!(dfm.model); dfm.params = init_params(dfm.model); dfm)
+
+@inline lags(dfm::DFM) = lags(dfm.model)
+@inline leads(dfm::DFM) = leads(dfm.model)
+
+for f in (:observed, :states, :shocks, :endog, :exog, :varshks, :allvars)
+    nf = Symbol("n", f)
+    @eval begin
+        @inline $f(dfm::DFM) = $f(dfm.model)
+        @inline $nf(dfm::DFM) = $nf(dfm.model)
+    end
 end
 
+end
