@@ -7,14 +7,29 @@
 
 module DFMModels
 
-import ..shocks 
-import ..nshocks 
+import ..shocks
+import ..nshocks
 
+import ..eval_resid
+import ..eval_RJ
+import ..eval_R!
+# import ..eval_RJ!
+
+using LinearAlgebra
 using OrderedCollections
 using ComponentArrays
+using SparseArrays
+using FillArrays
 
-include("utils.jl")
+####################################################
 
+const LittleDictVec{K,V} = LittleDict{K,V,Vector{K},Vector{V}}
+const Sym = Union{AbstractString,Symbol}
+const LikeVec{T} = Union{Vector{T},NTuple{N,T} where {N},NamedTuple{NT,NTuple{N,T} where {N}} where {NT}}
+const SymVec = LikeVec{<:Sym}
+const DiagonalF64 = Diagonal{Float64,Vector{Float64}}
+
+####################################################
 
 """
 A Dynamic Factor Model (DFM) with n blocks is a state-space model with 
@@ -58,11 +73,15 @@ collection of components blocks.
 """
 DFMModels
 
+####################################################
+
 export DFMModel
 export DFMBlock, ComponentsBlock, ObservedBlock, CommonComponents, IdiosyncraticComponents
 export observed, nobserved, states, nstates
-export varshks, nvarshks, shocks, nshocks, endog, nendog, exog, nexog
+export varshks, nvarshks, endog, nendog, exog, nexog
+export lags, leads
 
+####################################################
 
 """Abstract type for all DFM blocks"""
 abstract type DFMBlock end
@@ -363,6 +382,8 @@ end
 export initialize_dfm!
 
 include("params.jl")
+include("evals.jl")
+include("utils.jl")
 
 end
 

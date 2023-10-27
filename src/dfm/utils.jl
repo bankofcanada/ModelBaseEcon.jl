@@ -1,11 +1,5 @@
 
 
-const LittleDictVec{K,V} = LittleDict{K,V,Vector{K},Vector{V}}
-
-const Sym = Union{AbstractString,Symbol}
-const LikeVec{T} = Union{Vector{T},NTuple{N,T} where {N},NamedTuple{NT,NTuple{N,T} where {N}} where {NT}}
-const SymVec = LikeVec{<:Sym}
-
 
 _num2sub(n::Integer) = n < 0 ? '₋' * _num2sub(-n) :
                        n < 10 ? string('₀' + n) :
