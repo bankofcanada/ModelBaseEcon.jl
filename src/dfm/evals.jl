@@ -25,36 +25,6 @@ function eval_RJ(point::AbstractMatrix, bm::DFMBlockOrModel, p::DFMParams)
 end
 
 
-function _wrap_arrays(bm::DFMBlockOrModel, R, J, point)
-    # number of equations (same as number of endogenous variables)
-    ne = nendog(bm)
-    # total number of variables
-    nv = nvarshks(bm)
-    # number of time periods
-    nt = lags(bm) + 1 + leads(bm)
-
-    # rows - equations correspond to endogenous variables
-    A1 = Axis{(; (endog(bm) .=> 1:ne)...)}
-    # columns - time periods - by - variables
-    A2 = FlatAxis
-    A3 = Axis{(; (varshks(bm) .=> 1:nv)...)}
-
-    if !isnothing(R) && size(R) !== (ne,)
-        throw(DimensionMismatch("Wrong size of R. Expected ($ne,), got $(size(R))"))
-    end
-    if !isnothing(J) && size(J) !== (ne, nt * nv)
-        throw(DimensionMismatch("Wrong size of J. Expected ($ne, $(nt*nv)), got $(size(J))"))
-    end
-    if !isnothing(point) && size(point) !== (nt, nv)
-        throw(DimensionMismatch("Wrong size of data point. Expected ($nt,$nv), got $(size(point))"))
-    end
-
-    CR = isnothing(R) ? nothing : ComponentArray(R, A1())
-    CJ = isnothing(J) ? nothing : ComponentArray(reshape(J, ne, nt, nv), A1(), A2(), A3())
-    Cpoint = isnothing(point) ? nothing : ComponentArray(point, A2(), A3())
-
-    return CR, CJ, Cpoint
-end
 
 function _eval_dfm_R!(CR, Cpoint, blk::ComponentsBlock, p::DFMParams)
     vars = endog(blk)

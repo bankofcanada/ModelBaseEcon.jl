@@ -41,7 +41,7 @@ function init_params!(p::DFMParams, blk::ObservedBlock)
         push!(loadings, name => _make_loading(block, length(vars)))
     end
     return DFMParams(p;
-        mean=Array{Float64}(undef, blk.size),
+        mean=DFMParams(; (v.name => 0 for v in endog(blk))...),
         loadings=DFMParams(; loadings...),
         covar=Array{Float64}(undef, nshocks(blk))
     )
@@ -53,5 +53,5 @@ function init_params!(p::DFMParams, m::DFMModel)
     for (name, block) in m.components
         push!(params, name => init_params(block))
     end
-    return DFMParams(p; params...)
+    return fill!(DFMParams(p; params...), 0.0)
 end
