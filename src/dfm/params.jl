@@ -1,3 +1,9 @@
+##################################################################################
+# This file is part of ModelBaseEcon.jl
+# BSD 3-Clause License
+# Copyright (c) 2020-2023, Bank of Canada
+# All rights reserved.
+##################################################################################
 
 export init_params, init_params!
 
@@ -55,3 +61,26 @@ function init_params!(p::DFMParams, m::DFMModel)
     end
     return fill!(DFMParams(p; params...), 0.0)
 end
+
+export get_covariance
+get_covariance(p::DFMParams, ::CommonComponents) = Symmetric(p.covar)
+get_covariance(p::DFMParams, ::IdiosyncraticComponents) = Diagonal(p.covar)
+get_covariance(p::DFMParams, ::ObservedBlock) = Diagonal(p.covar)
+function get_covariance(p::DFMParams, m::DFMModel)
+    shks = shocks(m)
+    nshks = length(shks)
+    COV = zeros(nshks, nshks)
+    AX = Axis{_enumerate_vars(shks)}
+    C = ComponentArray(COV, AX(), AX())
+    blk = m.observed_block
+    covar = get_covariance(p.observed, blk)
+    C[blk.shks, blk.shks] = covar
+    isdiagonal = length(covar) == 1 || covar isa Diagonal
+    for (name, blk) in m.components
+        covar = get_covariance(getproperty(p, name), blk)
+        C[blk.shks, blk.shks] = covar
+        isdiagonal = isdiagonal && (length(covar) == 1 || covar isa Diagonal)
+    end
+    return isdiagonal ? Diagonal(COV) : Symmetric(COV)
+end
+

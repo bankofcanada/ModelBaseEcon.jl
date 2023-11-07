@@ -1,9 +1,15 @@
+##################################################################################
+# This file is part of ModelBaseEcon.jl
+# BSD 3-Clause License
+# Copyright (c) 2020-2023, Bank of Canada
+# All rights reserved.
+##################################################################################
 
 _getcoef(::ComponentsBlock, p::DFMParams, i::Integer=1) = @view p.coefs[:, :, i]
-_getcoef(::IdiosyncraticComponents, p::DFMParams, i::Integer=1) = DiagonalF64(@view p.coefs[:, i])
+_getcoef(::IdiosyncraticComponents, p::DFMParams, i::Integer=1) = Diagonal(@view p.coefs[:, i])
 
 _getloading(::ComponentsBlock, p::DFMParams, name::Symbol) = getproperty(p.loadings, name)
-_getloading(blk::IdiosyncraticComponents, ::DFMParams, ::Symbol) = DiagonalF64(Ones(blk.size))
+_getloading(blk::IdiosyncraticComponents, ::DFMParams, ::Symbol) = Diagonal(Ones(blk.size))
 
 # export eval_RJ!
 
