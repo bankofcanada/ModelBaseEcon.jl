@@ -35,6 +35,7 @@ const Sym = Union{AbstractString,Symbol,ModelVariable}
 const LikeVec{T} = Union{Vector{T},NTuple{N,T} where {N},NamedTuple{NT,NTuple{N,T} where {N}} where {NT}}
 const SymVec = LikeVec{<:Sym}
 const DiagonalF64 = Diagonal{Float64,Vector{Float64}}
+const SymmetricF64 = Symmetric{Float64, Matrix{Float64}}
 
 ####################################################
 
@@ -401,24 +402,29 @@ mutable struct DFM <: AbstractModel
 end
 DFM() = DFM(DFMModel(), DFMParams())
 
-@inline eval_resid(point::AbstractMatrix, dfm::DFM) = eval_resid(point, dfm.model, dfm.params)
-@inline eval_RJ(point::AbstractMatrix, dfm::DFM) = eval_RJ(point, dfm.model, dfm.params)
-@inline eval_R!(R::AbstractVector, point::AbstractMatrix, dfm::DFM) = eval_R!(R, point, dfm.model, dfm.params)
-@inline eval_RJ!(R::AbstractVector, J::AbstractMatrix, point::AbstractMatrix, dfm::DFM) = eval_RJ!(R, J, point, dfm.model, dfm.params)
-@inline add_components!(dfm::DFM; kwargs...) = (add_components!(dfm.model, kwargs...); dfm)
-@inline add_components!(dfm::DFM, args...) = (add_components!(dfm.model, args...); dfm)
-@inline map_loadings!(dfm::DFM, args::Pair...) = (map_loadings!(dfm.model, args...); dfm)
-@inline add_shocks!(dfm::DFM, args...) = (add_shocks!(dfm.model, args...); dfm)
-@inline initialize_dfm!(dfm::DFM) = (initialize_dfm!(dfm.model); dfm.params = init_params(dfm.model); dfm)
+eval_resid(point::AbstractMatrix, dfm::DFM) = eval_resid(point, dfm.model, dfm.params)
+eval_RJ(point::AbstractMatrix, dfm::DFM) = eval_RJ(point, dfm.model, dfm.params)
+eval_R!(R::AbstractVector, point::AbstractMatrix, dfm::DFM) = eval_R!(R, point, dfm.model, dfm.params)
+eval_RJ!(R::AbstractVector, J::AbstractMatrix, point::AbstractMatrix, dfm::DFM) = eval_RJ!(R, J, point, dfm.model, dfm.params)
+add_components!(dfm::DFM; kwargs...) = (add_components!(dfm.model, kwargs...); dfm)
+add_components!(dfm::DFM, args...) = (add_components!(dfm.model, args...); dfm)
+map_loadings!(dfm::DFM, args::Pair...) = (map_loadings!(dfm.model, args...); dfm)
+add_shocks!(dfm::DFM, args...) = (add_shocks!(dfm.model, args...); dfm)
+initialize_dfm!(dfm::DFM) = (initialize_dfm!(dfm.model); dfm.params = init_params(dfm.model); dfm)
 
-@inline lags(dfm::DFM) = lags(dfm.model)
-@inline leads(dfm::DFM) = leads(dfm.model)
+lags(dfm::DFM) = lags(dfm.model)
+leads(dfm::DFM) = leads(dfm.model)
+
+get_covariance(dfm::DFM) = get_covariance(dfm.params, dfm.model)
+get_covariance(dfm::DFM, blk::Sym) = get_covariance(dfm, Val(Symbol(blk)))
+get_covariance(dfm::DFM, ::Val{:observed}) = get_covariance(dfm.params.observed, dfm.model.observed_block)
+get_covariance(dfm::DFM, v::Val{B}) where B = (@nospecialize(v); get_covariance(getproperty(dfm.params, B), dfm.model.components[B]))
 
 for f in (:observed, :states, :shocks, :endog, :exog, :varshks, :allvars)
     nf = Symbol("n", f)
     @eval begin
-        @inline $f(dfm::DFM) = $f(dfm.model)
-        @inline $nf(dfm::DFM) = $nf(dfm.model)
+        $f(dfm::DFM) = $f(dfm.model)
+        $nf(dfm::DFM) = $nf(dfm.model)
     end
 end
 
