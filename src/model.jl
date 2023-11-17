@@ -413,7 +413,7 @@ function parse_deletes(block::Expr)
                 # @delete line
                 args = filter(a -> !isa(a, LineNumberNode), expr.args[2:end])
                 push!(removals.args, args...)
-            else 
+            else
                 # regular / complex variable
                 args = filter(a -> !isa(a, LineNumberNode), expr.args)
                 push!(additions.args, expr)
@@ -476,7 +476,7 @@ macro variables(model, block::Expr)
     return esc(:(
         unique!(deleteat!($(model).variables, findall(x -> x ∈ $(removals.args), $(model).variables)));
         unique!(append!($(model).variables, $(additions.args)));
-        $(thismodule).update_model_state!($(model)); 
+        $(thismodule).update_model_state!($(model));
         nothing
     ))
 end
@@ -498,7 +498,7 @@ macro logvariables(model, block::Expr)
     return esc(:(
         unique!(deleteat!($(model).variables, findall(x -> x ∈ $(removals.args), $(model).variables)));
         unique!(append!($(model).variables, to_log.($(additions.args))));
-        $(thismodule).update_model_state!($(model)); 
+        $(thismodule).update_model_state!($(model));
         nothing
     ))
 end
@@ -519,7 +519,7 @@ macro neglogvariables(model, block::Expr)
     return esc(:(
         unique!(deleteat!($(model).variables, findall(x -> x ∈ $(removals.args), $(model).variables)));
         unique!(append!($(model).variables, to_neglog.($(additions.args))));
-        $(thismodule).update_model_state!($(model)); 
+        $(thismodule).update_model_state!($(model));
         nothing
     ))
 end
@@ -541,7 +541,7 @@ macro steadyvariables(model, block::Expr)
     return esc(:(
         unique!(deleteat!($(model).variables, findall(x -> x ∈ $(removals.args), $(model).variables)));
         unique!(append!($(model).variables, to_steady.($(additions.args))));
-        $(thismodule).update_model_state!($(model)); 
+        $(thismodule).update_model_state!($(model));
         nothing
     ))
 end
@@ -562,13 +562,17 @@ macro exogenous(model, block::Expr)
     return esc(:(
         unique!(deleteat!($(model).variables, findall(x -> x ∈ $(removals.args), $(model).variables)));
         unique!(append!($(model).variables, to_exog.($(additions.args))));
-        $(thismodule).update_model_state!($(model)); 
+        $(thismodule).update_model_state!($(model));
         nothing
     ))
 end
 macro exogenous(model, vars::Symbol...)
     thismodule = @__MODULE__
-    return esc(:(unique!(append!($(model).variables, to_exog.($vars))); $(thismodule).update_model_state!($(model)); nothing))
+    return MacroTools.@q(begin
+        unique!(append!($(model).variables, to_exog.($vars)))
+        $thismodule.update_model_state!($(model))
+        nothing
+    end) |> esc
 end
 
 """
@@ -583,7 +587,7 @@ macro shocks(model, block::Expr)
     return esc(:(
         unique!(deleteat!($(model).shocks, findall(x -> x ∈ $(removals.args), $(model).shocks)));
         unique!(append!($(model).shocks, to_shock.($(additions.args))));
-        $(thismodule).update_model_state!($(model)); 
+        $(thismodule).update_model_state!($(model));
         nothing
     ))
 end
@@ -608,7 +612,7 @@ macro autoshocks(model, suf="_shk")
         push!($(model).autoexogenize, (
             v.name => Symbol(v.name, $(QuoteNode(suf))) for v in $(model).variables if !isexog(v)
         )...)
-        $(thismodule).update_model_state!($(model));
+        $(thismodule).update_model_state!($(model))
         nothing
     end)
 end
@@ -630,7 +634,11 @@ macro parameters(model, args::Expr...)
     if length(args) == 1 && args[1].head == :block
         args = args[1].args
     end
-    ret = Expr(:block, :($(model).parameters.mod[] = $__module__))
+    ret = Expr(:block, :(
+        if $model._state == :new
+            $model.parameters.mod[] = $__module__
+        end
+    ))
     for a in args
         if a isa LineNumberNode
             continue
@@ -644,7 +652,7 @@ macro parameters(model, args::Expr...)
         end
         throw(ArgumentError("Parameter definitions must be assignments, not\n  $a"))
     end
-    push!(ret.args, :($(thismodule).update_model_state!($(model)); nothing))
+    push!(ret.args, :($(thismodule).update_model_state!($(model))), nothing)
     return esc(ret)
 end
 
@@ -708,7 +716,7 @@ macro autoexogenize(model, block::Expr)
             autoexos[expr.args[1]] = expr.args[2]
         elseif expr isa Expr && expr.head == :call && expr.args[1] == :(=>)
             autoexos[expr.args[2]] = expr.args[3]
-        else 
+        else
             err = ArgumentError("Expression does not appear to be an equation or pair: $expr")
             return esc(:(throw($err)))
         end
@@ -716,8 +724,8 @@ macro autoexogenize(model, block::Expr)
 
     return esc(:(
         $(thismodule).deleteautoexogenize!($(model).autoexogenize, $(removed_autoexos));
-        merge!($(model).autoexogenize, $(autoexos)); 
-        $(thismodule).update_model_state!($(model)); 
+        merge!($(model).autoexogenize, $(autoexos));
+        $(thismodule).update_model_state!($(model));
         nothing
     ))
 end
@@ -743,12 +751,12 @@ function deleteautoexogenize!(autoexogdict, entries)
             The paired symbol for $(entry[2]) is $(autoexogdict[entry[2]])."""
             continue
         elseif value_in_values
-            k = [k for (k,v) in autoexogdict if v==entry[2]]
+            k = [k for (k, v) in autoexogdict if v == entry[2]]
             @warn """Cannot remove autoexogenize $(entry[1]) => $(entry[2]).
             The paired symbol for $(entry[2]) is $(k[1])."""
             continue
         elseif key_in_values
-            k = [k for (k,v) in autoexogdict if v==entry[1]]
+            k = [k for (k, v) in autoexogdict if v == entry[1]]
             @warn """Cannot remove autoexogenize $(entry[1]) => $(entry[2]).
             The paired symbol for $(entry[1]) is $(k[1])."""
             continue
@@ -800,13 +808,13 @@ macro equations(model, block::Expr)
     end
     ret = Expr(:block)
     removals, additions = parse_equation_deletes(block)
-    
+
     #removals
     if length(removals.args) > 0
         push!(ret.args, :($(thismodule).deleteequations!($(model), $(removals.args))))
         push!(ret.args, :($(thismodule).update_model_state!($(model)); nothing))
     end
-    
+
     # additions
     eqn = Expr(:block)
     for expr in additions.args
@@ -822,7 +830,7 @@ macro equations(model, block::Expr)
                 push!(ret.args, :($(thismodule).changeequations!($model.equations, $sym => $(Meta.quot(eqn)))))
             elseif expr.head == :macrocall
                 # This situation happens when the equation has a docstring, 
-                 if expr.args[end].head == :call && expr.args[end].args[1] == :(=>)
+                if expr.args[end].head == :call && expr.args[end].args[1] == :(=>)
                     sym = expr.args[end].args[2]
                     push!(ret.args, :($(thismodule).changeequations!($model.equations, $(sym) => $(Meta.quot(eqn)))))
                 else
@@ -834,7 +842,7 @@ macro equations(model, block::Expr)
             eqn = Expr(:block)
         end
     end
-    push!(ret.args, :($(thismodule).process_new_equations!($(model),  $(__module__)); $(thismodule).update_model_state!($(model)); nothing))
+    push!(ret.args, :($(thismodule).process_new_equations!($(model), $(__module__)); $(thismodule).update_model_state!($(model)); nothing))
     return esc(ret)
 end
 
@@ -970,8 +978,8 @@ function process_equation(model::Model, expr::Expr;
     #  + remove line numbers from expression, but keep track so we can insert it into the residual functions
     #  + for each time-referenece of variable, create a dummy symbol that will be used in constructing the residual functions
     #
-    # leave numbers alone
-    process(num::Number) = num
+    # leave literal values alone
+    process(num) = num
     # store line number and discard it from the expression
     process(line::LineNumberNode) = (push!(source, line); nothing)
     # Symbols are left alone.
@@ -1067,20 +1075,19 @@ function process_equation(model::Model, expr::Expr;
         # if we're still here, recursively process the arguments
         args = map(process, ex.args)
         # remove `nothing`
-        filter!(args) do a
-            a !== nothing
-        end
+        filter!(!isnothing, args)
         if ex.head == :if
             if length(args) == 3
-                return Expr(:call, :ifelse, args...)
+                return Expr(:call, :if, args...)
             else
                 error_process("Unable to process an `if` statement with a single branch. Use function `ifelse` instead.", expr)
             end
         end
-        if ex.head == :call
-            return Expr(:call, args...)
+        if ex.head ∈ (:call, :(&&), :(||))
+            return Expr(ex.head, args...)
         end
         if ex.head == :block && length(args) == 1
+            # unblock
             return args[1]
         end
         if ex.head == :incomplete
@@ -1217,7 +1224,7 @@ Usually there's no need to call this function directly. It is called during
 """
 function add_equation!(model::Model, eqn_key::Symbol, expr::Expr; var_to_idx=get_var_to_idx(model), modelmodule::Module=moduleof(model))
     source = LineNumberNode[]
-    auxeqns = OrderedDict{Symbol, Expr}()
+    auxeqns = OrderedDict{Symbol,Expr}()
     flags = EqnFlags()
     doc = ""
 
@@ -1262,7 +1269,7 @@ function add_equation!(model::Model, eqn_key::Symbol, expr::Expr; var_to_idx=get
         end
         if ex.head === :(=)
             # expression is an equation
-            done_equalsign[] && error_process("Multiple equali signs.", expr)
+            done_equalsign[] && error_process("Multiple equal signs.", expr)
             done_equalsign[] = true
             # recursively process the two sides of the equation
             lhs, rhs = ex.args
@@ -1310,7 +1317,7 @@ function add_equation!(model::Model, eqn_key::Symbol, expr::Expr; var_to_idx=get
                     end
                 end
                 aux_name = Symbol("$(eqn_key)_AUX$(length(auxeqns)+1)")
-                aux_expr = process_equation(model, Expr(:(=), arg, 0);  var_to_idx=var_to_idx, modelmodule=modelmodule, eqn_name=aux_name)
+                aux_expr = process_equation(model, Expr(:(=), arg, 0); var_to_idx=var_to_idx, modelmodule=modelmodule, eqn_name=aux_name)
                 if isempty(aux_expr.tsrefs)
                     # arg doesn't contain any variables, no need for substitution
                     @goto skip_substitution
@@ -1420,7 +1427,7 @@ is easier to call [`@reinitialize`](@ref), which automatically sets the
 some other module, then this can be done by calling this function instead of the
 macro.
 """
-function reinitialize!(model::Model, modelmodule::Module)
+function reinitialize!(model::Model, modelmodule::Module=moduleof(model))
     initfuncs(modelmodule)
     samename = Symbol[intersect(model.allvars, keys(model.parameters))...]
     if !isempty(samename)
@@ -1434,7 +1441,7 @@ function reinitialize!(model::Model, modelmodule::Module)
         if e.eval_resid == eqnnotready
             delete_sstate_equations!(model, key)
             delete_aux_equations!(model, key)
-            add_equation!(model, key, e.expr; modelmodule=modelmodule, var_to_idx=var_to_idx)
+            add_equation!(model, key, e.expr; modelmodule, var_to_idx)
         else
             model.maxlag = max(model.maxlag, e.maxlag)
             model.maxlead = max(model.maxlead, e.maxlead)
@@ -1490,7 +1497,7 @@ macro reinitialize(model::Symbol)
     # @__MODULE__ is this module (ModelBaseEcon)
     # __module__ is the module where this macro is called (the module where the model exists)
     return quote
-        $(thismodule).reinitialize!($(model), $(__module__))
+        $(thismodule).reinitialize!($(model))
     end |> esc
 end
 
@@ -1569,7 +1576,7 @@ Returns a vector of symbol keys for the Aux equations used for the given equatio
 """
 function get_aux_equation_keys(model::Model, eqn_key::Symbol)
     key_string = string(eqn_key)
-    aux_keys = filter(x -> contains(string(x)*"_AUX", key_string), keys(model.auxeqns))
+    aux_keys = filter(x -> contains(string(x) * "_AUX", key_string), keys(model.auxeqns))
     return aux_keys
 end
 
@@ -1589,12 +1596,12 @@ function delete_aux_equations!(model::Model, eqn_key::Symbol)
             eqn_map[var] = filter(x -> x ∉ [eqn_key, eqn_keys...], eqn_map[var])
         end
         removalindices = []
-        for (i,v) in enumerate(model.auxvars)
+        for (i, v) in enumerate(model.auxvars)
             if v.name ∉ keys(eqn_map) || length(eqn_map[v.name]) == 0
                 push!(removalindices, i)
             end
         end
-        unique!(deleteat!(model.auxvars, removalindices));
+        unique!(deleteat!(model.auxvars, removalindices))
     end
 end
 
@@ -1627,18 +1634,24 @@ end
 """
     find_main_equation(model, var)
 
-Return the name of the first equation that contains `var[t]`. Return `nothing`
-if there's no such equation.
+Return the name of the first equation that matches the pattern `var[t] = __`. If
+such equation does not exist, return the name of the first equation that
+contains `var[t]` anywhere in its expression. If that doesn't exist either,
+return `nothing`.
 """
 function find_main_equation(model::Model, var::Symbol)
+    first_eqn = nothing
+    pat = Expr(:(=), Expr(:ref, var, :t), :__)
     for (eqn_name, eqn) in pairs(model.equations)
-        for (t, sym) in eqn.tsrefs
-            if t[1].name == var && t[2] == 0
-                return eqn_name
-            end
+        haskey(eqn.tsrefs, (var, 0)) || continue
+        if MacroTools.@capture(eqn.expr, $pat)
+            return eqn_name
+        end
+        if first_eqn === nothing
+            first_eqn = eqn_name
         end
     end
-    return nothing
+    return first_eqn
 end
 export find_main_equation
 
@@ -1653,7 +1666,7 @@ Print the provided equation with the variables colored according to their type.
     * `target`::Symbol - if provided, the specified symbol will be presented in bright green.
     * `eq_symbols`::Vector{Any} - a vector of symbols present in the equation. Can slightly speed up processing if provided.
 """
-function prettyprint_equation(m::Model, eq::Union{Equation,SteadyStateEquation}; target::Symbol=nothing, eq_symbols::Vector{Symbol} = Symbol[], light::Bool=false)
+function prettyprint_equation(m::Model, eq::Union{Equation,SteadyStateEquation}; target::Symbol=nothing, eq_symbols::Vector{Symbol}=Symbol[], light::Bool=false)
     colors = [
         "#pp_target_color" => "#f4C095",
         "#pp_var_color" => "#1D7874",
@@ -1689,7 +1702,7 @@ function prettyprint_equation(m::Model, eq::Union{Equation,SteadyStateEquation};
     for p in colors
         eq_str = replace(eq_str, p)
     end
-    
+
     print_array = Vector{Any}()
     for part in split(eq_str, "|||")
         cray = findfirst("crayon", part)
@@ -1712,9 +1725,9 @@ destination vector.
 function find_symbols!(dest::Vector{Symbol}, v::Vector{Any})
     for el in v
         if el isa Expr
-            find_symbols!(dest, el.args)  
+            find_symbols!(dest, el.args)
         elseif el isa Symbol && !(el in [:+, :-, :*, :/, :^, :max, :min, :t, :log, :exp]) && !(el in dest)
-            push!(dest, el) 
+            push!(dest, el)
         end
     end
 end
@@ -1730,7 +1743,7 @@ equation.
 """
 function equation_symbols(e::Union{Equation,SteadyStateEquation})
     vars = Vector{Symbol}()
-    find_symbols!(vars, e.expr.args) 
+    find_symbols!(vars, e.expr.args)
     return vars
 end
 
@@ -1743,7 +1756,7 @@ Returns a dictionary with the keys being the symbols used in the models equation
 and the values being a vector of equation keys for equations which use these symbols. 
 """
 function equation_map(m::Model)
-    eqmap = Dict{Symbol, Any}()
+    eqmap = Dict{Symbol,Any}()
     for (key, eqn) in pairs(alleqns(m))
         for (var, time) in keys(eqn.tsrefs)
             if var.name ∈ keys(eqmap)
@@ -1766,7 +1779,7 @@ function equation_map(m::Model)
                 eqmap[var.name] = [key]
             end
         end
-    end 
+    end
     for (key, eqn) in pairs(m.sstate.constraints)
         for ind in eqn.vinds
             name = m.sstate.vars[(1+ind)÷2].name.name
@@ -1783,7 +1796,7 @@ function equation_map(m::Model)
                 eqmap[param] = [key]
             end
         end
-    end 
+    end
     return eqmap
 end
 
@@ -1823,7 +1836,7 @@ macro replaceparameterlinks(model, expr)
     return esc(:(
         $(thismodule).replaceparameterlinks!($model, $old, Meta.parse($new_string), $__module__);
         nothing
-        ));
+    ))
 end
 export @replaceparameterlinks
 
