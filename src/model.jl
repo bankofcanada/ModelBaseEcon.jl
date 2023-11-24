@@ -570,7 +570,11 @@ macro exogenous(model, block::Expr)
 end
 macro exogenous(model, vars::Symbol...)
     thismodule = @__MODULE__
-    return esc(:(unique!(append!($(model).variables, to_exog.($vars))); $(thismodule).update_model_state!($(model)); nothing))
+    return MacroTools.@q(begin
+        unique!(append!($(model).variables, to_exog.($vars)))
+        $thismodule.update_model_state!($(model))
+        nothing
+    end) |> esc
 end
 
 """
@@ -632,7 +636,11 @@ macro parameters(model, args::Expr...)
     if length(args) == 1 && args[1].head == :block
         args = args[1].args
     end
-    ret = Expr(:block, :($(model).parameters.mod[] = $__module__))
+    ret = Expr(:block, :(
+        if $model._state == :new
+            $model.parameters.mod[] = $__module__
+        end
+    ))
     for a in args
         if a isa LineNumberNode
             continue
@@ -646,7 +654,7 @@ macro parameters(model, args::Expr...)
         end
         throw(ArgumentError("Parameter definitions must be assignments, not\n  $a"))
     end
-    push!(ret.args, :($(thismodule).update_model_state!($(model)); nothing))
+    push!(ret.args, :($(thismodule).update_model_state!($(model))), nothing)
     return esc(ret)
 end
 
@@ -972,8 +980,8 @@ function process_equation(model::Model, expr::Expr;
     #  + remove line numbers from expression, but keep track so we can insert it into the residual functions
     #  + for each time-referenece of variable, create a dummy symbol that will be used in constructing the residual functions
     #
-    # leave numbers alone
-    process(num::Number) = num
+    # leave literal values alone
+    process(num) = num
     # store line number and discard it from the expression
     process(line::LineNumberNode) = (push!(source, line); nothing)
     # Symbols are left alone.
@@ -1069,20 +1077,19 @@ function process_equation(model::Model, expr::Expr;
         # if we're still here, recursively process the arguments
         args = map(process, ex.args)
         # remove `nothing`
-        filter!(args) do a
-            a !== nothing
-        end
+        filter!(!isnothing, args)
         if ex.head == :if
             if length(args) == 3
-                return Expr(:call, :ifelse, args...)
+                return Expr(:call, :if, args...)
             else
                 error_process("Unable to process an `if` statement with a single branch. Use function `ifelse` instead.", expr)
             end
         end
-        if ex.head == :call
-            return Expr(:call, args...)
+        if ex.head ∈ (:call, :(&&), :(||))
+            return Expr(ex.head, args...)
         end
         if ex.head == :block && length(args) == 1
+            # unblock
             return args[1]
         end
         if ex.head == :incomplete
