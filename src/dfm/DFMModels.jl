@@ -35,7 +35,7 @@ const Sym = Union{AbstractString,Symbol,ModelVariable}
 const LikeVec{T} = Union{Vector{T},NTuple{N,T} where {N},NamedTuple{NT,NTuple{N,T} where {N}} where {NT}}
 const SymVec = LikeVec{<:Sym}
 const DiagonalF64 = Diagonal{Float64,Vector{Float64}}
-const SymmetricF64 = Symmetric{Float64, Matrix{Float64}}
+const SymmetricF64 = Symmetric{Float64,Matrix{Float64}}
 
 ####################################################
 
@@ -108,12 +108,11 @@ mutable struct ComponentsBlock{TYPE} <: DFMBlock
     order::Int
 end
 
-ComponentsBlock{TYPE}(name::Sym, size::Integer, order::Integer) where {TYPE} =
-    begin
-        vars = _make_factor_names(name, size)
-        shks = [to_shock(Symbol(var, "_shk")) for var in vars]
-        ComponentsBlock{TYPE}(vars, shks, Int(size), Int(order))
-    end
+function ComponentsBlock{TYPE}(name::Sym, size::Integer, order::Integer) where {TYPE}
+    vars = _make_factor_names(name, size)
+    shks = [to_shock(Symbol(var, "_shk")) for var in vars]
+    return ComponentsBlock{TYPE}(vars, shks, Int(size), Int(order))
+end
 
 """
     CommonComponents = ComponentBlock{:Dense}
@@ -241,19 +240,19 @@ end
 
 #  Create an empty DFM model 
 #       m = DFMModel(<name>)
-#  Add factors and idiosyncratic components
+#  Add factors -- common and idiosyncratic components
 #       add_components!(m, 
 #           F = CommonComponents("F", 2, 1), 
 #           ic = IdiosyncraticComponents()
 #       )
-#  Add variables and map them to which components they load
-#       map_components!(m
+#  Add observed variables and map them to which components they load
+#       map_loadings!(m
 #           [:a, :b] => :F,
 #           :a => :ic
 #       )
 #  In this example the model has two observed variables.
 #  Both variables load the common factor F (two factors, VAR(1))
-#  Only :a has an idiosyncratic component. 
+#  Only :a has an idiosyncratic component, so :b needs an observation shock. 
 #  Add shocks
 #       add_shocks!(m, :b)
 #  This will add a shock :b_shk associated with the observation equation for :b.
@@ -418,7 +417,7 @@ leads(dfm::DFM) = leads(dfm.model)
 get_covariance(dfm::DFM) = get_covariance(dfm.params, dfm.model)
 get_covariance(dfm::DFM, blk::Sym) = get_covariance(dfm, Val(Symbol(blk)))
 get_covariance(dfm::DFM, ::Val{:observed}) = get_covariance(dfm.params.observed, dfm.model.observed_block)
-get_covariance(dfm::DFM, v::Val{B}) where B = (@nospecialize(v); get_covariance(getproperty(dfm.params, B), dfm.model.components[B]))
+get_covariance(dfm::DFM, v::Val{B}) where {B} = (@nospecialize(v); get_covariance(getproperty(dfm.params, B), dfm.model.components[B]))
 
 for f in (:observed, :states, :shocks, :endog, :exog, :varshks, :allvars)
     nf = Symbol("n", f)

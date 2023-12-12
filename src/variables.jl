@@ -1,9 +1,12 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020-2022, Bank of Canada
+# Copyright (c) 2020-2023, Bank of Canada
 # All rights reserved.
 ##################################################################################
+
+export AbstractVar
+abstract type AbstractVar{NAME} end
 
 export ModelVariable, ModelSymbol
 
@@ -57,23 +60,26 @@ Shock variables are always `:const` while regular variables are assumed
 `:growth`. They can be declared `:const` using `@steady`.
  
 """
-struct ModelVariable
+struct ModelVariable{name} <: AbstractVar{name}
     doc::String
-    name::Symbol
+    # name::Symbol
     vr_type::Symbol   # one of :var, :shock, :exog
     tr_type::Symbol    # transformation, one of :none, :log, :neglog
     ss_type::Symbol    # behaviour as t → ∞, one of :const, :growth
     # index::Int
     ModelVariable(d, n, vt, tt, st) = begin
+        n isa Symbol || error("Variable name must be a Symbol, not a $(typeof(n))")
         vt ∈ variable_types || error("Unknown variable type $vt. Expected one of $variable_types")
         tt ∈ transformation_types || error("Unknown transformation type $tt. Expected one of $transformation_types")
         st ∈ steadystate_types || error("Unknown steady state type $st. Expected one of $steadystate_types")
-        new(d, n, vt, tt, st)
+        new{n}(d, vt, tt, st)
     end
 end
 
-function Base.getproperty(v::ModelVariable, s::Symbol)
-    if s === :var_type
+function Base.getproperty(v::ModelVariable{name}, s::Symbol) where {name}
+    if s === :name
+        return name
+    elseif s === :var_type
         vt = getfield(v, :vr_type)
         if vt === :shock || vt === :exog
             return vt
@@ -239,18 +245,19 @@ isneglog(v::ModelVariable) = v.tr_type == :neglog
 export to_shock, to_exog, to_steady, to_lin, to_log, to_neglog
 export isshock, isexog, issteady, islin, islog, isneglog
 
-Core.Symbol(v::ModelVariable) = v.name
-Base.convert(::Type{Symbol}, v::ModelVariable) = v.name
+Core.Symbol(v::ModelVariable{NAME}) where {NAME} = NAME
+Base.convert(::Type{Symbol}, v::ModelVariable{NAME}) where {NAME} = NAME
 Base.convert(::Type{ModelVariable}, v::Symbol) = ModelVariable(v)
 Base.convert(::Type{ModelVariable}, v::Expr) = ModelVariable(v)
-Base.:(==)(a::ModelVariable, b::ModelVariable) = a.name == b.name
-Base.:(==)(a::ModelVariable, b::Symbol) = a.name == b
-Base.:(==)(a::Symbol, b::ModelVariable) = a == b.name
+Base.:(==)(::ModelVariable{NAME}, ::ModelVariable{NAME}) where {NAME} = true
+Base.:(==)(::ModelVariable, ::ModelVariable) = false
+Base.:(==)(::ModelVariable{NAME}, b::Symbol) where {NAME} = NAME == b
+Base.:(==)(a::Symbol, ::ModelVariable{NAME}) where {NAME} = a == NAME
 
 # The hash must be the same as the hash of the symbol, so that we can use
 # ModelVariable as index in a Dict with Symbol keys
-Base.hash(v::ModelVariable, h::UInt) = hash(v.name, h)
-Base.hash(v::ModelVariable) = hash(v.name)
+Base.hash(v::ModelVariable, h::UInt) = (@nospecialize; hash(v.name, h))
+Base.hash(v::ModelVariable) = (@nospecialize; hash(v.name))
 
 function Base.show(io::IO, v::ModelVariable)
     if get(io, :compact, false)
