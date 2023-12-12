@@ -14,8 +14,7 @@ _getloading(blk::IdiosyncraticComponents, ::DFMParams, ::Symbol) = Diagonal(Ones
 # export eval_RJ!
 
 _alloc_R(b_or_m) = Vector{Float64}(undef, nendog(b_or_m))
-_alloc_J(b::DFMModel) = spzeros(nendog(b), (1 + lags(b) + leads(b)) * nvarshks(b))
-_alloc_J(b::DFMBlock) = spzeros(nendog(b), (1 + lags(b) + leads(b)) * nvarshks(b))
+_alloc_J(b::DFMBlockOrModel) = spzeros(nendog(b), (1 + lags(b) + leads(b)) * nvarshks(b))
 
 function eval_resid(point::AbstractMatrix, bm::DFMBlockOrModel, p::DFMParams)
     R = _alloc_R(bm)
@@ -60,17 +59,17 @@ end
 
 
 function _eval_dfm_R!(CR, Cpoint, blk::ObservedBlock, p::DFMParams)
-    nvars = nendog(blk)
-    vars = endog(blk)
+    # nvars = nendog(blk)
+    vars = endog(blk)         # all observed vars
     #! this uses implementation detail of LittleDict
-    svars = blk.var2shk.keys
+    svars = blk.var2shk.keys  # observed vars with observation shocks
     sshks = blk.var2shk.vals
     CR[vars] = Cpoint[end, vars] - p.mean
     CR[svars] -= Cpoint[end, sshks]
     for (name, fblk) in blk.components
         # names of factors in this block
         fnames = endog(fblk)
-        # names of observed that are loading the factors in this block
+        # names of observed vars that are loading the factors in this block
         onames = blk.comp2vars[name]
         Λ = _getloading(fblk, p, name)
         CR[onames] -= Λ * Cpoint[end, fnames]

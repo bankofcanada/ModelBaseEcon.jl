@@ -24,6 +24,10 @@ _num2sub(n::Integer) = n < 0 ? '₋' * _num2sub(-n) :
 
 @inline _enumerate_vars(vars) = (; (Symbol(v) => n for (n, v) = enumerate(vars))...)
 
+_do_wrap(::Nothing, AXES...) = nothing
+_do_wrap(X::AbstractArray, AXES...) = ComponentArray(X, AXES...)
+_do_wrap(X, AXES...) = error("Unable to wrap $(nameof(typeof(X))) in a ComponentArray")
+
 function _wrap_arrays(bm::DFMBlockOrModel, R, J, point)
     # number of equations (same as number of endogenous variables)
     ne = nendog(bm)
@@ -51,20 +55,20 @@ function _wrap_arrays(bm::DFMBlockOrModel, R, J, point)
         throw(DimensionMismatch("Wrong size of data point. Expected ($nt,$nv), got $(size(point))"))
     end
 
-    CR = isnothing(R) ? nothing : ComponentArray(R, A1())
-    CJ = isnothing(J) ? nothing : ComponentArray(reshape(J, ne, nt, nv), A1(), A2(), A3())
-    Cpoint = isnothing(point) ? nothing : ComponentArray(point, A2(), A3())
+    CR = _do_wrap(R, A1())
+    CJ = _do_wrap(reshape(J, ne, nt, nv), A1(), A2(), A3())
+    Cpoint = _do_wrap(point, A2(), A3())
 
     return CR, CJ, Cpoint
 end
 
-@inline ComponentArrays.toval(v::ModelVariable) = ComponentArrays.toval(v.name)
+@inline ComponentArrays.toval(v::ModelVariable) = ComponentArrays.toval(Symbol(v))
 @inline ComponentArrays.toval(tv::NTuple{N,ModelVariable}) where {N} = ComponentArrays.toval(Symbol.(tv))
 @inline ComponentArrays.toval(av::AbstractArray{<:ModelVariable}) = ComponentArrays.toval(Symbol.(av))
 
-function copy_components_to!(dest::DFMParams, src::DFMParams)
+# function copy_components_to!(dest::DFMParams, src::DFMParams)
 
-end
+# end
 
 
 
