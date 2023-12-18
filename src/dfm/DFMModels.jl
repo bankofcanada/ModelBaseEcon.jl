@@ -399,7 +399,7 @@ mutable struct DFM <: AbstractModel
     model::DFMModel
     params::DFMParams
 end
-DFM() = DFM(DFMModel(), DFMParams())
+DFM(T::Type{<:Real}=Float64) = DFM(DFMModel(), DFMParams{T}())
 
 eval_resid(point::AbstractMatrix, dfm::DFM) = eval_resid(point, dfm.model, dfm.params)
 eval_RJ(point::AbstractMatrix, dfm::DFM) = eval_RJ(point, dfm.model, dfm.params)
