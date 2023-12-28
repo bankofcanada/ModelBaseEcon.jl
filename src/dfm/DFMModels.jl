@@ -414,10 +414,10 @@ initialize_dfm!(dfm::DFM) = (initialize_dfm!(dfm.model); dfm.params = init_param
 lags(dfm::DFM) = lags(dfm.model)
 leads(dfm::DFM) = leads(dfm.model)
 
-get_covariance(dfm::DFM) = get_covariance(dfm.params, dfm.model)
+get_covariance(dfm::DFM) = get_covariance(dfm.model, dfm.params)
 get_covariance(dfm::DFM, blk::Sym) = get_covariance(dfm, Val(Symbol(blk)))
-get_covariance(dfm::DFM, ::Val{:observed}) = get_covariance(dfm.params.observed, dfm.model.observed_block)
-get_covariance(dfm::DFM, v::Val{B}) where {B} = (@nospecialize(v); get_covariance(getproperty(dfm.params, B), dfm.model.components[B]))
+get_covariance(dfm::DFM, ::Val{:observed}) = get_covariance(dfm.model.observed_block, dfm.params.observed)
+get_covariance(dfm::DFM, v::Val{B}) where {B} = (@nospecialize(v); get_covariance(dfm.model.components[B], getproperty(dfm.params, B)))
 
 for f in (:observed, :states, :shocks, :endog, :exog, :varshks, :allvars)
     nf = Symbol("n", f)

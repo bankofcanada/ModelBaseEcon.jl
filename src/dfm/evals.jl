@@ -130,3 +130,76 @@ function eval_RJ!(R::AbstractVector, J::AbstractMatrix, point::AbstractMatrix, b
     return R, J
 end
 
+
+######################################################
+###   eval functions needed for the Kalman filter in StateSpaceEcon.Kalman 
+
+function fill_transition!(A::AbstractMatrix, bm::ComponentsBlock, params::DFMParams)
+    L = lags(bm)
+    NS = nstates(bm)
+    if L > 1
+        RA = reshape(A, NS, L, NS, L)
+        A .= 0
+        for l = 1:L-1
+            RA[:, l, :, l+1] = I(NS)
+        end
+        for l = 1:L
+            RA[:, L, :, L-l+1] = _getcoef(bm, params, l)
+        end
+    else
+        A .= _getcoef(bm, params, 1)
+    end
+    return A
+end
+
+function fill_transition!(A::AbstractMatrix, bm::DFMModel, params::DFMParams)
+    fill!(A, 0)
+    offset = 0
+    for (bname, blk) in bm.components
+        binds = offset .+ (1:lags(blk)*nstates(blk))
+        fill_transition!(view(A, binds, binds), blk, params[bname])
+        offset = last(binds)
+    end
+    return A
+end
+
+function fill_loading!(A::AbstractMatrix, M::DFMModel, P::DFMParams)
+    fill!(A, 0)
+    bm = M.observed_block
+    par = P.observed
+    yinds = _enumerate_vars(observed(bm))
+    offset = 0
+    for (bname, blk) in bm.components
+        L = lags(blk)
+        N = nstates(blk)
+        bxinds = (offset + (L-1)*N) .+ (1:N)
+        byinds = Int[yinds[v] for v in bm.comp2vars[bname]]
+        A[byinds, bxinds] .= _getloading(blk, par, bname)
+        offset = last(bxinds)
+    end
+    return A
+end
+
+function fill_covariance!(A::AbstractMatrix, M::DFMModel, P::DFMParams, ::Val{:Observed})
+    fill!(A, 0)
+    bm = M.observed_block
+    par = P.observed
+    yinds = _enumerate_vars(observed(bm))
+    shk_inds = Int[yinds[v] for v in keys(bm.var2shk)]
+    A[shk_inds, shk_inds] = get_covariance(bm, par)
+    return A
+end
+
+function fill_covariance!(A::AbstractMatrix, M::DFMModel, P::DFMParams, ::Val{:State})
+    fill!(A, 0)
+    offset = 0
+    for (bname, blk) in M.components
+        L = lags(blk)
+        N = nstates(blk)
+        bxinds = (offset + (L-1)*N) .+ (1:N)
+        A[bxinds, bxinds] = get_covariance(blk, P[bname])
+        offset = last(bxinds)
+    end
+    return A
+end
+
