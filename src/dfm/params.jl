@@ -63,21 +63,21 @@ function init_params!(p::DFMParams{T}, m::DFMModel) where {T<:Real}
 end
 
 export get_covariance
-get_covariance(p::DFMParams, ::CommonComponents) = Symmetric(p.covar)
-get_covariance(p::DFMParams, ::IdiosyncraticComponents) = Diagonal(p.covar)
-get_covariance(p::DFMParams, ::ObservedBlock) = Diagonal(p.covar)
-function get_covariance(p::DFMParams, m::DFMModel)
+get_covariance(::CommonComponents, p::DFMParams) = Symmetric(p.covar)
+get_covariance(::IdiosyncraticComponents, p::DFMParams) = Diagonal(p.covar)
+get_covariance(::ObservedBlock, p::DFMParams) = Diagonal(p.covar)
+function get_covariance(m::DFMModel, p::DFMParams)
     shks = shocks(m)
     nshks = length(shks)
     COV = zeros(nshks, nshks)
     AX = Axis{_enumerate_vars(shks)}
     C = ComponentArray(COV, AX(), AX())
     blk = m.observed_block
-    covar = get_covariance(p.observed, blk)
+    covar = get_covariance(blk, p.observed)
     C[blk.shks, blk.shks] = covar
     isdiagonal = length(covar) == 1 || covar isa Diagonal
     for (name, blk) in m.components
-        covar = get_covariance(getproperty(p, name), blk)
+        covar = get_covariance(blk, getproperty(p, name))
         C[blk.shks, blk.shks] = covar
         isdiagonal = isdiagonal && (length(covar) == 1 || covar isa Diagonal)
     end
