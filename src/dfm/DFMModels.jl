@@ -427,4 +427,16 @@ for f in (:observed, :states, :shocks, :endog, :exog, :varshks, :allvars)
     end
 end
 
+states_with_lags(m::DFM) = states_with_lags(m.model)
+states_with_lags(m::DFMModel) = 
+    mapfoldl(append!, values(m.components), init=states(m.observed_block)) do blk
+        s = states(blk)
+        ret = copy(s)
+        for l = 1:lags(blk) - 1
+            ret = [(Symbol(v, "_lag_", l) for v in s)..., ret...]
+        end
+        ret
+    end
+
+
 end
