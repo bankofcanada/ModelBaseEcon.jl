@@ -84,3 +84,6 @@ function get_covariance(m::DFMModel, p::DFMParams)
     return isdiagonal ? Diagonal(COV) : Symmetric(COV)
 end
 
+set_covariance!(p::DFMParams, ::ObservedBlock, val) = (p.covar[:] = diag(val); val)
+set_covariance!(p::DFMParams, ::IdiosyncraticComponents, val) = (p.covar[:] = diag(val); val)
+set_covariance!(p::DFMParams, ::CommonComponents, val) = (p.covar[:,:] = Symmetric(val); val)
