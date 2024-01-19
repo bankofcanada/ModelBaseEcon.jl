@@ -8,8 +8,14 @@
 _getcoef(::ComponentsBlock, p::DFMParams, i::Integer=1) = @view p.coefs[:, :, i]
 _getcoef(::IdiosyncraticComponents, p::DFMParams, i::Integer=1) = Diagonal(@view p.coefs[:, i])
 
+_setcoef!(::ComponentsBlock, p::DFMParams, val, i::Integer=1) = (p.coefs[:, :, i] = val; val)
+_setcoef!(::IdiosyncraticComponents, p::DFMParams, val, i::Integer=1) = (p.coefs[:, i] = diag(val); val)
+
 _getloading(::ComponentsBlock, p::DFMParams, name::Symbol) = getproperty(p.loadings, name)
 _getloading(blk::IdiosyncraticComponents, ::DFMParams, ::Symbol) = Diagonal(Ones(blk.size))
+
+_setloading!(::ComponentsBlock, p::DFMParams, val, name::Symbol) = setproperty!(p.loadings, name, val)
+_setloading!(::IdiosyncraticComponents, ::DFMParams, val, name::Symbol) = nothing
 
 # export eval_RJ!
 
@@ -134,12 +140,12 @@ end
 ######################################################
 ###   eval functions needed for the Kalman filter in StateSpaceEcon.Kalman 
 
-function fill_transition!(A::AbstractMatrix, bm::ComponentsBlock, params::DFMParams)
+function get_transition!(A::AbstractMatrix, bm::ComponentsBlock, params::DFMParams)
     L = lags(bm)
     NS = nstates(bm)
     if L > 1
+        fill!(A, 0)
         RA = reshape(A, NS, L, NS, L)
-        A .= 0
         for l = 1:L-1
             RA[:, l, :, l+1] = I(NS)
         end
@@ -147,23 +153,23 @@ function fill_transition!(A::AbstractMatrix, bm::ComponentsBlock, params::DFMPar
             RA[:, L, :, L-l+1] = _getcoef(bm, params, l)
         end
     else
-        A .= _getcoef(bm, params, 1)
+        A[:, :] = _getcoef(bm, params, 1)
     end
     return A
 end
 
-function fill_transition!(A::AbstractMatrix, bm::DFMModel, params::DFMParams)
+function get_transition!(A::AbstractMatrix, bm::DFMModel, params::DFMParams)
     fill!(A, 0)
     offset = 0
     for (bname, blk) in bm.components
         binds = offset .+ (1:lags(blk)*nstates(blk))
-        fill_transition!(view(A, binds, binds), blk, params[bname])
+        get_transition!(view(A, binds, binds), blk, params[bname])
         offset = last(binds)
     end
     return A
 end
 
-function fill_loading!(A::AbstractMatrix, M::DFMModel, P::DFMParams)
+function get_loading!(A::AbstractMatrix, M::DFMModel, P::DFMParams)
     fill!(A, 0)
     bm = M.observed_block
     par = P.observed
@@ -172,15 +178,19 @@ function fill_loading!(A::AbstractMatrix, M::DFMModel, P::DFMParams)
     for (bname, blk) in bm.components
         L = lags(blk)
         N = nstates(blk)
-        bxinds = (offset + (L-1)*N) .+ (1:N)
+        bxinds = (offset + (L - 1) * N) .+ (1:N)
         byinds = Int[yinds[v] for v in bm.comp2vars[bname]]
-        A[byinds, bxinds] .= _getloading(blk, par, bname)
+        A[byinds, bxinds] = _getloading(blk, par, bname)
         offset = last(bxinds)
     end
     return A
 end
 
-function fill_covariance!(A::AbstractMatrix, M::DFMModel, P::DFMParams, ::Val{:Observed})
+function get_mean!(mu::AbstractVector, ::DFMModel, P::DFMParams)
+    mu[:] = P.observed.mean
+end
+
+function get_covariance!(A::AbstractMatrix, M::DFMModel, P::DFMParams, ::Val{:Observed})
     fill!(A, 0)
     bm = M.observed_block
     par = P.observed
@@ -190,16 +200,83 @@ function fill_covariance!(A::AbstractMatrix, M::DFMModel, P::DFMParams, ::Val{:O
     return A
 end
 
-function fill_covariance!(A::AbstractMatrix, M::DFMModel, P::DFMParams, ::Val{:State})
+function get_covariance!(A::AbstractMatrix, M::DFMModel, P::DFMParams, ::Val{:State})
     fill!(A, 0)
     offset = 0
     for (bname, blk) in M.components
         L = lags(blk)
         N = nstates(blk)
-        bxinds = (offset + (L-1)*N) .+ (1:N)
+        bxinds = (offset + (L - 1) * N) .+ (1:N)
         A[bxinds, bxinds] = get_covariance(blk, P[bname])
         offset = last(bxinds)
     end
     return A
 end
 
+# The following functions do the opposite - update the parameter vector given the matrix
+
+function set_loading!(P::DFMParams, M::DFMModel, A::AbstractMatrix)
+    bm = M.observed_block
+    par = P.observed
+    yinds = _enumerate_vars(observed(bm))
+    offset = 0
+    for (bname, blk) in bm.components
+        L = lags(blk)
+        N = nstates(blk)
+        bxinds = (offset + (L - 1) * N) .+ (1:N)
+        byinds = Int[yinds[v] for v in bm.comp2vars[bname]]
+        _setloading!(blk, par, view(A, byinds, bxinds), bname)
+        offset = last(bxinds)
+    end
+    return P.observed.loadings
+end
+
+function set_mean!(P::DFMParams, ::DFMModel, mu::AbstractVector)
+    P.observed.mean[:] = mu
+    return P.observed.mean
+end
+
+function set_transition!(P::DFMParams, M::DFMModel, A::AbstractMatrix)
+    offset = 0
+    for (bname, blk) in M.components
+        binds = offset .+ (1:lags(blk)*nstates(blk))
+        set_transition!(getproperty(P, bname), blk, view(A, binds, binds))
+        offset = last(binds)
+    end
+    return P
+end
+
+function set_transition!(P::DFMParams, bm::ComponentsBlock, A::AbstractMatrix)
+    L = lags(bm)
+    NS = nstates(bm)
+    if L > 1
+        RA = reshape(A, NS, L, NS, L)
+        for l = 1:L
+            _setcoef!(bm, P, view(RA, :, L, :, L-l+1), l)
+        end
+    else
+        _setcoef!(bm, P, A, 1)
+    end
+    return P
+end
+
+function set_covariance!(P::DFMParams, M::DFMModel, A::AbstractMatrix, ::Val{:Observed})
+    bm = M.observed_block
+    par = P.observed
+    yinds = _enumerate_vars(observed(bm))
+    shk_inds = Int[yinds[v] for v in keys(bm.var2shk)]
+    set_covariance!(par, bm, view(A, shk_inds, shk_inds))
+    return par.covar
+end
+
+function set_covariance!(P::DFMParams, M::DFMModel, A::AbstractMatrix, ::Val{:State})
+    offset = 0
+    for (bname, blk) in M.components
+        L = lags(blk)
+        N = nstates(blk)
+        bxinds = (offset + (L - 1) * N) .+ (1:N)
+        set_covariance!(getproperty(P, bname), blk, view(A, bxinds, bxinds))
+        offset = last(bxinds)
+    end
+    return P
+end
