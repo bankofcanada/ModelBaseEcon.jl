@@ -158,10 +158,10 @@ function get_transition!(A::AbstractMatrix, bm::ComponentsBlock, params::DFMPara
     return A
 end
 
-function get_transition!(A::AbstractMatrix, bm::DFMModel, params::DFMParams)
+function get_transition!(A::AbstractMatrix, M::DFMModel, params::DFMParams)
     fill!(A, 0)
     offset = 0
-    for (bname, blk) in bm.components
+    for (bname, blk) in M.components
         binds = offset .+ (1:lags(blk)*nstates(blk))
         get_transition!(view(A, binds, binds), blk, params[bname])
         offset = last(binds)
@@ -171,16 +171,20 @@ end
 
 function get_loading!(A::AbstractMatrix, M::DFMModel, P::DFMParams)
     fill!(A, 0)
-    bm = M.observed_block
+    obs = M.observed_block
+    obs_comp = obs.components
+    obs_c2v = obs.comp2vars
     par = P.observed
-    yinds = _enumerate_vars(observed(bm))
+    yinds = _enumerate_vars(observed(obs))
     offset = 0
-    for (bname, blk) in bm.components
+    for (bname, blk) in M.components
         L = lags(blk)
         N = nstates(blk)
         bxinds = (offset + (L - 1) * N) .+ (1:N)
-        byinds = Int[yinds[v] for v in bm.comp2vars[bname]]
-        A[byinds, bxinds] = _getloading(blk, par, bname)
+        if haskey(obs_comp, bname)
+            byinds = Int[yinds[v] for v in obs_c2v[bname]]
+            A[byinds, bxinds] = _getloading(blk, par, bname)
+        end
         offset = last(bxinds)
     end
     return A
@@ -216,16 +220,20 @@ end
 # The following functions do the opposite - update the parameter vector given the matrix
 
 function set_loading!(P::DFMParams, M::DFMModel, A::AbstractMatrix)
-    bm = M.observed_block
+    obs = M.observed_block
+    obs_comp = obs.components
+    obs_c2v = obs.comp2vars
     par = P.observed
-    yinds = _enumerate_vars(observed(bm))
+    yinds = _enumerate_vars(observed(obs))
     offset = 0
-    for (bname, blk) in bm.components
+    for (bname, blk) in M.components
         L = lags(blk)
         N = nstates(blk)
         bxinds = (offset + (L - 1) * N) .+ (1:N)
-        byinds = Int[yinds[v] for v in bm.comp2vars[bname]]
-        _setloading!(blk, par, view(A, byinds, bxinds), bname)
+        if haskey(obs_comp, bname)
+            byinds = Int[yinds[v] for v in obs_c2v[bname]]
+            _setloading!(blk, par, view(A, byinds, bxinds), bname)
+        end
         offset = last(bxinds)
     end
     return P.observed.loadings
@@ -252,7 +260,7 @@ function set_transition!(P::DFMParams, bm::ComponentsBlock, A::AbstractMatrix)
     if L > 1
         RA = reshape(A, NS, L, NS, L)
         for l = 1:L
-            _setcoef!(bm, P, view(RA, :, L, :, L-l+1), l)
+            _setcoef!(bm, P, view(RA, :, L, :, L - l + 1), l)
         end
     else
         _setcoef!(bm, P, A, 1)
