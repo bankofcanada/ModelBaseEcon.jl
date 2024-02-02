@@ -15,12 +15,12 @@ _num2sub(n::Integer) = n < 0 ? '₋' * _num2sub(-n) :
 @inline _make_factor_names(name::Sym, ::Val{1})::Vector{Symbol} = Symbol[Symbol(name)]
 @inline _make_factor_names(name::Sym, ::Val{N}) where {N} = Symbol[Symbol(name, _num2sub(i)) for i = 1:N]
 
-@inline _tosymvec(s::Symbol)::Vector{Symbol} = [s]
-@inline _tosymvec(s::Sym)::Vector{Symbol} = [Symbol(s)]
+@inline _tosymvec(s::Symbol)::Vector{Symbol} = Symbol[s]
+@inline _tosymvec(s::Sym)::Vector{Symbol} = Symbol[Symbol(s)]
 @inline _tosymvec(v::Vector{Symbol})::Vector{Symbol} = v
 @inline _tosymvec(v::LikeVec{Symbol})::Vector{Symbol} = collect(v)
-@inline _tosymvec(v::Vector{<:Sym})::Vector{Symbol} = Symbol.(v)
-@inline _tosymvec(v::SymVec)::Vector{Symbol} = collect(Symbol.(v))
+@inline _tosymvec(v::Vector{<:Sym})::Vector{Symbol} = Symbol[Symbol(s) for s in v]
+@inline _tosymvec(v::SymVec)::Vector{Symbol} = Symbol[Symbol(s) for s in v]
 
 @inline _enumerate_vars(vars) = (; (Symbol(v) => n for (n, v) = enumerate(vars))...)
 
