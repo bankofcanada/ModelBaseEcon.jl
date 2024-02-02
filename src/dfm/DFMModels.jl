@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020-2023, Bank of Canada
+# Copyright (c) 2020-2024, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -260,6 +260,18 @@ end
 #  When the model is fully defined, call initialize
 #       initialize_dfm!(m)
 
+"""
+"""
+function add_observed!(m::DFMModel, names::SymVec)
+    obs_v2c = m.observed_block.var2comps
+    for var in names
+        get!(obs_v2c, Symbol(var), Symbol[])
+    end
+    return m
+end
+add_observed!(m::DFMModel, names::Sym...) = add_observed!(m, names)
+export add_observed!
+
 
 """
     add_components!(m::DFMModel; name = component, ...)
@@ -274,7 +286,7 @@ export add_components!
 function add_components!(m::DFMModel, args::Pair{<:Sym,<:ComponentsBlock}...)
     for (nm, df) in args
         nm = Symbol(nm)
-        haskey(m.components, nm) && @warn "Replacing block $(df.name)"
+        haskey(m.components, nm) && @warn "Replacing block $(nm)"
         push!(m.components, nm => df)
     end
     return m
@@ -301,9 +313,7 @@ function map_loadings!(m::DFMModel, args::Pair...)
     ocomps = obs.components
     mcomps = m.components
     for (vars, comp_names) in args
-        if !isa(comp_names, Vector{Symbol})
-            comp_names = _tosymvec(comp_names)
-        end
+        comp_names = _tosymvec(comp_names)
         # check that the component names are valid
         missing_names = setdiff(comp_names, keys(mcomps))
         if !isempty(missing_names)
@@ -330,15 +340,43 @@ end
 export add_shocks!
 add_shocks!(m::DFMModel, args...) = (add_shocks!(m.observed_block, args...); m)
 add_shocks!(b::ObservedBlock) = b
-function add_shocks!(b::ObservedBlock, var::Sym, args...)
+@inline function add_shocks!(b::ObservedBlock, var::Sym)
     push!(b.var2shk, Symbol(var) => Symbol(var, "_shk"))
-    return add_shocks!(b, args...)
+    return b
 end
-function add_shocks!(b::ObservedBlock, pair::Pair, args...)
+function add_shocks!(b::ObservedBlock, pair::Pair)
     var = Symbol(pair.first)
     shk = Symbol(pair.second)
     push!(b.var2shk, var => shk)
-    return add_shocks!(b, args...)
+    return b
+end
+add_shocks!(b::ObservedBlock, args...) = add_shocks!(b, args)
+function add_shocks!(b::ObservedBlock, args::LikeVec)
+    for a in args
+        add_shocks!(b, a)
+    end
+    return b
+end
+
+function _check_ic_shk(b::ObservedBlock)
+    v2s = b.var2shk
+    v2c = b.var2comps
+    for var in b.vars
+        x = haskey(v2s, var)
+        comps = getindex(v2c, var)
+        for (n, c) in b.components
+            c isa IdiosyncraticComponents || continue
+            n ∈ comps || continue
+            x = x + 1
+        end
+        x == 1 && continue
+        if x == 0
+            @warn "$var has neither shock nor idiosyncratic component."
+        else
+            @warn "$var has more than one shock or idiosyncratic components."
+        end
+    end
+    return b
 end
 
 function _init_observed!(b::ObservedBlock)
@@ -371,8 +409,9 @@ function _init_observed!(b::ObservedBlock)
         block isa IdiosyncraticComponents || continue
         block.size = length(vars)
         block.vars = map(v -> Symbol(v, "_cor"), vars)
-        block.shks = map(v -> to_shock(Symbol(v, "_shk")), vars)
+        block.shks = map(v -> to_shock(Symbol(v, "_cor_shk")), vars)
     end
+    # _check_ic_shk(b)
     return b
 end
 
@@ -409,6 +448,7 @@ add_components!(dfm::DFM; kwargs...) = (add_components!(dfm.model, kwargs...); d
 add_components!(dfm::DFM, args...) = (add_components!(dfm.model, args...); dfm)
 map_loadings!(dfm::DFM, args::Pair...) = (map_loadings!(dfm.model, args...); dfm)
 add_shocks!(dfm::DFM, args...) = (add_shocks!(dfm.model, args...); dfm)
+add_observed!(dfm::DFM, args...) = (add_observed!(dfm.model, args...); dfm)
 initialize_dfm!(dfm::DFM) = (initialize_dfm!(dfm.model); dfm.params = init_params(dfm.model); dfm)
 
 lags(dfm::DFM) = lags(dfm.model)
