@@ -106,12 +106,22 @@ mutable struct ComponentsBlock{TYPE} <: DFMBlock
     shks::Vector{ModelVariable}
     size::Int
     order::Int
+    nlags::Int
 end
 
-function ComponentsBlock{TYPE}(name::Sym, size::Integer, order::Integer) where {TYPE}
+function ComponentsBlock{TYPE}(names::SymVec, size::Integer, order::Integer, nlags::Integer) where {TYPE}
+    if length(names) != size
+        throw(ArgumentError("Number of names ($(length(names))) must match factor size ($(size))."))
+    end
+    vars = _tosymvec(names)
+    shks = _make_shocks(names)
+    return ComponentsBlock{TYPE}(vars, shks, Int(size), Int(order), Int(nlags))
+end
+
+function ComponentsBlock{TYPE}(name::Sym, size::Integer, order::Integer, nlags::Integer) where {TYPE}
     vars = _make_factor_names(name, size)
-    shks = [to_shock(Symbol(var, "_shk")) for var in vars]
-    return ComponentsBlock{TYPE}(vars, shks, Int(size), Int(order))
+    shks = _make_shocks(vars)
+    return ComponentsBlock{TYPE}(vars, shks, Int(size), Int(order), Int(nlags))
 end
 
 """
@@ -123,7 +133,7 @@ covariance matrix for this type of block are all dense matrices. See also
 [`IdiosyncraticComponents`](@ref).
 """
 const CommonComponents = ComponentsBlock{:Dense}
-CommonComponents(name::Sym, size::Integer=1; order::Integer=1) = CommonComponents(name, size, order)
+CommonComponents(name, size::Integer=name isa LikeVec ? length(name) : 1; order::Integer=1, nlags::Integer=order) = CommonComponents(name, size, order, nlags)
 
 """
     IdiosyncraticComponents = ComponentBlock{:Diagonal}
@@ -134,8 +144,59 @@ covariance matrix for this type of block are all diagonal. See also
 [`CommonComponents`](@ref).
 """
 const IdiosyncraticComponents = ComponentsBlock{:Diagonal}
-IdiosyncraticComponents(or::Integer=1; order::Integer=or) = IdiosyncraticComponents("", 0, order)
+IdiosyncraticComponents(or::Integer=1; order::Integer=or, nlags::Integer=order) = IdiosyncraticComponents("", 0, order, nlags)
 
+########## 
+###  Data structure and algorithms needed to keep track of which observed variable loads which component
+###  The components are organized in blocks.
+###  An observed can load the entire block (all components in it) or some components from a block.
+###  In both cases, the entire block is needed, plus information specifying all or which components are loaded.
+
+"abstract type for a reference to components"
+abstract type _BlockComponentRef{ALL,N,NAMES} end
+"reference to an entire block (all components in it)"
+struct _BlockRef{N,NAMES} <: _BlockComponentRef{true,N,NAMES}
+    names::NTuple{N,Symbol}
+    _BlockRef(names::SymVec) = (N = length(names); NAMES = ((Symbol(n) for n in names)...,); new{N,NAMES}(NAMES))
+end
+"reference to some, but not all, components in a block"
+struct _CompRef{N,NAMES} <: _BlockComponentRef{false,N,NAMES}
+    names::NTuple{N,Symbol}
+    inds::Vector{Int}
+    _CompRef(names::SymVec) = (N = length(names); NAMES = ((Symbol(n) for n in names)...,); new{N,NAMES}(NAMES, Int[]))
+end
+
+comp_ref(::_BlockComponentRef{ALL,N,NAMES}) where {ALL,N,NAMES} = _BlockRef(NAMES)
+comp_ref(::IdiosyncraticComponents) = _BlockRef(())
+comp_ref(b::CommonComponents) = _BlockRef(b.vars)
+comp_ref(b::CommonComponents, comp::Sym) = comp_ref(_CompRef(b.vars), Val(Symbol(comp)))
+comp_ref(c::_BlockRef, ::Sym) = c
+comp_ref(c::_BlockRef, ::Val) = c
+comp_ref(c::_CompRef, comp::Sym) = comp_ref(c, Val(Symbol(comp)))
+@generated function comp_ref(c::_CompRef{N,NAMES}, ::Val{comp}) where {N,NAMES,comp}
+    ind = 1
+    while ind <= N && NAMES[ind] != comp
+        ind += 1
+    end
+    ind > N && return :(throw(ArgumentError(string(comp) * " is not a component.")))
+    return quote
+        $ind in c.inds && return c
+        length(c.inds) == N - 1 && return _BlockRef(NAMES)
+        sort!(push!(c.inds, $ind))
+        return c
+    end
+end
+
+_n_comp_refs(::_BlockRef{0}) = error("Cannot determine the number of referenced components")
+_n_comp_refs(::_BlockRef{N}) where {N} = N
+_n_comp_refs(c::_CompRef) = length(c.inds)
+
+_inds_comp_refs(r::_BlockRef) = 1:_n_comp_refs(r)
+_inds_comp_refs(r::_CompRef) = r.inds
+
+Base.show(io::IO, c::_BlockComponentRef) = show(io, MIME"text/plain"(), c)
+Base.show(io::IO, ::MIME"text/plain", c::_BlockRef{N,NAMES}) where {N,NAMES} = print(io, NAMES)
+Base.show(io::IO, ::MIME"text/plain", c::_CompRef{N,NAMES}) where {N,NAMES} = print(io, NAMES[c.inds])
 
 """
     ObservedBlock <: DFMBlock
@@ -149,16 +210,16 @@ mutable struct ObservedBlock <: DFMBlock
     size::Int
     # order is always 0
     components::LittleDictVec{Symbol,ComponentsBlock}
-    var2comps::LittleDictVec{Symbol,Vector{Symbol}}
-    comp2vars::LittleDictVec{Symbol,Vector{Symbol}}
+    var2comps::LittleDictVec{Symbol,LittleDictVec{Symbol,_BlockComponentRef}}
+    comp2vars::LittleDictVec{Symbol,LittleDictVec{Symbol,_BlockComponentRef}}
     var2shk::LittleDictVec{Symbol,Symbol}
 end
 
 @inline ObservedBlock() = ObservedBlock(
     ModelVariable[], ModelVariable[], 0,
     LittleDictVec{Symbol,ComponentsBlock}(),
-    LittleDictVec{Symbol,Vector{Symbol}}(),
-    LittleDictVec{Symbol,Vector{Symbol}}(),
+    LittleDictVec{Symbol,LittleDictVec{Symbol,_BlockComponentRef}}(),
+    LittleDictVec{Symbol,LittleDictVec{Symbol,_BlockComponentRef}}(),
     LittleDictVec{Symbol,Symbol}(),
 )
 
@@ -200,7 +261,7 @@ const DFMBlockOrModel = Union{DFMModel,DFMBlock}
 
 @inline leads(::DFMBlockOrModel) = 0
 @inline lags(::ObservedBlock) = 0
-@inline lags(b::ComponentsBlock) = b.order
+@inline lags(b::ComponentsBlock) = b.nlags
 @inline lags(m::DFMModel) = maximum(lags, values(m.components))
 
 @inline varshks(bm::DFMBlockOrModel) = [endog(bm); exog(bm); shocks(bm)]
@@ -227,7 +288,7 @@ const DFMBlockOrModel = Union{DFMModel,DFMBlock}
 @inline nallvars(bm::DFMBlockOrModel) = nvarshks(bm)
 
 for f = (:states, :shocks, :endog)
-    nf = Symbol("n", f)
+    nf = Symbol(:n, f)
     @eval begin
         @inline $f(m::DFMModel) = mapfoldl($f, append!, values(m.components), init=copy($f(m.observed_block)))
         @inline $nf(m::DFMModel) = sum($nf, values(m.components), init=$nf(m.observed_block))
@@ -265,7 +326,7 @@ end
 function add_observed!(m::DFMModel, names::SymVec)
     obs_v2c = m.observed_block.var2comps
     for var in names
-        get!(obs_v2c, Symbol(var), Symbol[])
+        get!(obs_v2c, Symbol(var), LittleDictVec{Symbol,_BlockComponentRef}())
     end
     return m
 end
@@ -308,30 +369,42 @@ the model by previous calls to [`add_components!`](@ref).
 function map_loadings! end
 export map_loadings!
 
+_add_var2comp_ref(v2c, vars::SymVec, blk_name::Sym, blk::ComponentsBlock, comp::Sym...) = foreach(v -> _add_var2comp_ref(v2c, v, blk_name, blk, comp...), vars)
+function _add_var2comp_ref(v2c, var::Sym, blk_name::Sym, blk::ComponentsBlock, comp::Sym...)
+    tmp = get!(v2c, Symbol(var), LittleDictVec{Symbol,_BlockComponentRef}())
+    if haskey(tmp, blk_name)
+        tmp[blk_name] = comp_ref(tmp[blk_name], comp...)
+    else
+        tmp[blk_name] = comp_ref(blk, comp...)
+    end
+end
+
 function map_loadings!(m::DFMModel, args::Pair...)
     obs = m.observed_block
     ocomps = obs.components
     mcomps = m.components
     for (vars, comp_names) in args
         comp_names = _tosymvec(comp_names)
-        # check that the component names are valid
-        missing_names = setdiff(comp_names, keys(mcomps))
-        if !isempty(missing_names)
-            throw(ArgumentError("Component blocks by these names are missing from the model: $((missing_names...,))"))
-        end
         # add references to the component blocks to the observed block
         for cn in comp_names
-            ocomps[cn] = mcomps[cn]
-        end
-        # update our map
-        if vars isa Sym
-            tmp = get!(obs.var2comps, Symbol(vars), Symbol[])
-            append!(tmp, comp_names)
-        else
-            for var in vars
-                tmp = get!(obs.var2comps, Symbol(var), Symbol[])
-                append!(tmp, comp_names)
+            blk = get(mcomps, cn, nothing)
+            if !isnothing(blk)
+                ocomps[cn] = blk
+                _add_var2comp_ref(obs.var2comps, vars, cn, blk)
+                continue
             end
+            # cn name is not an entire block. Check component names
+            found = false
+            for (bname, blk) in mcomps
+                if cn in endog(blk)
+                    ocomps[bname] = blk
+                    _add_var2comp_ref(obs.var2comps, vars, bname, blk, cn)
+                    found = true
+                    break
+                end
+            end
+            found && continue
+            throw(ArgumentError("Component $cn not found in the model."))
         end
     end
     return m
@@ -341,7 +414,7 @@ export add_shocks!
 add_shocks!(m::DFMModel, args...) = (add_shocks!(m.observed_block, args...); m)
 add_shocks!(b::ObservedBlock) = b
 @inline function add_shocks!(b::ObservedBlock, var::Sym)
-    push!(b.var2shk, Symbol(var) => Symbol(var, "_shk"))
+    push!(b.var2shk, var => _make_shock(var))
     return b
 end
 function add_shocks!(b::ObservedBlock, pair::Pair)
@@ -350,13 +423,13 @@ function add_shocks!(b::ObservedBlock, pair::Pair)
     push!(b.var2shk, var => shk)
     return b
 end
-add_shocks!(b::ObservedBlock, args...) = add_shocks!(b, args)
-function add_shocks!(b::ObservedBlock, args::LikeVec)
-    for a in args
-        add_shocks!(b, a)
-    end
-    return b
-end
+add_shocks!(b::ObservedBlock, args...) = add_shocks!(add_shocks!(b, first(args)), Base.tail(args)...)
+# function add_shocks!(b::ObservedBlock, args::LikeVec)
+#     for a in args
+#         add_shocks!(b, a)
+#     end
+#     return b
+# end
 
 function _check_ic_shk(b::ObservedBlock)
     v2s = b.var2shk
@@ -380,8 +453,6 @@ function _check_ic_shk(b::ObservedBlock)
 end
 
 function _init_observed!(b::ObservedBlock)
-    # remove duplicates in components mentioned in the loadings map
-    foreach(unique!, values(b.var2comps))
     # add variables and shocks mentioned in the loadings and shocks maps
     empty!(b.vars)
     append!(b.vars, keys(b.var2comps))
@@ -389,27 +460,26 @@ function _init_observed!(b::ObservedBlock)
     unique!(b.vars)
     b.size = length(b.vars)
     empty!(b.shks)
-    append!(b.shks, to_shock.(values(b.var2shk)))
+    append!(b.shks, values(b.var2shk))
     # build the inverse loadings map
     empty!(b.comp2vars)
-    for (var, components) in b.var2comps
-        for blk in components
-            push!(get!(b.comp2vars, blk, Symbol[]), var)
+    for (varname, blkcomprefs) in b.var2comps
+        for (blkname, c) in blkcomprefs
+            tmp = get!(b.comp2vars, blkname, LittleDictVec{Symbol, _BlockComponentRef}())
+            push!(tmp, varname => c)
         end
     end
-    # remove any duplicates in var-lists
-    foreach(unique!, values(b.comp2vars))
     # resize idiosyncratic blocks as needed
     for (name, block) in b.components
-        vars = b.comp2vars[name]
+        vars = keys(b.comp2vars[name])
         if isempty(vars)
             @warn "No variables are loading the components in $name"
             continue
         end
         block isa IdiosyncraticComponents || continue
         block.size = length(vars)
-        block.vars = map(v -> Symbol(v, "_cor"), vars)
-        block.shks = map(v -> to_shock(Symbol(v, "_cor_shk")), vars)
+        block.vars = Symbol[Symbol(v, "_cor") for v in vars]
+        block.shks = _make_shocks(block.vars)
     end
     # _check_ic_shk(b)
     return b
@@ -468,11 +538,11 @@ for f in (:observed, :states, :shocks, :endog, :exog, :varshks, :allvars)
 end
 
 states_with_lags(m::DFM) = states_with_lags(m.model)
-states_with_lags(m::DFMModel) = 
+states_with_lags(m::DFMModel) =
     mapfoldl(append!, values(m.components), init=states(m.observed_block)) do blk
         s = states(blk)
         ret = copy(s)
-        for l = 1:lags(blk) - 1
+        for l = 1:lags(blk)-1
             ret = [(Symbol(v, "_lag_", l) for v in s)..., ret...]
         end
         ret

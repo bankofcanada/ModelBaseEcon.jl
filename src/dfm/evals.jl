@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020-2023, Bank of Canada
+# Copyright (c) 2020-2024, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -11,11 +11,35 @@ _getcoef(::IdiosyncraticComponents, p::DFMParams, i::Integer=1) = Diagonal(@view
 _setcoef!(::ComponentsBlock, p::DFMParams, val, i::Integer=1) = (p.coefs[:, :, i] = val; val)
 _setcoef!(::IdiosyncraticComponents, p::DFMParams, val, i::Integer=1) = (p.coefs[:, i] = diag(val); val)
 
-_getloading(::ComponentsBlock, p::DFMParams, name::Symbol) = getproperty(p.loadings, name)
-_getloading(blk::IdiosyncraticComponents, ::DFMParams, ::Symbol) = Diagonal(Ones(blk.size))
+_getloading(::IdiosyncraticComponents, var_comprefs::LittleDictVec{Symbol,_BlockComponentRef}, ::DFMParams, ::Symbol) = Diagonal(Ones(length(var_comprefs)))
+function _getloading(blk::ComponentsBlock, var_comprefs::LittleDictVec{Symbol,_BlockComponentRef}, p::DFMParams, name::Symbol)
+    pvals = getproperty(p.loadings, name)
+    all(c -> c isa _BlockRef, values(var_comprefs)) && return pvals
+    L = zeros(eltype(p), length(var_comprefs), blk.size)
+    idx_p = 0
+    for (i, cr) in enumerate(values(var_comprefs))
+        nvals = _n_comp_refs(cr)
+        L[i, _inds_comp_refs(cr)] = pvals[idx_p.+(1:nvals)]
+        idx_p = idx_p + nvals
+    end
+    return L
+end
 
-_setloading!(::ComponentsBlock, p::DFMParams, val, name::Symbol) = setproperty!(p.loadings, name, val)
-_setloading!(::IdiosyncraticComponents, ::DFMParams, val, name::Symbol) = nothing
+_setloading!(::IdiosyncraticComponents, var_comprefs::LittleDictVec{Symbol,_BlockComponentRef}, ::DFMParams, val, name::Symbol) = nothing
+function _setloading!(::ComponentsBlock, var_comprefs::LittleDictVec{Symbol,_BlockComponentRef}, p::DFMParams, val, name::Symbol)
+    pl = p.loadings
+    if all(c -> c isa _BlockRef, values(var_comprefs))
+        setproperty!(pl, name, val)
+    end
+    pvals = getproperty(pl, name)
+    idx_p = 0
+    for (i, cr) in enumerate(values(var_comprefs))
+        nvals = _n_comp_refs(cr)
+        pvals[idx_p.+(1:nvals)] = val[i, _inds_comp_refs(cr)]
+        idx_p = idx_p + nvals
+    end
+    return nothing
+end
 
 # export eval_RJ!
 
@@ -76,8 +100,9 @@ function _eval_dfm_R!(CR, Cpoint, blk::ObservedBlock, p::DFMParams)
         # names of factors in this block
         fnames = endog(fblk)
         # names of observed vars that are loading the factors in this block
-        onames = blk.comp2vars[name]
-        Λ = _getloading(fblk, p, name)
+        comprefs = blk.comp2vars[name]
+        onames = comprefs.keys
+        Λ = _getloading(fblk, comprefs, p, name)
         CR[onames] -= Λ * Cpoint[end, fnames]
     end
     return CR
@@ -98,8 +123,9 @@ function _eval_dfm_RJ!(CR, CJ, Cpoint, blk::ObservedBlock, p::DFMParams)
         # names of factors in this block
         fnames = endog(fblk)
         # names of observed that are loading the factors in this block
-        onames = blk.comp2vars[name]
-        Λ = _getloading(fblk, p, name)
+        comprefs = blk.comp2vars[name]
+        onames = comprefs.keys
+        Λ = _getloading(fblk, comprefs, p, name)
         CJ[onames, end, fnames] = -Λ
         CR[onames] -= Λ * Cpoint[end, fnames]
     end
@@ -182,8 +208,9 @@ function get_loading!(A::AbstractMatrix, M::DFMModel, P::DFMParams)
         N = nstates(blk)
         bxinds = (offset + (L - 1) * N) .+ (1:N)
         if haskey(obs_comp, bname)
-            byinds = Int[yinds[v] for v in obs_c2v[bname]]
-            A[byinds, bxinds] = _getloading(blk, par, bname)
+            crefs = obs_c2v[bname]
+            byinds = Int[yinds[v] for v in keys(crefs)]
+            A[byinds, bxinds] = _getloading(blk, crefs, par, bname)
         end
         offset = last(bxinds)
     end
@@ -231,8 +258,9 @@ function set_loading!(P::DFMParams, M::DFMModel, A::AbstractMatrix)
         N = nstates(blk)
         bxinds = (offset + (L - 1) * N) .+ (1:N)
         if haskey(obs_comp, bname)
-            byinds = Int[yinds[v] for v in obs_c2v[bname]]
-            _setloading!(blk, par, view(A, byinds, bxinds), bname)
+            crefs = obs_c2v[bname]
+            byinds = Int[yinds[v] for v in keys(crefs)]
+            _setloading!(blk, crefs, par, view(A, byinds, bxinds), bname)
         end
         offset = last(bxinds)
     end
