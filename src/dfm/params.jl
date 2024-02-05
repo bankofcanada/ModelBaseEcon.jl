@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020-2023, Bank of Canada
+# Copyright (c) 2020-2024, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -10,11 +10,16 @@ export init_params, init_params!
 const DFMParams{T<:Real} = ComponentArray{T}
 # DFMParams(x::DFMParams{T}; kwargs...)::DFMParams{T} where {T} = DFMParams{T}(; x..., kwargs...)
 
-function _make_loading(blk::CommonComponents, nobserved::Integer, T::Type{<:Real}=Float64)
-    Matrix{T}(undef, nobserved, blk.size)
+function _make_loading(blk::CommonComponents, vars_comprefs::LittleDictVec{Symbol,_BlockComponentRef}, T::Type{<:Real}=Float64)
+    nobserved = length(vars_comprefs)
+    all(c -> c isa _BlockRef, values(vars_comprefs)) && return Matrix{T}(undef, nobserved, blk.size)
+    nnz = sum(_n_comp_refs, values(vars_comprefs))
+    @assert (0 < nnz < nobserved * blk.size) "Unexpected number of non-zeros in loading."
+    return Vector{T}(undef, nnz)
 end
 
-function _make_loading(blk::IdiosyncraticComponents, nobserved::Integer, T::Type{<:Real}=Float64)
+function _make_loading(blk::IdiosyncraticComponents, vars_comprefs::LittleDictVec{Symbol,_BlockComponentRef}, T::Type{<:Real}=Float64)
+    nobserved = length(vars_comprefs)
     nobserved == blk.size || throw(DimensionMismatch("Size of idiosyncratic components block ($(blk.size)) does not match number of observed variables ($nobserved)."))
     Vector{T}(undef, nobserved)
 end
@@ -40,11 +45,11 @@ end
 
 function init_params!(p::DFMParams{T}, blk::ObservedBlock) where {T<:Real}
     loadings = Pair{Symbol,AbstractArray}[]
-    for (name, vars) = blk.comp2vars
-        block = blk.components[name]
+    for (blkname, vars_comprefs) = blk.comp2vars
+        block = blk.components[blkname]
         # idiosyncratic components and shocks don't get loadings (they're all ones)
         block isa IdiosyncraticComponents && continue
-        push!(loadings, name => _make_loading(block, length(vars), T))
+        push!(loadings, blkname => _make_loading(block, vars_comprefs, T))
     end
     return DFMParams{T}(; p...,
         mean=DFMParams{T}(; (v.name => 0 for v in endog(blk))...),
@@ -86,4 +91,4 @@ end
 
 set_covariance!(p::DFMParams, ::ObservedBlock, val) = (p.covar[:] = diag(val); val)
 set_covariance!(p::DFMParams, ::IdiosyncraticComponents, val) = (p.covar[:] = diag(val); val)
-set_covariance!(p::DFMParams, ::CommonComponents, val) = (p.covar[:,:] = Symmetric(val); val)
+set_covariance!(p::DFMParams, ::CommonComponents, val) = (p.covar[:, :] = Symmetric(val); val)

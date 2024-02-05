@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020-2023, Bank of Canada
+# Copyright (c) 2020-2024, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -21,6 +21,9 @@ _num2sub(n::Integer) = n < 0 ? '₋' * _num2sub(-n) :
 @inline _tosymvec(v::LikeVec{Symbol})::Vector{Symbol} = collect(v)
 @inline _tosymvec(v::Vector{<:Sym})::Vector{Symbol} = Symbol[Symbol(s) for s in v]
 @inline _tosymvec(v::SymVec)::Vector{Symbol} = Symbol[Symbol(s) for s in v]
+
+@inline _make_shock(name::Sym) = to_shock(Symbol(name, "_shk"))
+@inline _make_shocks(names) = ModelVariable[_make_shock(name) for name in names]
 
 @inline _enumerate_vars(vars) = (; (Symbol(v) => n for (n, v) = enumerate(vars))...)
 
