@@ -60,7 +60,9 @@ end
 
 function init_params!(p::DFMParams{T}, m::DFMModel) where {T<:Real}
     params = []
-    push!(params, :observed => init_params(m.observed_block, T))
+    for (name, block) in m.observed
+        push!(params, name => init_params(block, T))
+    end
     for (name, block) in m.components
         push!(params, name => init_params(block, T))
     end
@@ -77,10 +79,12 @@ function get_covariance(m::DFMModel, p::DFMParams)
     COV = zeros(nshks, nshks)
     AX = Axis{_enumerate_vars(shks)}
     C = ComponentArray(COV, AX(), AX())
-    blk = m.observed_block
-    covar = get_covariance(blk, p.observed)
-    C[blk.shks, blk.shks] = covar
-    isdiagonal = length(covar) == 1 || covar isa Diagonal
+    isdiagonal = false
+    for (name, blk) in m.observed
+        covar = get_covariance(blk, getproperty(p, name))
+        C[blk.shks, blk.shks] = covar
+        isdiagonal = isdiagonal && (length(covar) <= 1 || covar isa Diagonal)
+    end
     for (name, blk) in m.components
         covar = get_covariance(blk, getproperty(p, name))
         C[blk.shks, blk.shks] = covar

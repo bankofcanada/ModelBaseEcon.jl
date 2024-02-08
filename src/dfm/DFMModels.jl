@@ -31,9 +31,12 @@ using FillArrays
 ####################################################
 
 const LittleDictVec{K,V} = LittleDict{K,V,Vector{K},Vector{V}}
+const NamedList{V} = LittleDictVec{Symbol,V}
+
 const Sym = Union{AbstractString,Symbol,ModelVariable}
 const LikeVec{T} = Union{Vector{T},NTuple{N,T} where {N},NamedTuple{NT,NTuple{N,T} where {N}} where {NT}}
 const SymVec = LikeVec{<:Sym}
+
 const DiagonalF64 = Diagonal{Float64,Vector{Float64}}
 const SymmetricF64 = Symmetric{Float64,Matrix{Float64}}
 
@@ -94,14 +97,20 @@ export lags, leads
 """Abstract type for all DFM blocks"""
 abstract type DFMBlock end
 
+abstract type MixedFrequency end
+
 """
-    ComponentBlock{TYPE} <: DFMBlock
+    ComponentBlock{TYPE,MIXEDFREQ} <: DFMBlock
 
 A struct representing a block of latent components in a DFM model.
 See also [`CommonComponents`](@ref), [`IdiosyncraticComponents`](@ref) and
 [`ObservedBlock`](@ref).
+
+If MIXEDFREQ is not specified it defaults to a single-frequency model. `:MQ` means a model where
+some observed variables are Monthly and the rest are Quarterly. The type of each observed variable is
+determined by its idiosyncratic component.
 """
-mutable struct ComponentsBlock{TYPE} <: DFMBlock
+mutable struct ComponentsBlock{TYPE,MF<:MixedFrequency} <: DFMBlock
     vars::Vector{ModelVariable}
     shks::Vector{ModelVariable}
     size::Int
@@ -109,20 +118,34 @@ mutable struct ComponentsBlock{TYPE} <: DFMBlock
     nlags::Int
 end
 
-function ComponentsBlock{TYPE}(names::SymVec, size::Integer, order::Integer, nlags::Integer) where {TYPE}
+function ComponentsBlock{TYPE,MF}(names::SymVec, size::Integer, order::Integer, nlags::Integer) where {TYPE,MF}
     if length(names) != size
         throw(ArgumentError("Number of names ($(length(names))) must match factor size ($(size))."))
     end
     vars = _tosymvec(names)
     shks = _make_shocks(names)
-    return ComponentsBlock{TYPE}(vars, shks, Int(size), Int(order), Int(nlags))
+    return ComponentsBlock{TYPE,MF}(vars, shks, Int(size), Int(order), Int(nlags))
 end
 
-function ComponentsBlock{TYPE}(name::Sym, size::Integer, order::Integer, nlags::Integer) where {TYPE}
+function ComponentsBlock{TYPE,MF}(name::Sym, size::Integer, order::Integer, nlags::Integer) where {TYPE,MF}
     vars = _make_factor_names(name, size)
     shks = _make_shocks(vars)
-    return ComponentsBlock{TYPE}(vars, shks, Int(size), Int(order), Int(nlags))
+    return ComponentsBlock{TYPE,MF}(vars, shks, Int(size), Int(order), Int(nlags))
 end
+
+struct NoMixFreq <: MixedFrequency end
+struct MixFreq{WHICH} <: MixedFrequency end
+
+
+mf_ncoefs(MF::Type{<:MixedFrequency}) = length(mf_coefs(MF))
+mf_coefs(::Type{NoMixFreq}) = (1,)
+mf_coefs(::Type{MixFreq{:MQ}}) = (1, 2, 3, 2, 1)
+
+function MixFreq(WHICH::Symbol, blk::ComponentsBlock{TYPE,NoMixFreq}) where {TYPE}
+    MF = MixFreq{WHICH}
+    ComponentsBlock{TYPE,MF}(blk.vars, blk.shks, blk.size, blk.order, max(blk.nlags, mf_ncoefs(MF)))
+end
+export MixFreq, NoMixFreq
 
 """
     CommonComponents = ComponentBlock{:Dense}
@@ -132,8 +155,8 @@ variables. The loadings matrix, the trnasition matrices, and the shocks
 covariance matrix for this type of block are all dense matrices. See also
 [`IdiosyncraticComponents`](@ref).
 """
-const CommonComponents = ComponentsBlock{:Dense}
-CommonComponents(name, size::Integer=name isa LikeVec ? length(name) : 1; order::Integer=1, nlags::Integer=order) = CommonComponents(name, size, order, nlags)
+const CommonComponents{MF<:MixedFrequency} = ComponentsBlock{:Dense,MF}
+CommonComponents(name, size::Integer=name isa LikeVec ? length(name) : 1; order::Integer=1, nlags::Integer=order) = CommonComponents{NoMixFreq}(name, size, order, nlags)
 
 """
     IdiosyncraticComponents = ComponentBlock{:Diagonal}
@@ -143,8 +166,8 @@ variables. The loadings matrix, the trnasition matrices, and the shocks
 covariance matrix for this type of block are all diagonal. See also
 [`CommonComponents`](@ref).
 """
-const IdiosyncraticComponents = ComponentsBlock{:Diagonal}
-IdiosyncraticComponents(or::Integer=1; order::Integer=or, nlags::Integer=order) = IdiosyncraticComponents("", 0, order, nlags)
+const IdiosyncraticComponents{MF<:MixedFrequency} = ComponentsBlock{:Diagonal,MF}
+IdiosyncraticComponents(or::Integer=1; order::Integer=or, nlags::Integer=order) = IdiosyncraticComponents{NoMixFreq}("", 0, order, nlags)
 
 ########## 
 ###  Data structure and algorithms needed to keep track of which observed variable loads which component
@@ -170,9 +193,13 @@ comp_ref(::_BlockComponentRef{ALL,N,NAMES}) where {ALL,N,NAMES} = _BlockRef(NAME
 comp_ref(::IdiosyncraticComponents) = _BlockRef(())
 comp_ref(b::CommonComponents) = _BlockRef(b.vars)
 comp_ref(b::CommonComponents, comp::Sym) = comp_ref(_CompRef(b.vars), Val(Symbol(comp)))
-comp_ref(c::_BlockRef, ::Sym) = c
-comp_ref(c::_BlockRef, ::Val) = c
-comp_ref(c::_CompRef, comp::Sym) = comp_ref(c, Val(Symbol(comp)))
+comp_ref(c::_BlockComponentRef, comp::Sym) = comp_ref(c, Val(Symbol(comp)))
+@generated function comp_ref(c::_BlockRef{N,NAMES}, ::Val{comp}) where {N,NAMES,comp}
+    if N == 0 || comp in NAMES
+        return :(c)
+    end
+    return :(throw(ArgumentError(string(comp) * " is not a component.")))
+end
 @generated function comp_ref(c::_CompRef{N,NAMES}, ::Val{comp}) where {N,NAMES,comp}
     ind = 1
     while ind <= N && NAMES[ind] != comp
@@ -204,24 +231,29 @@ Base.show(io::IO, ::MIME"text/plain", c::_CompRef{N,NAMES}) where {N,NAMES} = pr
 A struct representing the observed variables in a DFM model.
 See also [`ComponentBlock`](@ref).
 """
-mutable struct ObservedBlock <: DFMBlock
+mutable struct ObservedBlock{MF<:MixedFrequency} <: DFMBlock
     vars::Vector{ModelVariable}
     shks::Vector{ModelVariable}
     size::Int
     # order is always 0
-    components::LittleDictVec{Symbol,ComponentsBlock}
-    var2comps::LittleDictVec{Symbol,LittleDictVec{Symbol,_BlockComponentRef}}
-    comp2vars::LittleDictVec{Symbol,LittleDictVec{Symbol,_BlockComponentRef}}
-    var2shk::LittleDictVec{Symbol,Symbol}
+    components::NamedList{ComponentsBlock}
+    var2comps::NamedList{NamedList{_BlockComponentRef}}
+    comp2vars::NamedList{NamedList{_BlockComponentRef}}
+    var2shk::NamedList{Symbol}
 end
 
-@inline ObservedBlock() = ObservedBlock(
+@inline ObservedBlock(MF::Type{<:MixedFrequency}=NoMixFreq) = ObservedBlock{MF}(
     ModelVariable[], ModelVariable[], 0,
-    LittleDictVec{Symbol,ComponentsBlock}(),
-    LittleDictVec{Symbol,LittleDictVec{Symbol,_BlockComponentRef}}(),
-    LittleDictVec{Symbol,LittleDictVec{Symbol,_BlockComponentRef}}(),
-    LittleDictVec{Symbol,Symbol}(),
+    NamedList{ComponentsBlock}(),
+    NamedList{NamedList{_BlockComponentRef}}(),
+    NamedList{NamedList{_BlockComponentRef}}(),
+    NamedList{Symbol}(),
 )
+
+function MixFreq(WHICH::Symbol, blk::ObservedBlock{NoMixFreq})
+    MF = MixFreq{WHICH}
+    ObservedBlock{MF}((getfield(blk, fn) for fn in fieldnames(typeof(blk)))...,)
+end
 
 """
     DFMModel
@@ -232,10 +264,10 @@ a collection of [`ComponentBlock`](@ref)s.
 mutable struct DFMModel <: AbstractModel
     name::Symbol
     _state::Symbol
-    observed_block::ObservedBlock
-    components::LittleDictVec{Symbol,ComponentsBlock}
+    observed::NamedList{ObservedBlock}
+    components::NamedList{ComponentsBlock}
 end
-DFMModel(name::Sym=:dfm) = DFMModel(Symbol(name), :new, ObservedBlock(), LittleDict{Symbol,ComponentsBlock}())
+DFMModel(name::Sym=:dfm) = DFMModel(Symbol(name), :new, NamedList{ObservedBlock}(), LittleDict{Symbol,ComponentsBlock}())
 
 const DFMBlockOrModel = Union{DFMModel,DFMBlock}
 
@@ -247,15 +279,17 @@ const DFMBlockOrModel = Union{DFMModel,DFMBlock}
 @inline nobserved(::ComponentsBlock) = 0
 @inline observed(b::ObservedBlock) = b.vars
 @inline nobserved(b::ObservedBlock) = b.size
-@inline observed(m::DFMModel) = observed(m.observed_block)
-@inline nobserved(m::DFMModel) = nobserved(m.observed_block)
+
+@inline observed(m::DFMModel) = mapfoldl(observed, append!, values(m.observed), init=ModelVariable[])
+@inline nobserved(m::DFMModel) = sum(nobserved, values(m.observed), init=0)
 
 @inline states(::ObservedBlock) = ModelVariable[]
 @inline nstates(::ObservedBlock) = 0
 @inline states(b::ComponentsBlock) = b.vars
 @inline nstates(b::ComponentsBlock) = b.size
-# @inline states(m::DFMModel) = mapfoldl(states, append!, values(m.components), init=copy(states(m.observed)))
-# @inline nstates(m::DFMModel) = sum(nstates, values(m.components), init=nstates(m.observed))
+
+@inline states(m::DFMModel) = mapfoldl(states, append!, values(m.components), init=ModelVariable[])
+@inline nstates(m::DFMModel) = sum(nstates, values(m.components), init=0)
 
 # info used in eval_XYZ functions
 
@@ -264,6 +298,8 @@ const DFMBlockOrModel = Union{DFMModel,DFMBlock}
 @inline lags(b::ComponentsBlock) = b.nlags
 @inline lags(m::DFMModel) = maximum(lags, values(m.components))
 
+@inline order(b::ComponentsBlock) = b.order
+
 @inline varshks(bm::DFMBlockOrModel) = [endog(bm); exog(bm); shocks(bm)]
 @inline nvarshks(bm::DFMBlockOrModel) = nendog(bm) + nexog(bm) + nshocks(bm)
 
@@ -271,8 +307,13 @@ const DFMBlockOrModel = Union{DFMModel,DFMBlock}
 @inline nshocks(b::ComponentsBlock) = b.size
 @inline shocks(b::ObservedBlock) = b.shks
 @inline nshocks(b::ObservedBlock) = length(b.shks)
-# @inline shocks(m::DFMModel) = mapfoldl(shocks, append!, values(m.components), init=copy(shocks(m.observed_block)))
-# @inline nshocks(m::DFMModel) = sum(shocks, values(m.components), init=nshocks(m.observed_block))
+
+add_state_shocks(m::DFMModel; init=ModelVariable[]) = mapfoldl(shocks, append!, values(m.components); init)
+add_nstate_shocks(m::DFMModel; init=0) = sum(nshocks, values(m.components); init)
+add_observed_shocks(m::DFMModel; init=ModelVariable[]) = mapfoldl(shocks, append!, values(m.observed); init)
+add_nobserved_shocks(m::DFMModel; init=0) = sum(nshocks, values(m.observed); init)
+@inline shocks(m::DFMModel) = (shks = add_observed_shocks(m); shks = add_state_shocks(m; init=shks); shks)
+@inline nshocks(m::DFMModel) = add_observed_shocks(m) + add_state_shocks(m)
 
 @inline endog(b::DFMBlock) = b.vars
 @inline nendog(b::DFMBlock) = b.size
@@ -287,13 +328,8 @@ const DFMBlockOrModel = Union{DFMModel,DFMBlock}
 @inline allvars(bm::DFMBlockOrModel) = varshks(bm)
 @inline nallvars(bm::DFMBlockOrModel) = nvarshks(bm)
 
-for f = (:states, :shocks, :endog)
-    nf = Symbol(:n, f)
-    @eval begin
-        @inline $f(m::DFMModel) = mapfoldl($f, append!, values(m.components), init=copy($f(m.observed_block)))
-        @inline $nf(m::DFMModel) = sum($nf, values(m.components), init=$nf(m.observed_block))
-    end
-end
+endog(m::DFMModel) = [observed(m); states(m)]
+nendog(m::DFMModel) = nobserved(m) + nstates(m)
 
 
 ## ##########################################################################
@@ -321,16 +357,51 @@ end
 #  When the model is fully defined, call initialize
 #       initialize_dfm!(m)
 
-"""
-"""
-function add_observed!(m::DFMModel, names::SymVec)
-    obs_v2c = m.observed_block.var2comps
-    for var in names
-        get!(obs_v2c, Symbol(var), LittleDictVec{Symbol,_BlockComponentRef}())
+
+add_observed!(m::DFMModel; kwargs...) = add_observed!(m, kwargs...)
+function add_observed!(m::DFMModel, args...)
+    for a in args
+        add_observed!(m, a)
     end
+    return m    
+end
+function add_observed!(m::DFMModel, (bname, blk)::Pair{<:Sym, <:ObservedBlock})
+    m.observed[bname] = blk
     return m
 end
-add_observed!(m::DFMModel, names::Sym...) = add_observed!(m, names)
+
+function add_observed!(m::DFMModel, (bname, vnames)::Pair{<:Sym, <:SymVec})
+    add_observed_vars!(get!(m.observed, bname, ObservedBlock()), vnames)    
+    return m
+end
+
+function add_observed!(m::DFMModel, (bname, var)::Pair{<:Sym, <:Sym})
+    add_observed_vars!(get!(m.observed, bname, ObservedBlock()), (var,))
+    return m
+end
+
+function add_observed_vars!(b::ObservedBlock, vars::SymVec)
+    v2c = b.var2comps
+    for var in vars
+        get!(v2c, Symbol(var), NamedList{_BlockComponentRef}())
+    end
+    return b
+end
+
+const dobn = :observed  # default observed block name
+
+function add_observed!(m::DFMModel, varnames::SymVec)
+    o = m.observed
+    if isempty(o) 
+        push!(o, dobn => add_observed_vars!(ObservedBlock(), varnames))
+        return m
+    end
+    if (length(o) == 1 && haskey(o, dobn))
+        add_observed_vars!(o[dobn], varnames)    
+        return m
+    end
+    error("Observed block not specified. Use `add_observed(m, block_name => (vars, ...))`.")
+end
 export add_observed!
 
 
@@ -369,9 +440,9 @@ the model by previous calls to [`add_components!`](@ref).
 function map_loadings! end
 export map_loadings!
 
-_add_var2comp_ref(v2c, vars::SymVec, blk_name::Sym, blk::ComponentsBlock, comp::Sym...) = foreach(v -> _add_var2comp_ref(v2c, v, blk_name, blk, comp...), vars)
-function _add_var2comp_ref(v2c, var::Sym, blk_name::Sym, blk::ComponentsBlock, comp::Sym...)
-    tmp = get!(v2c, Symbol(var), LittleDictVec{Symbol,_BlockComponentRef}())
+_add_var2comp_ref(v2c::NamedList{NamedList{_BlockComponentRef}}, vars::SymVec, blk_name::Sym, blk::ComponentsBlock, comp::Sym...) = foreach(v -> _add_var2comp_ref(v2c, v, blk_name, blk, comp...), vars)
+function _add_var2comp_ref(v2c::NamedList{NamedList{_BlockComponentRef}}, var::Sym, blk_name::Sym, blk::ComponentsBlock, comp::Sym...)
+    tmp = get!(v2c, Symbol(var), NamedList{_BlockComponentRef}())
     if haskey(tmp, blk_name)
         tmp[blk_name] = comp_ref(tmp[blk_name], comp...)
     else
@@ -379,26 +450,63 @@ function _add_var2comp_ref(v2c, var::Sym, blk_name::Sym, blk::ComponentsBlock, c
     end
 end
 
+_add_var2comp_ref(observed::NamedList{ObservedBlock}, var::Sym, blk_name::Sym, blk::ComponentsBlock, comp::Sym...) = _add_var2comp_ref(observed, (var,), blk_name, blk, comp...)
+function _add_var2comp_ref(observed::NamedList{ObservedBlock}, vars::SymVec, blk_name::Sym, blk::ComponentsBlock, comp::Sym...)
+    if isempty(observed)
+        # no observed block - create a default one
+        push!(observed, dobn => ObservedBlock())
+    end
+    if length(observed) == 1
+        # if there's only one observed block, all variables go into it
+        obnm, oblk = first(observed)
+        oblk.components[blk_name] = blk
+        _add_var2comp_ref(oblk.var2comps, vars, blk_name, blk, comp...)
+        return
+    end
+    # multiple observed blocks - no new variables allowed
+    not_done = trues(length(vars))
+    for (obnm, oblk) in observed
+        refd = false
+        v2c = oblk.var2comps
+        for (i,var) in enumerate(vars)
+            not_done[i] || continue
+            sv = Symbol(var)
+            haskey(v2c, sv) || continue
+            _add_var2comp_ref(v2c, sv, blk_name, blk, comp...)
+            refd = true
+            not_done[i] = false
+        end
+        if refd
+            oblk.components[blk_name] = blk
+        end
+    end
+    if any(not_done)
+        not_assigned = ((v for (i,v) in enumerate(vars) if not_done[i])...,)
+        error("Variables not assigned to an observed block: $(not_assigned)")
+    end
+    return
+end
+
+
 function map_loadings!(m::DFMModel, args::Pair...)
-    obs = m.observed_block
-    ocomps = obs.components
+    # obs = m.observed
+    # ocomps = obs.components
     mcomps = m.components
+    mobs = m.observed
     for (vars, comp_names) in args
         comp_names = _tosymvec(comp_names)
         # add references to the component blocks to the observed block
         for cn in comp_names
             blk = get(mcomps, cn, nothing)
             if !isnothing(blk)
-                ocomps[cn] = blk
-                _add_var2comp_ref(obs.var2comps, vars, cn, blk)
+                _add_var2comp_ref(mobs, vars, cn, blk)
                 continue
             end
             # cn name is not an entire block. Check component names
             found = false
             for (bname, blk) in mcomps
                 if cn in endog(blk)
-                    ocomps[bname] = blk
-                    _add_var2comp_ref(obs.var2comps, vars, bname, blk, cn)
+                    _add_var2comp_ref(mobs, vars, bname, blk, cn)
                     found = true
                     break
                 end
@@ -411,25 +519,51 @@ function map_loadings!(m::DFMModel, args::Pair...)
 end
 
 export add_shocks!
-add_shocks!(m::DFMModel, args...) = (add_shocks!(m.observed_block, args...); m)
-add_shocks!(b::ObservedBlock) = b
+# add_shocks!(b::ObservedBlock) = b
 @inline function add_shocks!(b::ObservedBlock, var::Sym)
     push!(b.var2shk, var => _make_shock(var))
     return b
 end
-function add_shocks!(b::ObservedBlock, pair::Pair)
+function add_shocks!(b::ObservedBlock, pair::Pair{<:Sym,<:Sym})
     var = Symbol(pair.first)
     shk = Symbol(pair.second)
     push!(b.var2shk, var => shk)
     return b
 end
-add_shocks!(b::ObservedBlock, args...) = add_shocks!(add_shocks!(b, first(args)), Base.tail(args)...)
-# function add_shocks!(b::ObservedBlock, args::LikeVec)
-#     for a in args
-#         add_shocks!(b, a)
-#     end
-#     return b
-# end
+
+add_shocks!(m::DFMModel, args...) = add_shocks!(m, args)
+function add_shocks!(m::DFMModel, args)
+    mobs = m.observed
+    if isempty(mobs)
+        push!(mobs, dobn => ObservedBlock())
+    end
+    if length(mobs) == 1
+        _, oblk = first(mobs)
+        for a in args
+            add_shocks!(oblk, a)
+        end
+        return m
+    end
+    for a in args
+        sv = a isa Sym ? Symbol(a) : Symbol(a[1])
+        found = false
+        for (_, oblk) in mobs
+            if haskey(oblk.var2comps, sv)
+                add_shocks!(oblk, a)
+                found = true
+                break
+            end
+        end
+        if !found
+            error("Variable $sv is not assigned to any observed block.")
+        end
+    end
+    return m
+end
+
+
+add_shocks!(b::ObservedBlock, var::Union{Sym,Pair{<:Sym,<:Sym}}, vars...) = add_shocks!(add_shocks!(b, var), vars...)
+add_shocks!(b::ObservedBlock, vars::LikeVec) = add_shocks!(b, vars...)
 
 function _check_ic_shk(b::ObservedBlock)
     v2s = b.var2shk
@@ -465,7 +599,7 @@ function _init_observed!(b::ObservedBlock)
     empty!(b.comp2vars)
     for (varname, blkcomprefs) in b.var2comps
         for (blkname, c) in blkcomprefs
-            tmp = get!(b.comp2vars, blkname, LittleDictVec{Symbol, _BlockComponentRef}())
+            tmp = get!(b.comp2vars, blkname, NamedList{_BlockComponentRef}())
             push!(tmp, varname => c)
         end
     end
@@ -493,7 +627,9 @@ receiving inputs from the model developer. Also perform checks for the integrity
 of the model provided by the model developer.
 """
 function initialize_dfm!(m::DFMModel)
-    _init_observed!(m.observed_block)
+    for oblk in values(m.observed)
+        _init_observed!(oblk)
+    end
     m._state = :ready
     return m
 end
@@ -539,7 +675,7 @@ end
 
 states_with_lags(m::DFM) = states_with_lags(m.model)
 states_with_lags(m::DFMModel) =
-    mapfoldl(append!, values(m.components), init=states(m.observed_block)) do blk
+    mapfoldl(append!, values(m.components), init=Symbol[]) do blk
         s = states(blk)
         ret = copy(s)
         for l = 1:lags(blk)-1
