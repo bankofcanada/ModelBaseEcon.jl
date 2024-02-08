@@ -11,8 +11,8 @@ _getcoef(::IdiosyncraticComponents, p::DFMParams, i::Integer=1) = Diagonal(@view
 _setcoef!(::ComponentsBlock, p::DFMParams, val, i::Integer=1) = (p.coefs[:, :, i] = val; val)
 _setcoef!(::IdiosyncraticComponents, p::DFMParams, val, i::Integer=1) = (p.coefs[:, i] = diag(val); val)
 
-_getloading(::IdiosyncraticComponents, var_comprefs::LittleDictVec{Symbol,_BlockComponentRef}, ::DFMParams, ::Symbol) = Diagonal(Ones(length(var_comprefs)))
-function _getloading(blk::ComponentsBlock, var_comprefs::LittleDictVec{Symbol,_BlockComponentRef}, p::DFMParams, name::Symbol)
+_getloading(::Pair{Symbol,<:IdiosyncraticComponents}, var_comprefs::NamedList{_BlockComponentRef}, ::DFMParams) = I(length(var_comprefs))
+function _getloading((name, blk)::Pair{Symbol,<:ComponentsBlock}, var_comprefs::NamedList{_BlockComponentRef}, p::DFMParams)
     pvals = getproperty(p.loadings, name)
     all(c -> c isa _BlockRef, values(var_comprefs)) && return pvals
     L = zeros(eltype(p), length(var_comprefs), blk.size)
@@ -25,8 +25,8 @@ function _getloading(blk::ComponentsBlock, var_comprefs::LittleDictVec{Symbol,_B
     return L
 end
 
-_setloading!(::IdiosyncraticComponents, var_comprefs::LittleDictVec{Symbol,_BlockComponentRef}, ::DFMParams, val, name::Symbol) = nothing
-function _setloading!(::ComponentsBlock, var_comprefs::LittleDictVec{Symbol,_BlockComponentRef}, p::DFMParams, val, name::Symbol)
+_setloading!(::Pair{Symbol,<:IdiosyncraticComponents}, var_comprefs::NamedList{_BlockComponentRef}, ::DFMParams, val) = nothing
+function _setloading!((name, _)::Pair{Symbol,<:ComponentsBlock}, var_comprefs::NamedList{_BlockComponentRef}, p::DFMParams, val)
     pl = p.loadings
     if all(c -> c isa _BlockRef, values(var_comprefs))
         setproperty!(pl, name, val)
@@ -65,7 +65,7 @@ function _eval_dfm_R!(CR, Cpoint, blk::ComponentsBlock, p::DFMParams)
     vars = endog(blk)
     shks = shocks(blk)
     CR[vars] = Cpoint[end, vars] - Cpoint[end, shks]
-    for i = 1:lags(blk)
+    for i = 1:order(blk)
         C = _getcoef(blk, p, i)
         CR[vars] -= C * Cpoint[end-i, vars]
     end
@@ -79,7 +79,7 @@ function _eval_dfm_RJ!(CR, CJ, Cpoint, blk::ComponentsBlock, p::DFMParams)
     CR[vars] = Cpoint[end, vars] - Cpoint[end, shks]
     CJ[vars, end, vars] = I(nvars)
     CJ[vars, end, shks] = -I(nvars)
-    for i = 1:lags(blk)
+    for i = 1:order(blk)
         C = _getcoef(blk, p, i)
         CR[vars] -= C * Cpoint[end-i, vars]
         CJ[vars, end-i, vars] = -C
@@ -102,7 +102,7 @@ function _eval_dfm_R!(CR, Cpoint, blk::ObservedBlock, p::DFMParams)
         # names of observed vars that are loading the factors in this block
         comprefs = blk.comp2vars[name]
         onames = comprefs.keys
-        Λ = _getloading(fblk, comprefs, p, name)
+        Λ = _getloading(name => fblk, comprefs, p)
         CR[onames] -= Λ * Cpoint[end, fnames]
     end
     return CR
@@ -125,7 +125,7 @@ function _eval_dfm_RJ!(CR, CJ, Cpoint, blk::ObservedBlock, p::DFMParams)
         # names of observed that are loading the factors in this block
         comprefs = blk.comp2vars[name]
         onames = comprefs.keys
-        Λ = _getloading(fblk, comprefs, p, name)
+        Λ = _getloading(name => fblk, comprefs, p)
         CJ[onames, end, fnames] = -Λ
         CR[onames] -= Λ * Cpoint[end, fnames]
     end
@@ -133,7 +133,9 @@ function _eval_dfm_RJ!(CR, CJ, Cpoint, blk::ObservedBlock, p::DFMParams)
 end
 
 function _eval_dfm_R!(CR, Cpoint, m::DFMModel, p::DFMParams)
-    _eval_dfm_R!(CR, Cpoint, m.observed_block, p.observed)
+    for (name, block) in m.observed
+        _eval_dfm_R!(CR, Cpoint, block, getproperty(p, name))
+    end
     for (name, block) in m.components
         _eval_dfm_R!(CR, Cpoint, block, getproperty(p, name))
     end
@@ -142,7 +144,9 @@ end
 
 function _eval_dfm_RJ!(CR, CJ, Cpoint, m::DFMModel, p::DFMParams)
     fill!(CJ, 0)
-    _eval_dfm_RJ!(CR, CJ, Cpoint, m.observed_block, p.observed)
+    for (name, block) in m.observed
+        _eval_dfm_RJ!(CR, CJ, Cpoint, block, getproperty(p, name))
+    end
     for (name, block) in m.components
         _eval_dfm_RJ!(CR, CJ, Cpoint, block, getproperty(p, name))
     end
@@ -168,6 +172,7 @@ end
 
 function get_transition!(A::AbstractMatrix, bm::ComponentsBlock, params::DFMParams)
     L = lags(bm)
+    O = order(bm)
     NS = nstates(bm)
     if L > 1
         fill!(A, 0)
@@ -175,11 +180,16 @@ function get_transition!(A::AbstractMatrix, bm::ComponentsBlock, params::DFMPara
         for l = 1:L-1
             RA[:, l, :, l+1] = I(NS)
         end
-        for l = 1:L
+        for l = 1:O
             RA[:, L, :, L-l+1] = _getcoef(bm, params, l)
         end
     else
-        A[:, :] = _getcoef(bm, params, 1)
+        # L = 1 or 0.  We know that O <= L
+        if O == 1
+            A[:, :] = _getcoef(bm, params, 1)
+            # elseif O == 0
+            #     nothing
+        end
     end
     return A
 end
@@ -189,45 +199,72 @@ function get_transition!(A::AbstractMatrix, M::DFMModel, params::DFMParams)
     offset = 0
     for (bname, blk) in M.components
         binds = offset .+ (1:lags(blk)*nstates(blk))
-        get_transition!(view(A, binds, binds), blk, params[bname])
+        get_transition!(view(A, binds, binds), blk, getproperty(params, bname))
         offset = last(binds)
     end
     return A
 end
 
+function _get_oblk_loading!(A::AbstractMatrix, yinds::NamedTuple, offset::Int, par::DFMParams,
+    (obname, oblk)::Pair{Symbol,ObservedBlock{MF}},
+    (cbname, cblk)::Pair{Symbol,<:ComponentsBlock}
+) where {MF}
+    crefs = get(oblk.comp2vars, cbname, nothing)
+    N = nstates(cblk)
+    L = lags(cblk)
+    bxinds(lagp1) = (offset + (L - lagp1) * N) .+ (1:N)
+    isnothing(crefs) && return
+    NC = mf_ncoefs(MF)
+    if NC > L
+        error("Components block :$cbname does not have enough lags for observed block :$obname. Need $NC, have $L.")
+    end
+    # bxinds(i) returns the column indices in A corresponding to lag i-1 of the factors in cblk
+    #  in other words, i = lag + 1
+
+    byinds = Int[yinds[v] for v in keys(crefs)]
+    Λ = _getloading(cbname => cblk, crefs, getproperty(par, obname))
+    C = mf_coefs(MF)
+    for i = 1:NC
+        A[byinds, bxinds(i)] = C[i] * Λ
+    end
+    return
+end
+
 function get_loading!(A::AbstractMatrix, M::DFMModel, P::DFMParams)
     fill!(A, 0)
-    obs = M.observed_block
-    obs_comp = obs.components
-    obs_c2v = obs.comp2vars
-    par = P.observed
-    yinds = _enumerate_vars(observed(obs))
+    yinds = _enumerate_vars(observed(M))
     offset = 0
-    for (bname, blk) in M.components
-        L = lags(blk)
-        N = nstates(blk)
-        bxinds = (offset + (L - 1) * N) .+ (1:N)
-        if haskey(obs_comp, bname)
-            crefs = obs_c2v[bname]
-            byinds = Int[yinds[v] for v in keys(crefs)]
-            A[byinds, bxinds] = _getloading(blk, crefs, par, bname)
+    for (nm, blk) in M.components
+        for obss in M.observed
+            _get_oblk_loading!(A, yinds, offset, P, obss, nm => blk)
         end
-        offset = last(bxinds)
+        offset = offset + lags(blk) * nstates(blk)
     end
     return A
 end
 
-function get_mean!(mu::AbstractVector, ::DFMModel, P::DFMParams)
-    mu[:] = P.observed.mean
+function get_mean!(mu::AbstractVector, M::DFMModel, P::DFMParams)
+    nm_obs = M.observed
+    if length(nm_obs) == 1
+        on = first(keys(nm_obs))
+        mu[:] = getproperty(P, on).mean
+        return mu
+    end
+    yinds = _enumerate_vars(observed(M))
+    for (on, ob) in nm_obs
+        byinds = Int[yinds[Symbol(v)] for v in observed(ob)]
+        mu[byinds] = getproperty(P, on).mean
+    end
+    return mu
 end
 
 function get_covariance!(A::AbstractMatrix, M::DFMModel, P::DFMParams, ::Val{:Observed})
     fill!(A, 0)
-    bm = M.observed_block
-    par = P.observed
-    yinds = _enumerate_vars(observed(bm))
-    shk_inds = Int[yinds[v] for v in keys(bm.var2shk)]
-    A[shk_inds, shk_inds] = get_covariance(bm, par)
+    yinds = _enumerate_vars(observed(M))
+    for (on, ob) in M.observed
+        shk_inds = Int[yinds[v] for v in keys(ob.var2shk)]
+        A[shk_inds, shk_inds] = get_covariance(ob, getproperty(P, on))
+    end
     return A
 end
 
@@ -238,7 +275,7 @@ function get_covariance!(A::AbstractMatrix, M::DFMModel, P::DFMParams, ::Val{:St
         L = lags(blk)
         N = nstates(blk)
         bxinds = (offset + (L - 1) * N) .+ (1:N)
-        A[bxinds, bxinds] = get_covariance(blk, P[bname])
+        A[bxinds, bxinds] = get_covariance(blk, getproperty(P, bname))
         offset = last(bxinds)
     end
     return A
@@ -246,30 +283,45 @@ end
 
 # The following functions do the opposite - update the parameter vector given the matrix
 
-function set_loading!(P::DFMParams, M::DFMModel, A::AbstractMatrix)
-    obs = M.observed_block
-    obs_comp = obs.components
-    obs_c2v = obs.comp2vars
-    par = P.observed
-    yinds = _enumerate_vars(observed(obs))
-    offset = 0
-    for (bname, blk) in M.components
-        L = lags(blk)
-        N = nstates(blk)
-        bxinds = (offset + (L - 1) * N) .+ (1:N)
-        if haskey(obs_comp, bname)
-            crefs = obs_c2v[bname]
-            byinds = Int[yinds[v] for v in keys(crefs)]
-            _setloading!(blk, crefs, par, view(A, byinds, bxinds), bname)
-        end
-        offset = last(bxinds)
-    end
-    return P.observed.loadings
+function _set_oblk_loading!(P::DFMParams, yinds::NamedTuple, offset::Int, A::AbstractMatrix,
+    (obname, oblk)::Pair{Symbol,ObservedBlock{MF}},
+    (cbname, cblk)::Pair{Symbol,<:ComponentsBlock}
+) where {MF}
+    N = nstates(cblk)
+    L = lags(cblk)
+    bxinds = (offset + (L - 1) * N) .+ (1:N)
+    crefs = get(oblk.comp2vars, cbname, nothing)
+    isnothing(crefs) && return last(bxinds)
+    byinds = Int[yinds[v] for v in keys(crefs)]
+    _setloading!(cbname => cblk, crefs, getproperty(P, obname), view(A, byinds, bxinds))
+    return last(bxinds)
 end
 
-function set_mean!(P::DFMParams, ::DFMModel, mu::AbstractVector)
-    P.observed.mean[:] = mu
-    return P.observed.mean
+function set_loading!(P::DFMParams, M::DFMModel, A::AbstractMatrix)
+    yinds = _enumerate_vars(observed(M))
+    offset = 0
+    for (nm, blk) in M.components
+        for o_nm_blk in M.observed
+            _set_oblk_loading!(P, yinds, offset, A, o_nm_blk, nm => blk)
+        end
+        offset = offset + lags(blk) * nstates(blk)
+    end
+    return P
+end
+
+function set_mean!(P::DFMParams, M::DFMModel, mu::AbstractVector)
+    nm_obs = M.observed
+    if length(nm_obs) == 1
+        on = first(keys(nm_obs))
+        getproperty(P, on).mean[:] = mu
+        return mu
+    end
+    yinds = _enumerate_vars(observed(M))
+    for (on, ob) in nm_obs
+        byinds = Int[yinds[v] for v in observed(ob)]
+        getproperty(P, on).mean[:] = mu[byinds]
+    end
+    return P
 end
 
 function set_transition!(P::DFMParams, M::DFMModel, A::AbstractMatrix)
@@ -297,12 +349,12 @@ function set_transition!(P::DFMParams, bm::ComponentsBlock, A::AbstractMatrix)
 end
 
 function set_covariance!(P::DFMParams, M::DFMModel, A::AbstractMatrix, ::Val{:Observed})
-    bm = M.observed_block
-    par = P.observed
-    yinds = _enumerate_vars(observed(bm))
-    shk_inds = Int[yinds[v] for v in keys(bm.var2shk)]
-    set_covariance!(par, bm, view(A, shk_inds, shk_inds))
-    return par.covar
+    yinds = _enumerate_vars(observed(M))
+    for (on, ob) in M.observed
+        shk_inds = Int[yinds[v] for v in keys(ob.var2shk)]
+        set_covariance!(getproperty(P, on), ob, view(A, shk_inds, shk_inds))
+    end
+    return P
 end
 
 function set_covariance!(P::DFMParams, M::DFMModel, A::AbstractMatrix, ::Val{:State})
