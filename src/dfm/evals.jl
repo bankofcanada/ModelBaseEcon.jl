@@ -88,7 +88,7 @@ function _eval_dfm_RJ!(CR, CJ, Cpoint, blk::ComponentsBlock, p::DFMParams)
 end
 
 
-function _eval_dfm_R!(CR, Cpoint, blk::ObservedBlock, p::DFMParams)
+function _eval_dfm_R!(CR, Cpoint, blk::ObservedBlock{MF}, p::DFMParams) where {MF}
     # nvars = nendog(blk)
     vars = endog(blk)         # all observed vars
     #! this uses implementation detail of LittleDict
@@ -103,13 +103,16 @@ function _eval_dfm_R!(CR, Cpoint, blk::ObservedBlock, p::DFMParams)
         comprefs = blk.comp2vars[name]
         onames = comprefs.keys
         Λ = _getloading(name => fblk, comprefs, p)
-        CR[onames] -= Λ * Cpoint[end, fnames]
+        C = mf_coefs(MF)
+        for i = 1:mf_ncoefs(MF)
+            CR[onames] -= C[i] * Λ * Cpoint[end-i+1, fnames]
+        end
     end
     return CR
 end
 
 
-function _eval_dfm_RJ!(CR, CJ, Cpoint, blk::ObservedBlock, p::DFMParams)
+function _eval_dfm_RJ!(CR, CJ, Cpoint, blk::ObservedBlock{MF}, p::DFMParams) where {MF}
     nvars = nendog(blk)
     vars = endog(blk)
     #! this uses implementation detail of LittleDict
@@ -126,8 +129,11 @@ function _eval_dfm_RJ!(CR, CJ, Cpoint, blk::ObservedBlock, p::DFMParams)
         comprefs = blk.comp2vars[name]
         onames = comprefs.keys
         Λ = _getloading(name => fblk, comprefs, p)
-        CJ[onames, end, fnames] = -Λ
-        CR[onames] -= Λ * Cpoint[end, fnames]
+        C = mf_coefs(MF)
+        for i = 1:mf_ncoefs(MF)
+            CR[onames] -= C[i] * Λ * Cpoint[end-i+1, fnames]
+            CJ[onames, end-i+1, fnames] = -C[i] * Λ
+        end
     end
     return CR, CJ
 end
@@ -318,7 +324,7 @@ function set_mean!(P::DFMParams, M::DFMModel, mu::AbstractVector)
     end
     yinds = _enumerate_vars(observed(M))
     for (on, ob) in nm_obs
-        byinds = Int[yinds[v] for v in observed(ob)]
+        byinds = Int[yinds[Symbol(v)] for v in observed(ob)]
         getproperty(P, on).mean[:] = mu[byinds]
     end
     return P
@@ -336,14 +342,20 @@ end
 
 function set_transition!(P::DFMParams, bm::ComponentsBlock, A::AbstractMatrix)
     L = lags(bm)
+    O = order(bm)
     NS = nstates(bm)
     if L > 1
         RA = reshape(A, NS, L, NS, L)
-        for l = 1:L
+        for l = 1:O
             _setcoef!(bm, P, view(RA, :, L, :, L - l + 1), l)
         end
     else
-        _setcoef!(bm, P, A, 1)
+        # L = 1 or 0.  We know that O <= L
+        if O == 1
+            _setcoef!(bm, P, A, 1)
+            # elseif O == 0
+            #     nothing
+        end
     end
     return P
 end

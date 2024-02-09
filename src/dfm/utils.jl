@@ -69,9 +69,3 @@ end
 @inline ComponentArrays.toval(tv::NTuple{N,ModelVariable}) where {N} = ComponentArrays.toval(Symbol.(tv))
 @inline ComponentArrays.toval(av::AbstractArray{<:ModelVariable}) = ComponentArrays.toval(Symbol.(av))
 
-# function copy_components_to!(dest::DFMParams, src::DFMParams)
-
-# end
-
-
-

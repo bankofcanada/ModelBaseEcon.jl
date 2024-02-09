@@ -294,7 +294,7 @@ const DFMBlockOrModel = Union{DFMModel,DFMBlock}
 # info used in eval_XYZ functions
 
 @inline leads(::DFMBlockOrModel) = 0
-@inline lags(::ObservedBlock) = 0
+@inline lags(::ObservedBlock{MF}) where MF = mf_ncoefs(MF) - 1
 @inline lags(b::ComponentsBlock) = b.nlags
 @inline lags(m::DFMModel) = maximum(lags, values(m.components))
 
@@ -313,7 +313,7 @@ add_nstate_shocks(m::DFMModel; init=0) = sum(nshocks, values(m.components); init
 add_observed_shocks(m::DFMModel; init=ModelVariable[]) = mapfoldl(shocks, append!, values(m.observed); init)
 add_nobserved_shocks(m::DFMModel; init=0) = sum(nshocks, values(m.observed); init)
 @inline shocks(m::DFMModel) = (shks = add_observed_shocks(m); shks = add_state_shocks(m; init=shks); shks)
-@inline nshocks(m::DFMModel) = add_observed_shocks(m) + add_state_shocks(m)
+@inline nshocks(m::DFMModel) = add_nobserved_shocks(m) + add_nstate_shocks(m)
 
 @inline endog(b::DFMBlock) = b.vars
 @inline nendog(b::DFMBlock) = b.size
