@@ -216,10 +216,10 @@ function _get_oblk_loading!(A::AbstractMatrix, yinds::NamedTuple, offset::Int, p
     (cbname, cblk)::Pair{Symbol,<:ComponentsBlock}
 ) where {MF}
     crefs = get(oblk.comp2vars, cbname, nothing)
+    isnothing(crefs) && return
     N = nstates(cblk)
     L = lags(cblk)
     bxinds(lagp1) = (offset + (L - lagp1) * N) .+ (1:N)
-    isnothing(crefs) && return
     NC = mf_ncoefs(MF)
     if NC > L
         error("Components block :$cbname does not have enough lags for observed block :$obname. Need $NC, have $L.")

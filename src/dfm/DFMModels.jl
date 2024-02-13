@@ -294,7 +294,7 @@ const DFMBlockOrModel = Union{DFMModel,DFMBlock}
 # info used in eval_XYZ functions
 
 @inline leads(::DFMBlockOrModel) = 0
-@inline lags(::ObservedBlock{MF}) where MF = mf_ncoefs(MF) - 1
+@inline lags(::ObservedBlock{MF}) where {MF} = mf_ncoefs(MF) - 1
 @inline lags(b::ComponentsBlock) = b.nlags
 @inline lags(m::DFMModel) = maximum(lags, values(m.components))
 
@@ -363,19 +363,19 @@ function add_observed!(m::DFMModel, args...)
     for a in args
         add_observed!(m, a)
     end
-    return m    
+    return m
 end
-function add_observed!(m::DFMModel, (bname, blk)::Pair{<:Sym, <:ObservedBlock})
+function add_observed!(m::DFMModel, (bname, blk)::Pair{<:Sym,<:ObservedBlock})
     m.observed[bname] = blk
     return m
 end
 
-function add_observed!(m::DFMModel, (bname, vnames)::Pair{<:Sym, <:SymVec})
-    add_observed_vars!(get!(m.observed, bname, ObservedBlock()), vnames)    
+function add_observed!(m::DFMModel, (bname, vnames)::Pair{<:Sym,<:SymVec})
+    add_observed_vars!(get!(m.observed, bname, ObservedBlock()), vnames)
     return m
 end
 
-function add_observed!(m::DFMModel, (bname, var)::Pair{<:Sym, <:Sym})
+function add_observed!(m::DFMModel, (bname, var)::Pair{<:Sym,<:Sym})
     add_observed_vars!(get!(m.observed, bname, ObservedBlock()), (var,))
     return m
 end
@@ -392,12 +392,12 @@ const dobn = :observed  # default observed block name
 
 function add_observed!(m::DFMModel, varnames::SymVec)
     o = m.observed
-    if isempty(o) 
+    if isempty(o)
         push!(o, dobn => add_observed_vars!(ObservedBlock(), varnames))
         return m
     end
     if (length(o) == 1 && haskey(o, dobn))
-        add_observed_vars!(o[dobn], varnames)    
+        add_observed_vars!(o[dobn], varnames)
         return m
     end
     error("Observed block not specified. Use `add_observed(m, block_name => (vars, ...))`.")
@@ -468,7 +468,7 @@ function _add_var2comp_ref(observed::NamedList{ObservedBlock}, vars::SymVec, blk
     for (obnm, oblk) in observed
         refd = false
         v2c = oblk.var2comps
-        for (i,var) in enumerate(vars)
+        for (i, var) in enumerate(vars)
             not_done[i] || continue
             sv = Symbol(var)
             haskey(v2c, sv) || continue
@@ -481,7 +481,7 @@ function _add_var2comp_ref(observed::NamedList{ObservedBlock}, vars::SymVec, blk
         end
     end
     if any(not_done)
-        not_assigned = ((v for (i,v) in enumerate(vars) if not_done[i])...,)
+        not_assigned = ((v for (i, v) in enumerate(vars) if not_done[i])...,)
         error("Variables not assigned to an observed block: $(not_assigned)")
     end
     return
@@ -673,6 +673,9 @@ for f in (:observed, :states, :shocks, :endog, :exog, :varshks, :allvars)
     end
 end
 
+nstates_with_lags(m::DFM) = nstates_with_lags(m.model)
+nstates_with_lags(m::DFMModel) = sum(b -> nstates(b)*lags(b), values(m.components), init=0)
+
 states_with_lags(m::DFM) = states_with_lags(m.model)
 states_with_lags(m::DFMModel) =
     mapfoldl(append!, values(m.components), init=Symbol[]) do blk
@@ -685,4 +688,7 @@ states_with_lags(m::DFMModel) =
     end
 
 
+include("constraints.jl")
+
 end
+
