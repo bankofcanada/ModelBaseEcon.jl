@@ -11,18 +11,36 @@ _getcoef(::IdiosyncraticComponents, p::DFMParams, i::Integer=1) = Diagonal(@view
 _setcoef!(::ComponentsBlock, p::DFMParams, val, i::Integer=1) = (p.coefs[:, :, i] = val; val)
 _setcoef!(::IdiosyncraticComponents, p::DFMParams, val, i::Integer=1) = (p.coefs[:, i] = diag(val); val)
 
-_getloading(::Pair{Symbol,<:IdiosyncraticComponents}, var_comprefs::NamedList{_BlockComponentRef}, ::DFMParams) = I(length(var_comprefs))
-function _getloading((name, blk)::Pair{Symbol,<:ComponentsBlock}, var_comprefs::NamedList{_BlockComponentRef}, p::DFMParams)
-    pvals = getproperty(p.loadings, name)
-    all(c -> c isa _BlockRef, values(var_comprefs)) && return pvals
-    L = zeros(eltype(p), length(var_comprefs), blk.size)
+function _getloading((name, blk)::Pair{Symbol,<:ComponentsBlock}, crefs::NamedList{_BlockComponentRef}, p::DFMParams)
+    L = zeros(eltype(p), length(crefs), blk.size)
+    _getloading!(L, name=>blk, crefs, p)
+    return L
+end
+
+@inline function _getloading!(Λ::AbstractMatrix, ::Pair{Symbol,<:IdiosyncraticComponents}, crefs::NamedList{_BlockComponentRef}, ::DFMParams)
+    col = 0
+    for (row, c) in enumerate(values(crefs))
+        c isa _NoCompRef && continue
+        col = col + 1
+        Λ[row, col] = 1
+    end
+    return Λ
+end
+
+function _getloading!(Λ::AbstractMatrix, (nm, b)::Pair{Symbol,<:ComponentsBlock}, crefs::NamedList{_BlockComponentRef}, p::DFMParams)
+    pvals = getproperty(p.loadings, nm)
+    if all(c -> isa(c, _BlockRef), values(crefs))
+        Λ[:, :] = pvals
+        return Λ
+    end
     idx_p = 0
-    for (i, cr) in enumerate(values(var_comprefs))
+    for (i, cr) in enumerate(values(crefs))
         nvals = _n_comp_refs(cr)
-        L[i, _inds_comp_refs(cr)] = pvals[idx_p.+(1:nvals)]
+        nvals == 0 && continue
+        Λ[i, _inds_comp_refs(cr)] = pvals[idx_p.+(1:nvals)]
         idx_p = idx_p + nvals
     end
-    return L
+    return Λ
 end
 
 _setloading!(::Pair{Symbol,<:IdiosyncraticComponents}, var_comprefs::NamedList{_BlockComponentRef}, ::DFMParams, val) = nothing
@@ -211,55 +229,69 @@ function get_transition!(A::AbstractMatrix, M::DFMModel, params::DFMParams)
     return A
 end
 
-function _get_oblk_loading!(A::AbstractMatrix, yinds::NamedTuple, offset::Int, par::DFMParams,
-    (obname, oblk)::Pair{Symbol,ObservedBlock{MF}},
-    (cbname, cblk)::Pair{Symbol,<:ComponentsBlock}
-) where {MF}
-    crefs = get(oblk.comp2vars, cbname, nothing)
-    isnothing(crefs) && return
-    N = nstates(cblk)
-    L = lags(cblk)
-    bxinds(lagp1) = (offset + (L - lagp1) * N) .+ (1:N)
-    NC = mf_ncoefs(MF)
+function get_loading!(A::AbstractMatrix{<:Number}, ob::ObservedBlock{MF}, par::DFMParams, (cn, cb)::Pair{Symbol,<:ComponentsBlock}) where {MF}
+    crefs = get(ob.comp2vars, cn, nothing)
+    if isnothing(crefs)
+        return A
+    end
+    yinds =
+        C = mf_coefs(MF)
+    NC = length(C)
+    L = lags(cb)
     if NC > L
-        error("Components block :$cbname does not have enough lags for observed block :$obname. Need $NC, have $L.")
+        error("Components block :$cn does not have enough lags. Need $NC, have $L.")
     end
-    # bxinds(i) returns the column indices in A corresponding to lag i-1 of the factors in cblk
-    #  in other words, i = lag + 1
+    NS = nstates(cb)
+    @assert size(A) == (nobserved(ob), nstates_with_lags(cb))
+    Λ = _getloading!(view(A, :, (L-1)*NS+1:L*NS), cn => cb, crefs, par)
+    for i = 2:NC
+        A[:, (L-i)*NS.+(1:NS)] = C[i] * Λ
+    end
+    lmul!(C[1], Λ)
+    return A
+end
 
-    byinds = Int[yinds[v] for v in keys(crefs)]
-    Λ = _getloading(cbname => cblk, crefs, getproperty(par, obname))
-    C = mf_coefs(MF)
-    for i = 1:NC
-        A[byinds, bxinds(i)] = C[i] * Λ
+function get_loading!(A::AbstractMatrix, ob::ObservedBlock, par::DFMParams)
+    @assert size(A) == (nobserved(ob), sum(nstates_with_lags, ob.components, init=0))
+    offset = 0
+    for (cn, cb) in ob.components
+        cols = offset .+ (1:nstates_with_lags(cb))
+        get_loading!(view(A, :, cols), ob, par, cn => cb)
+        offset = last(cols)
     end
-    return
+    return A
 end
 
 function get_loading!(A::AbstractMatrix, M::DFMModel, P::DFMParams)
     fill!(A, 0)
     yinds = _enumerate_vars(observed(M))
     offset = 0
-    for (nm, blk) in M.components
-        for obss in M.observed
-            _get_oblk_loading!(A, yinds, offset, P, obss, nm => blk)
+    for (cn, cb) in M.components
+        cols = offset .+ (1:nstates_with_lags(cb))
+        for (on, ob) in M.observed
+            rows = Int[yinds[Symbol(v)] for v in observed(ob)]
+            get_loading!(view(A, rows, cols), ob, getproperty(P, on), cn => cb)
         end
-        offset = offset + lags(blk) * nstates(blk)
+        offset = last(cols)
     end
     return A
+end
+
+function get_mean!(mu::AbstractVector, ::ObservedBlock, bpar::DFMParams)
+    mu[:] = bpar.mean
+    return mu
 end
 
 function get_mean!(mu::AbstractVector, M::DFMModel, P::DFMParams)
     nm_obs = M.observed
     if length(nm_obs) == 1
-        on = first(keys(nm_obs))
-        mu[:] = getproperty(P, on).mean
-        return mu
+        on, ob = first(nm_obs)
+        return get_mean!(mu, ob, getproperty(P, on))
     end
     yinds = _enumerate_vars(observed(M))
     for (on, ob) in nm_obs
         byinds = Int[yinds[Symbol(v)] for v in observed(ob)]
-        mu[byinds] = getproperty(P, on).mean
+        get_mean!(view(mu, byinds), ob, getproperty(P, on))
     end
     return mu
 end

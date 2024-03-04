@@ -188,6 +188,10 @@ struct _CompRef{N,NAMES} <: _BlockComponentRef{false,N,NAMES}
     inds::Vector{Int}
     _CompRef(names::SymVec) = (N = length(names); NAMES = ((Symbol(n) for n in names)...,); new{N,NAMES}(NAMES, Int[]))
 end
+"no reference to any components in a block"
+struct _NoCompRef{N,NAMES} <: _BlockComponentRef{false,N,NAMES}
+    _NoCompRef(names::SymVec) = (N = length(names); NAMES = ((Symbol(n) for n in names)...,); new{N,NAMES}())
+end
 
 comp_ref(::_BlockComponentRef{ALL,N,NAMES}) where {ALL,N,NAMES} = _BlockRef(NAMES)
 comp_ref(::IdiosyncraticComponents) = _BlockRef(())
@@ -217,13 +221,16 @@ end
 _n_comp_refs(::_BlockRef{0}) = error("Cannot determine the number of referenced components")
 _n_comp_refs(::_BlockRef{N}) where {N} = N
 _n_comp_refs(c::_CompRef) = length(c.inds)
+_n_comp_refs(c::_NoCompRef) = 0
 
 _inds_comp_refs(r::_BlockRef) = 1:_n_comp_refs(r)
 _inds_comp_refs(r::_CompRef) = r.inds
+_inds_comp_refs(r::_NoCompRef) = Int[]
 
 Base.show(io::IO, c::_BlockComponentRef) = show(io, MIME"text/plain"(), c)
 Base.show(io::IO, ::MIME"text/plain", c::_BlockRef{N,NAMES}) where {N,NAMES} = print(io, NAMES)
 Base.show(io::IO, ::MIME"text/plain", c::_CompRef{N,NAMES}) where {N,NAMES} = print(io, NAMES[c.inds])
+Base.show(io::IO, ::MIME"text/plain", c::_NoCompRef{N,NAMES}) where {N,NAMES} = print(io, "∅")
 
 """
     ObservedBlock <: DFMBlock
@@ -254,6 +261,9 @@ function MixFreq(WHICH::Symbol, blk::ObservedBlock{NoMixFreq})
     MF = MixFreq{WHICH}
     ObservedBlock{MF}((getfield(blk, fn) for fn in fieldnames(typeof(blk)))...,)
 end
+
+mf_coefs(::ObservedBlock{MF}) where MF = mf_coefs(MF)
+mf_ncoefs(::ObservedBlock{MF}) where MF = mf_ncoefs(MF)
 
 """
     DFMModel
@@ -565,26 +575,26 @@ end
 add_shocks!(b::ObservedBlock, var::Union{Sym,Pair{<:Sym,<:Sym}}, vars...) = add_shocks!(add_shocks!(b, var), vars...)
 add_shocks!(b::ObservedBlock, vars::LikeVec) = add_shocks!(b, vars...)
 
-function _check_ic_shk(b::ObservedBlock)
-    v2s = b.var2shk
-    v2c = b.var2comps
-    for var in b.vars
-        x = haskey(v2s, var)
-        comps = getindex(v2c, var)
-        for (n, c) in b.components
-            c isa IdiosyncraticComponents || continue
-            n ∈ comps || continue
-            x = x + 1
-        end
-        x == 1 && continue
-        if x == 0
-            @warn "$var has neither shock nor idiosyncratic component."
-        else
-            @warn "$var has more than one shock or idiosyncratic components."
-        end
-    end
-    return b
-end
+# function _check_ic_shk(b::ObservedBlock)
+#     v2s = b.var2shk
+#     v2c = b.var2comps
+#     for var in b.vars
+#         x = haskey(v2s, var)
+#         comps = getindex(v2c, var)
+#         for (n, c) in b.components
+#             c isa IdiosyncraticComponents || continue
+#             n ∈ comps || continue
+#             x = x + 1
+#         end
+#         x == 1 && continue
+#         if x == 0
+#             @warn "$var has neither shock nor idiosyncratic component."
+#         else
+#             @warn "$var has more than one shock or idiosyncratic components."
+#         end
+#     end
+#     return b
+# end
 
 function _init_observed!(b::ObservedBlock)
     # add variables and shocks mentioned in the loadings and shocks maps
@@ -596,24 +606,37 @@ function _init_observed!(b::ObservedBlock)
     empty!(b.shks)
     append!(b.shks, values(b.var2shk))
     # build the inverse loadings map
-    empty!(b.comp2vars)
+    b_c2v = b.comp2vars
+    empty!(b_c2v)
+    for cn in keys(b.components)
+        tmp = b_c2v[cn] = NamedList{_BlockComponentRef}()
+        for vn in b.vars
+            tmp[vn] = _NoCompRef(b.vars)
+        end
+    end
     for (varname, blkcomprefs) in b.var2comps
         for (blkname, c) in blkcomprefs
-            tmp = get!(b.comp2vars, blkname, NamedList{_BlockComponentRef}())
-            push!(tmp, varname => c)
+            b_c2v[blkname][varname] = c
+            # tmp = get!(b_c2v, blkname, NamedList{_BlockComponentRef}())
+            # push!(tmp, varname => c)
         end
     end
     # resize idiosyncratic blocks as needed
     for (name, block) in b.components
-        vars = keys(b.comp2vars[name])
-        if isempty(vars)
+        block isa IdiosyncraticComponents || continue
+        vars = block.vars
+        found = false
+        for (var, refs) in b_c2v[name]
+            refs isa _NoCompRef && continue
+            found = true
+            push!(vars, Symbol(var, "_cor"))
+        end
+        if !found
             @warn "No variables are loading the components in $name"
             continue
         end
-        block isa IdiosyncraticComponents || continue
         block.size = length(vars)
-        block.vars = Symbol[Symbol(v, "_cor") for v in vars]
-        block.shks = _make_shocks(block.vars)
+        block.shks = _make_shocks(vars)
     end
     # _check_ic_shk(b)
     return b
@@ -674,19 +697,22 @@ for f in (:observed, :states, :shocks, :endog, :exog, :varshks, :allvars)
 end
 
 nstates_with_lags(m::DFM) = nstates_with_lags(m.model)
-nstates_with_lags(m::DFMModel) = sum(b -> nstates(b)*lags(b), values(m.components), init=0)
+nstates_with_lags(m::DFMModel) = sum(nstates_with_lags, values(m.components), init=0)
+nstates_with_lags((n,b)::Pair{Symbol,<:DFMBlock}) = nstates_with_lags(b)
+nstates_with_lags(::ObservedBlock) = 0
+nstates_with_lags(b::ComponentsBlock) = nstates(b) * lags(b)
 
 states_with_lags(m::DFM) = states_with_lags(m.model)
-states_with_lags(m::DFMModel) =
-    mapfoldl(append!, values(m.components), init=Symbol[]) do blk
-        s = states(blk)
-        ret = copy(s)
-        for l = 1:lags(blk)-1
-            ret = [(Symbol(v, "_lag_", l) for v in s)..., ret...]
-        end
-        ret
-    end
+states_with_lags(m::DFMModel) = mapfoldl(states_with_lags, append!, values(m.components), init=Symbol[])
+states_with_lags((n,b)::Pair{Symbol,<:DFMBlock}) = states_with_lags(b)
+states_with_lags(::ObservedBlock) = Symbol[]
+function states_with_lags(blk::ComponentsBlock)
+    return Symbol[
+        (Symbol(v, "_lag_", lags(blk)-l) for l = 1:lags(blk)-1 for v in states(blk))..., 
+        states(blk)...]
+end
 
+export states_with_lags, nstates_with_lags
 
 include("constraints.jl")
 
