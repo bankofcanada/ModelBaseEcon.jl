@@ -1435,15 +1435,6 @@ end
     @test length(m.equations) == 3
     @test collect(keys(m.equations)) == [:_EQ1, :_EQ3, :_EQ4]
 
-    m = S1.newmodel()
-    @equations m begin
-        @delete _EQ1
-    end
-    @steadystate m begin
-        @delete _SSEQ1
-    end
-    @test_logs (:warn, "Model contains unused variables: [:a]") @reinitialize m
-
 
     maux = deepcopy(AUX.model)
     @test length(maux.equations) == 2
@@ -1458,6 +1449,30 @@ end
     end
     @test length(maux.equations) == 2
     @test length(maux.alleqns) == 4
+
+    # option to not show a warning
+    m = S1.newmodel()
+
+    @equations m begin
+        @delete _EQ2
+    end
+
+    @test length(m.equations) == 2
+    @test collect(keys(m.equations)) == [:_EQ1, :_EQ3]
+    m.options.unused_varshks = [:b_shk]
+
+    @test_logs @reinitialize m
+
+     # option to not show a warning
+    m = S1.newmodel()
+    @equations m begin
+        @delete _EQ1
+    end
+    @steadystate m begin
+        @delete _SSEQ1
+    end
+    m.options.unused_varshks = [:a]
+    @test_logs @reinitialize m
 end
 
 @using_example E2sat
