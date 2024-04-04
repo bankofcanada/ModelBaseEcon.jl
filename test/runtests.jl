@@ -961,20 +961,20 @@ end
     # remove existing key (from repeated test runs)
     mod = @__MODULE__
     eq_key = :(y[t] = 0.132434 * y[t - 1] + (0.8675660000000001 * y[t + 1] + y_shk[t]))
-    if eq_key ∈ keys(mod.expression_functions_map)
-        delete!(mod.expression_functions_map, eq_key)
+    if eq_key ∈ keys(mod._expression_functions_map)
+        delete!(mod._expression_functions_map, eq_key)
     end
 
     for i = 1:3
         α = 0.132434
         new_E1 = E1_noparams.newmodel()
-        prev_length = length(mod.expression_functions_map)
+        prev_length = length(mod._expression_functions_map)
         prev_maxversion = get_max_maineq()
         @equations new_E1 begin
             :maineq => y[t] = $α * y[t-1] + $(1 - α) * y[t+1] + y_shk[t]
         end
         @reinitialize(new_E1)
-        new_length = length(mod.expression_functions_map)
+        new_length = length(mod._expression_functions_map)
         new_maxversion = get_max_maineq()
         if i == 1
             @test new_length == prev_length + 1
