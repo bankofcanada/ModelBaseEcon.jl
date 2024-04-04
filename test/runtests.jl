@@ -942,11 +942,13 @@ end
 
 # helper functions
 function get_max_maineq()
-    tmp = InteractiveUtils.varinfo(@__MODULE__)
-    tmp = filter(r -> match(r"resid_maineq_\d+$", r[1]) !== nothing, tmp.content[1].rows[2:end])
+    mod = @__MODULE__
+    all_names = names(mod, all=true)
+    method_names = filter(name -> isa(getfield(mod, name), Function), all_names)
+    resid_funcs = filter(r -> match(r"resid_maineq_\d+$", r) !== nothing, string.(method_names))
     versions = Vector{Int64}([0])
-    for v in tmp
-        _m = match(r"resid_maineq_(\d+)$", v[1])
+    for v in resid_funcs
+        _m = match(r"resid_maineq_(\d+)$", v)
         if _m !== nothing
           push!(versions, parse(Int64,_m[1]))
         end
