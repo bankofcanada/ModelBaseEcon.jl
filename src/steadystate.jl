@@ -608,8 +608,16 @@ function setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Mod
     # create the resid and RJ functions for the new equation
     # To do this, we use `makefuncs` from evaluation.jl
     residual = Expr(:block, source[1], :($(lhs) - $(rhs)))
-    funcs_expr = makefuncs(eqn_key, residual, vsyms, [], unique(val_params), modelmodule)
-    resid, RJ = modelmodule.eval(funcs_expr)
+    if !isdefined(modelmodule, :expression_functions_map) || modelmodule.expression_functions_map === nothing
+        modelmodule.expression_functions_map = Dict{Expr,Any}()
+    end
+    if expr ∈ keys(modelmodule.expression_functions_map)
+        resid, RJ = modelmodule.expression_functions_map[expr]
+    else
+        funcs_expr = makefuncs(eqn_key, residual, vsyms, [], unique(val_params), modelmodule)
+        resid, RJ = modelmodule.eval(funcs_expr)
+        modelmodule.expression_functions_map[expr] = (resid, RJ)
+    end
     _update_eqn_params!(resid, model.parameters)
     # We have all the ingredients to create the instance of SteadyStateEquation
     for i = 1:2

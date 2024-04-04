@@ -1162,11 +1162,20 @@ function process_equation(model::Model, expr::Expr;
     if eqn_name == :_unnamed_equation_
         throw(ArgumentError("No equation name specified"))
     end
-    funcs_expr = makefuncs(eqn_name, residual, tssyms, sssyms, psyms, modelmodule)
-    resid, RJ, resid_param, chunk = modelmodule.eval(funcs_expr)
-    _update_eqn_params!(resid, model.parameters)
-    thismodule = @__MODULE__
-    modelmodule.eval(:($(thismodule).precompilefuncs($resid, $RJ, $resid_param, $chunk)))
+    if !isdefined(modelmodule, :expression_functions_map) || modelmodule.expression_functions_map === nothing
+        modelmodule.expression_functions_map = Dict{Expr,Any}()
+    end
+    if expr ∈ keys(modelmodule.expression_functions_map)
+        resid, RJ, resid_param, chunk = modelmodule.expression_functions_map[expr]
+        _update_eqn_params!(resid, model.parameters)
+    else
+        funcs_expr = makefuncs(eqn_name, residual, tssyms, sssyms, psyms, modelmodule)
+        resid, RJ, resid_param, chunk = modelmodule.eval(funcs_expr)
+        modelmodule.expression_functions_map[expr] = (resid, RJ, resid_param, chunk)
+        _update_eqn_params!(resid, model.parameters)
+        thismodule = @__MODULE__
+        modelmodule.eval(:($(thismodule).precompilefuncs($resid, $RJ, $resid_param, $chunk)))
+    end
     tsrefs′ = LittleDict{Tuple{ModelSymbol,Int},Symbol}()
     for ((modsym, i), sym) in tsrefs
         tsrefs′[(ModelSymbol(modsym), i)] = sym
