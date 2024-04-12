@@ -1162,19 +1162,27 @@ function process_equation(model::Model, expr::Expr;
     if eqn_name == :_unnamed_equation_
         throw(ArgumentError("No equation name specified"))
     end
-    if !isdefined(modelmodule, :_expression_functions_map) || modelmodule._expression_functions_map === nothing
-        @eval modelmodule _expression_functions_map = Dict{Expr,Any}()
+    # Get model module from Main
+    _modelmodule = modelmodule
+    if :modulename ∈ keys(model.options) && isdefined(Main, model.options.modulename)
+        modelmodule_from_main = getfield(Main, model.options.modulename)
+        if modelmodule_from_main isa Module
+            _modelmodule = modelmodule_from_main
+        end
     end
-    if expr ∈ keys(modelmodule._expression_functions_map)
-        resid, RJ, resid_param, chunk = modelmodule._expression_functions_map[expr]
+    if !isdefined(_modelmodule, :_expression_functions_map) || _modelmodule._expression_functions_map === nothing
+        @eval _modelmodule _expression_functions_map = Dict{Expr,Any}()
+    end
+    if expr ∈ keys(_modelmodule._expression_functions_map)
+        resid, RJ, resid_param, chunk = _modelmodule._expression_functions_map[expr]
         _update_eqn_params!(resid, model.parameters)
     else
-        funcs_expr = makefuncs(eqn_name, residual, tssyms, sssyms, psyms, modelmodule)
-        resid, RJ, resid_param, chunk = modelmodule.eval(funcs_expr)
-        modelmodule._expression_functions_map[expr] = (resid, RJ, resid_param, chunk)
+        funcs_expr = makefuncs(eqn_name, residual, tssyms, sssyms, psyms, _modelmodule)
+        resid, RJ, resid_param, chunk = _modelmodule.eval(funcs_expr)
+        _modelmodule._expression_functions_map[expr] = (resid, RJ, resid_param, chunk)
         _update_eqn_params!(resid, model.parameters)
         thismodule = @__MODULE__
-        modelmodule.eval(:($(thismodule).precompilefuncs($resid, $RJ, $resid_param, $chunk)))
+        _modelmodule.eval(:($(thismodule).precompilefuncs($resid, $RJ, $resid_param, $chunk)))
     end
     tsrefs′ = LittleDict{Tuple{ModelSymbol,Int},Symbol}()
     for ((modsym, i), sym) in tsrefs
