@@ -941,10 +941,9 @@ end
 end
 
 # helper functions
-function get_max_maineq()
-    mod = @__MODULE__
-    all_names = names(mod, all=true)
-    method_names = filter(name -> isa(getfield(mod, name), Function), all_names)
+function get_max_maineq(modelmodule::Module)
+    all_names = names(modelmodule, all=true)
+    method_names = filter(name -> isa(getfield(modelmodule, name), Function), all_names)
     resid_funcs = filter(r -> match(r"resid_maineq_\d+$", r) !== nothing, string.(method_names))
     versions = Vector{Int64}([0])
     for v in resid_funcs
@@ -961,23 +960,23 @@ end
     # don't recompile existing functions
 
     # remove existing key (from repeated test runs)
-    mod = @__MODULE__
+    modelmodule = E1_noparams
     eq_key = :(y[t] = 0.132434 * y[t - 1] + (0.8675660000000001 * y[t + 1] + y_shk[t]))
-    if eq_key ∈ keys(mod._expression_functions_map)
-        delete!(mod._expression_functions_map, eq_key)
+    if isdefined(modelmodule, :_expression_functions_map) && eq_key ∈ keys(modelmodule._expression_functions_map)
+        delete!(modelmodule._expression_functions_map, eq_key)
     end
-
+   
     for i = 1:3
         α = 0.132434
         new_E1 = E1_noparams.newmodel()
-        prev_length = length(mod._expression_functions_map)
-        prev_maxversion = get_max_maineq()
+        prev_length = length(modelmodule._expression_functions_map)
+        prev_maxversion = get_max_maineq(modelmodule)
         @equations new_E1 begin
             :maineq => y[t] = $α * y[t-1] + $(1 - α) * y[t+1] + y_shk[t]
         end
         @reinitialize(new_E1)
-        new_length = length(mod._expression_functions_map)
-        new_maxversion = get_max_maineq()
+        new_length = length(modelmodule._expression_functions_map)
+        new_maxversion = get_max_maineq(modelmodule)
         if i == 1
             @test new_length == prev_length + 1
             @test new_maxversion == prev_maxversion + 1
@@ -985,7 +984,6 @@ end
             @test new_length == prev_length
             @test new_maxversion == prev_maxversion
         end
-        # test_eval_RJ(new_E1, [0.0], [-α 1.0 -(1 - α) 0.0 -1.0 0.0;])
     end
 end
 

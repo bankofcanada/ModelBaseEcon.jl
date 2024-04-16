@@ -809,6 +809,9 @@ macro equations(model, block::Expr)
     ret = Expr(:block)
     removals, additions = parse_equation_deletes(block)
 
+    # store modelmodule in case we start removing equations
+    push!(ret.args, :(_ModelBaseEcon_temp_modelmodule = nequations($(model)) > 0 && $(thismodule).moduleof($(model)) !== $(thismodule) ? $(thismodule).moduleof($(model)) : $(__module__) ))
+
     #removals
     if length(removals.args) > 0
         push!(ret.args, :($(thismodule).deleteequations!($(model), $(removals.args))))
@@ -842,7 +845,10 @@ macro equations(model, block::Expr)
             eqn = Expr(:block)
         end
     end
-    push!(ret.args, :($(thismodule).process_new_equations!($(model), $(__module__)); $(thismodule).update_model_state!($(model)); nothing))
+    push!(ret.args, :($(thismodule).process_new_equations!($(model), _ModelBaseEcon_temp_modelmodule); $(thismodule).update_model_state!($(model)); nothing))
+
+    # unstore modelmodule
+    push!(ret.args, :(_ModelBaseEcon_temp_modelmodule = nothing))
     return esc(ret)
 end
 
@@ -854,12 +860,14 @@ function changeequations!(eqns::OrderedDict{Symbol,Equation}, (sym, e)::Pair{Sym
     return eqns
 end
 
-function process_new_equations!(model::Model, modelmodule::Module)
+function process_new_equations!(model::Model, modelmodule::Module=moduleof(model))
     # only process at this point if model is not new
     if model._state == :new
         return
     end
-    initfuncs(modelmodule)
+    if !isdefined(modelmodule, :EquationEvaluator)
+        initfuncs(modelmodule)
+    end
     var_to_idx = _make_var_to_idx(model.allvars)
     for (key, e) in alleqns(model)
         if e.eval_resid == eqnnotready
@@ -1162,27 +1170,19 @@ function process_equation(model::Model, expr::Expr;
     if eqn_name == :_unnamed_equation_
         throw(ArgumentError("No equation name specified"))
     end
-    # Get model module from Main
-    _modelmodule = modelmodule
-    if :modulename ∈ keys(model.options) && isdefined(Main, model.options.modulename)
-        modelmodule_from_main = getfield(Main, model.options.modulename)
-        if modelmodule_from_main isa Module
-            _modelmodule = modelmodule_from_main
-        end
+    if !isdefined(modelmodule, :_expression_functions_map) || modelmodule._expression_functions_map === nothing
+        @eval modelmodule _expression_functions_map = Dict{Expr,Any}()
     end
-    if !isdefined(_modelmodule, :_expression_functions_map) || _modelmodule._expression_functions_map === nothing
-        @eval _modelmodule _expression_functions_map = Dict{Expr,Any}()
-    end
-    if expr ∈ keys(_modelmodule._expression_functions_map)
-        resid, RJ, resid_param, chunk = _modelmodule._expression_functions_map[expr]
+    if expr ∈ keys(modelmodule._expression_functions_map)
+        resid, RJ, resid_param, chunk = modelmodule._expression_functions_map[expr]
         _update_eqn_params!(resid, model.parameters)
     else
-        funcs_expr = makefuncs(eqn_name, residual, tssyms, sssyms, psyms, _modelmodule)
-        resid, RJ, resid_param, chunk = _modelmodule.eval(funcs_expr)
-        _modelmodule._expression_functions_map[expr] = (resid, RJ, resid_param, chunk)
+        funcs_expr = makefuncs(eqn_name, residual, tssyms, sssyms, psyms, modelmodule)
+        resid, RJ, resid_param, chunk = modelmodule.eval(funcs_expr)
+        modelmodule._expression_functions_map[expr] = (resid, RJ, resid_param, chunk)
         _update_eqn_params!(resid, model.parameters)
         thismodule = @__MODULE__
-        _modelmodule.eval(:($(thismodule).precompilefuncs($resid, $RJ, $resid_param, $chunk)))
+        modelmodule.eval(:($(thismodule).precompilefuncs($resid, $RJ, $resid_param, $chunk)))
     end
     tsrefs′ = LittleDict{Tuple{ModelSymbol,Int},Symbol}()
     for ((modsym, i), sym) in tsrefs
