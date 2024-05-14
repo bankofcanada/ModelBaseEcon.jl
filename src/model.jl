@@ -1405,7 +1405,7 @@ function initialize!(model::Model, modelmodule::Module)
         # if dynss is true, then we need the steady state even for the standard MED
         nothing
     end
-    unused = get_unused_symbols(model)
+    unused = get_unused_symbols(model; filter_known_unused=true)
     if length(unused[:variables]) > 0
         @warn "Model contains unused variables: $(unused[:variables])"
     end
@@ -1458,7 +1458,7 @@ function reinitialize!(model::Model, modelmodule::Module=moduleof(model))
         # if dynss is true, then we need the steady state even for the standard MED
         nothing
     end
-    unused = get_unused_symbols(model)
+    unused = get_unused_symbols(model; filter_known_unused=true)
     if length(unused[:variables]) > 0
         @warn "Model contains unused variables: $(unused[:variables])"
     end
@@ -1867,17 +1867,26 @@ function replace_in_expr(e::Expr, old::Model, new::Union{Symbol,Expr}, params::P
 end
 
 """
-    get_unused_symbols(model::Model)
+    get_unused_symbols(model::Model; filter_known_unused=false)
 
 Returns a dictionary with vectors of the unused variables, shocks, and parameters.
+
+Keyword arguments:
+* filter_known_unused::Bool - When `true`, the results will exclude variables present in model.option.unused_varshks.
+  The default is `false`.
 """
-function get_unused_symbols(model::Model)
+function get_unused_symbols(model::Model; filter_known_unused::Bool=false)
     eqmap = equation_map(model)
     unused = Dict(
         :variables => filter(x -> !haskey(eqmap, x), [x.name for x in model.variables]),
         :shocks => filter(x -> !haskey(eqmap, x), [x.name for x in model.shocks]),
         :parameters => filter(x -> !haskey(eqmap, x), collect(keys(model.parameters)))
     )
+    if filter_known_unused && :unused_varshks ∈ model.options
+        for k in (:variables, :shocks)
+            unused[k] = filter(x -> x ∉ model.options.unused_varshks, unused[k])
+        end
+    end
     return unused
 end
 export get_unused_symbols
