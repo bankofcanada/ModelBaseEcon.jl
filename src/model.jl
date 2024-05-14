@@ -1867,7 +1867,7 @@ function replace_in_expr(e::Expr, old::Model, new::Union{Symbol,Expr}, params::P
 end
 
 """
-    get_unused_symbols(model::Model; filter_nowarn=false)
+    get_unused_symbols(model::Model; filter_known_unused=false)
 
 Returns a dictionary with vectors of the unused variables, shocks, and parameters.
 
@@ -1875,7 +1875,7 @@ Keyword arguments:
 * filter_known_unused::Bool - When `true`, the results will exclude variables present in model.option.unused_varshks.
   The default is `false`.
 """
-function get_unused_symbols(model::Model; filter_known_unused=false)
+function get_unused_symbols(model::Model; filter_known_unused::Bool=false)
     eqmap = equation_map(model)
     unused = Dict(
         :variables => filter(x -> !haskey(eqmap, x), [x.name for x in model.variables]),
