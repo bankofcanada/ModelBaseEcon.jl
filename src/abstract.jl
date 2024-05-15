@@ -103,9 +103,9 @@ function moduleof(m::M) where {M<:AbstractModel}
         mod_eval = m._module_eval
         isnothing(mod_eval) || return parentmodule(mod_eval(:(EquationEvaluator)))
     end
-    for (_, eqn) in equations(m)
-        mod = parentmodule(eval_resid(eqn))
-        (mod === @__MODULE__) || return mod
-    end
+    # for (_, eqn) in equations(m)
+    #     mod = parentmodule(eval_resid(eqn))
+    #     (mod === @__MODULE__) || return mod
+    # end
     error("Unable to determine the module containing the given model. Try adding equations to it and calling `@initialize`.")
 end

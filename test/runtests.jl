@@ -253,12 +253,14 @@ end
     @test RJ isa E.EquationGradient
     @test RJ.fn1 isa ModelBaseEcon.FunctionWrapper
     @test RJ.fn1.f == resid
+    @test parentmodule(resid) === E
+    @test parentmodule(RJ) === E
     @test resid([1.1, 2.3]) == 8.0
     @test RJ([1.1, 2.3]) == (8.0, [1.0, 3.0])
     # make sure the EquationEvaluator and EquationGradient are reused for identical expressions and arguments
     nnames = length(names(E, all=true))
     resid1, RJ1 = ModelBaseEcon.makefuncs(Symbol(1), :(x + 3 * y), [:x, :y], [], [], E)
-    @test    nnames == length(names(E, all=true))
+    @test nnames == length(names(E, all=true))
     @test resid === resid1
     @test RJ === RJ1
 end
@@ -458,9 +460,9 @@ end
         local m = Model()
         @variables m a
         eq = ModelBaseEcon.process_equation(m, quote
-            "this is equation 1"
-            :E1 => a[t] = 0
-        end, modelmodule=@__MODULE__, eqn_name=:A)
+                "this is equation 1"
+                :E1 => a[t] = 0
+            end, modelmodule=@__MODULE__, eqn_name=:A)
         eq.doc == "this is equation 1"
     end
 
@@ -639,8 +641,16 @@ end
     @test ModelBaseEcon.process_equation(m, :(x[t] = ifelse(false, 2, 0)), eqn_name=:_EQ3) isa Equation
     p = 0
     @test_logs (:warn, r"Variable or shock .* without `t` reference.*"i) @assert ModelBaseEcon.process_equation(m, "x=$p", eqn_name=:_EQ4) isa Equation
-    @test ModelBaseEcon.process_equation(m, :(x[t] = if true && true 1 else 2 end), eqn_name=:_EQ2) isa Equation
-    @test ModelBaseEcon.process_equation(m, :(x[t] = if true || x[t]==1 2 else 1 end), eqn_name=:_EQ2) isa Equation
+    @test ModelBaseEcon.process_equation(m, :(x[t] = if true && true
+        1
+    else
+        2
+    end), eqn_name=:_EQ2) isa Equation
+    @test ModelBaseEcon.process_equation(m, :(x[t] = if true || x[t] == 1
+        2
+    else
+        1
+    end), eqn_name=:_EQ2) isa Equation
 end
 
 @testset "Meta" begin
@@ -955,7 +965,7 @@ end
     # don't recompile existing functions
 
     modelmodule = E1_noparams
-   
+
     for i = 1:5
         α = 0.132434
         new_E1 = E1_noparams.newmodel()
@@ -970,6 +980,7 @@ end
         else
             @test new_length == prev_length
         end
+        @test ModelBaseEcon.moduleof(new_E1.equations[:maineq]) === E1_noparams
         # also make sure moduleof doesn't add any new symbols to modules
         @test ModelBaseEcon.moduleof(new_E1) === E1_noparams
         @test new_length == length(names(modelmodule, all=true))
