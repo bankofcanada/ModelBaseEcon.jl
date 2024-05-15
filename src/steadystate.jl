@@ -501,7 +501,7 @@ addition to the equations generated automatically from the dynamic system.
     directly by users. Use [`@steadystate`](@ref) instead of calling this
     function.
 """
-function setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Module=moduleof(model), eqn_key=:_undefined_, var_to_idx=get_var_to_idx(model))
+function setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Module=moduleof(model), eqn_key=:_undefined_, var_to_idx=get_var_to_idx(model), _source_=LineNumberNode(0))
     if eqn_key == :_undefined_
         eqn_key = get_next_equation_name(model.sstate.constraints, "_SSEQ")
     end
@@ -604,20 +604,11 @@ function setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Mod
     # 
     nargs = length(vinds)
     # In case there's no source information, add a dummy one
-    push!(source, LineNumberNode(0))
+    push!(source, _source_)
     # create the resid and RJ functions for the new equation
     # To do this, we use `makefuncs` from evaluation.jl
     residual = Expr(:block, source[1], :($(lhs) - $(rhs)))
-    if !isdefined(modelmodule, :_expression_functions_map) || modelmodule._expression_functions_map === nothing
-        @eval modelmodule _expression_functions_map = Dict{Expr,Any}()
-    end
-    if expr ∈ keys(modelmodule._expression_functions_map)
-        resid, RJ = modelmodule._expression_functions_map[expr]
-    else
-        funcs_expr = makefuncs(eqn_key, residual, vsyms, [], unique(val_params), modelmodule)
-        resid, RJ = modelmodule.eval(funcs_expr)
-        modelmodule._expression_functions_map[expr] = (resid, RJ)
-    end
+    resid, RJ = makefuncs(eqn_key, residual, vsyms, [], unique(val_params), modelmodule)
     _update_eqn_params!(resid, model.parameters)
     # We have all the ingredients to create the instance of SteadyStateEquation
     for i = 1:2
@@ -678,11 +669,13 @@ to help the steady state solver find the one you want to use.
 """
 macro steadystate(model, type::Symbol, equation::Expr)
     thismodule = @__MODULE__
-    return esc(:($(thismodule).setss!($(model), $(Meta.quot(equation)); type=$(QuoteNode(type)))))
+    _source_ = QuoteNode(__source__)
+    return esc(:($(thismodule).setss!($(model), $(Meta.quot(equation)); type=$(QuoteNode(type)), _source_=$(_source_))))
 end
 
 macro steadystate(model, block::Expr)
     thismodule = @__MODULE__
+    _source_ = QuoteNode(__source__)
     ret = Expr(:block)
     removals, additions = parse_equation_deletes(block)
     
@@ -697,15 +690,15 @@ macro steadystate(model, block::Expr)
         if isa(expr, LineNumberNode)
             continue
         elseif expr.head == :(=)
-            push!(ret.args, :($(thismodule).setss!($(model), $(Meta.quot(expr)); type=:level)))
+            push!(ret.args, :($(thismodule).setss!($(model), $(Meta.quot(expr)); type=:level, _source_=$(_source_))))
         elseif expr.head == :macrocall
             if expr.args[1] == Symbol("@level")
-                push!(ret.args, :($(thismodule).setss!($(model), $(Meta.quot(expr.args[3])); type=:level)))
+                push!(ret.args, :($(thismodule).setss!($(model), $(Meta.quot(expr.args[3])); type=:level, _source_=$(_source_))))
             elseif expr.args[1] == Symbol("@slope")
-                push!(ret.args, :($(thismodule).setss!($(model), $(Meta.quot(expr.args[3])); type=:slope)))
+                push!(ret.args, :($(thismodule).setss!($(model), $(Meta.quot(expr.args[3])); type=:slope, _source_=$(_source_))))
             else
                #push the whole thing, get an error in setss!
-               push!(ret.args, :($(thismodule).setss!($(model), $(Meta.quot(expr)); type=:level))) 
+               push!(ret.args, :($(thismodule).setss!($(model), $(Meta.quot(expr)); type=:level, _source_=$(_source_)))) 
             end
         else
             # not an equation

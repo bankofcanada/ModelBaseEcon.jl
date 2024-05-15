@@ -246,11 +246,21 @@ using ModelBaseEcon
 end
 @testset "Evaluations" begin
     ModelBaseEcon.initfuncs(E)
-    E.eval(ModelBaseEcon.makefuncs(Symbol(1), :(x + 3 * y), [:x, :y], [], [], E))
-    @test :resid_1 ∈ names(E, all=true)
-    @test :RJ_1 ∈ names(E, all=true)
-    @test E.resid_1([1.1, 2.3]) == 8.0
-    @test E.RJ_1([1.1, 2.3]) == (8.0, [1.0, 3.0])
+    @test isdefined(E, :EquationEvaluator)
+    @test isdefined(E, :EquationGradient)
+    resid, RJ = ModelBaseEcon.makefuncs(Symbol(1), :(x + 3 * y), [:x, :y], [], [], E)
+    @test resid isa E.EquationEvaluator
+    @test RJ isa E.EquationGradient
+    @test RJ.fn1 isa ModelBaseEcon.FunctionWrapper
+    @test RJ.fn1.f == resid
+    @test resid([1.1, 2.3]) == 8.0
+    @test RJ([1.1, 2.3]) == (8.0, [1.0, 3.0])
+    # make sure the EquationEvaluator and EquationGradient are reused for identical expressions and arguments
+    nnames = length(names(E, all=true))
+    resid1, RJ1 = ModelBaseEcon.makefuncs(Symbol(1), :(x + 3 * y), [:x, :y], [], [], E)
+    @test    nnames == length(names(E, all=true))
+    @test resid === resid1
+    @test RJ === RJ1
 end
 
 @testset "Misc" begin
@@ -940,50 +950,29 @@ end
     end
 end
 
-# helper functions
-function get_max_maineq(modelmodule::Module)
-    all_names = names(modelmodule, all=true)
-    method_names = filter(name -> isa(getfield(modelmodule, name), Function), all_names)
-    resid_funcs = filter(r -> match(r"resid_maineq_\d+$", r) !== nothing, string.(method_names))
-    versions = Vector{Int64}([0])
-    for v in resid_funcs
-        _m = match(r"resid_maineq_(\d+)$", v)
-        if _m !== nothing
-          push!(versions, parse(Int64,_m[1]))
-        end
-    end
-    return maximum(versions)
-end
-
 
 @testset "E1.equation change 4" begin
     # don't recompile existing functions
 
-    # remove existing key (from repeated test runs)
     modelmodule = E1_noparams
-    eq_key = :(y[t] = 0.132434 * y[t - 1] + (0.8675660000000001 * y[t + 1] + y_shk[t]))
-    if isdefined(modelmodule, :_expression_functions_map) && eq_key ∈ keys(modelmodule._expression_functions_map)
-        delete!(modelmodule._expression_functions_map, eq_key)
-    end
    
-    for i = 1:3
+    for i = 1:5
         α = 0.132434
         new_E1 = E1_noparams.newmodel()
-        prev_length = length(modelmodule._expression_functions_map)
-        prev_maxversion = get_max_maineq(modelmodule)
+        prev_length = length(names(modelmodule, all=true))
         @equations new_E1 begin
             :maineq => y[t] = $α * y[t-1] + $(1 - α) * y[t+1] + y_shk[t]
         end
         @reinitialize(new_E1)
-        new_length = length(modelmodule._expression_functions_map)
-        new_maxversion = get_max_maineq(modelmodule)
+        new_length = length(names(modelmodule, all=true))
         if i == 1
-            @test new_length == prev_length + 1
-            @test new_maxversion == prev_maxversion + 1
+            @test new_length == prev_length + 3
         else
             @test new_length == prev_length
-            @test new_maxversion == prev_maxversion
         end
+        # also make sure moduleof doesn't add any new symbols to modules
+        @test ModelBaseEcon.moduleof(new_E1) === E1_noparams
+        @test new_length == length(names(modelmodule, all=true))
     end
 end
 

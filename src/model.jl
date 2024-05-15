@@ -54,6 +54,8 @@ mutable struct Model <: AbstractModel
     "State determines whether the model is ready to be solved/run. One of :new, :ready, :dev. 
     Should not be directly manipulated."
     _state::Symbol
+    "the module in which all model equations will be compiled"
+    _module_eval::Union{Nothing, Function}
     "Options are various hyper-parameters for tuning the algorithms"
     options::Options
     "Flags contain meta information about the type of model"
@@ -84,10 +86,10 @@ mutable struct Model <: AbstractModel
     solverdata::LittleDictVec{Symbol,Any}
     #
     # constructor of an empty model
-    Model(opts::Options) = new(:new, merge(defaultoptions, opts),
+    Model(opts::Options) = new(:new, nothing, merge(defaultoptions, opts),
         ModelFlags(), SteadyStateData(), false, [], [], OrderedDict{Symbol,Equation}(), Parameters(), Dict(), 0, 0, [], OrderedDict{Symbol,Equation}(),
         LittleDict{Symbol,AbstractModelEvaluationData}(), LittleDict{Symbol,Any}())
-    Model() = new(:new, deepcopy(defaultoptions),
+    Model() = new(:new, nothing, deepcopy(defaultoptions),
         ModelFlags(), SteadyStateData(), false, [], [], OrderedDict{Symbol,Equation}(), Parameters(), Dict(), 0, 0, [], OrderedDict{Symbol,Equation}(),
         LittleDict{Symbol,AbstractModelEvaluationData}(), LittleDict{Symbol,Any}())
 end
@@ -809,9 +811,6 @@ macro equations(model, block::Expr)
     ret = Expr(:block)
     removals, additions = parse_equation_deletes(block)
 
-    # store modelmodule in case we start removing equations
-    push!(ret.args, :(_ModelBaseEcon_temp_modelmodule = nequations($(model)) > 0 && $(thismodule).moduleof($(model)) !== $(thismodule) ? $(thismodule).moduleof($(model)) : $(__module__) ))
-
     #removals
     if length(removals.args) > 0
         push!(ret.args, :($(thismodule).deleteequations!($(model), $(removals.args))))
@@ -845,10 +844,10 @@ macro equations(model, block::Expr)
             eqn = Expr(:block)
         end
     end
-    push!(ret.args, :($(thismodule).process_new_equations!($(model), _ModelBaseEcon_temp_modelmodule); $(thismodule).update_model_state!($(model)); nothing))
+    push!(ret.args,
+        :($(thismodule).process_new_equations!($(model))),
+        :($(thismodule).update_model_state!($(model)); nothing))
 
-    # unstore modelmodule
-    push!(ret.args, :(_ModelBaseEcon_temp_modelmodule = nothing))
     return esc(ret)
 end
 
@@ -860,20 +859,18 @@ function changeequations!(eqns::OrderedDict{Symbol,Equation}, (sym, e)::Pair{Sym
     return eqns
 end
 
-function process_new_equations!(model::Model, modelmodule::Module=moduleof(model))
+function process_new_equations!(model::Model)
     # only process at this point if model is not new
     if model._state == :new
         return
     end
-    if !isdefined(modelmodule, :EquationEvaluator)
-        initfuncs(modelmodule)
-    end
+    modelmodule = moduleof(model)
     var_to_idx = _make_var_to_idx(model.allvars)
     for (key, e) in alleqns(model)
         if e.eval_resid == eqnnotready
             delete_sstate_equations!(model, key)
             delete_aux_equations!(model, key)
-            add_equation!(model, key, e.expr; modelmodule=modelmodule, var_to_idx=var_to_idx)
+            add_equation!(model, key, e.expr; modelmodule, var_to_idx)
         end
     end
 end
@@ -1170,20 +1167,10 @@ function process_equation(model::Model, expr::Expr;
     if eqn_name == :_unnamed_equation_
         throw(ArgumentError("No equation name specified"))
     end
-    if !isdefined(modelmodule, :_expression_functions_map) || modelmodule._expression_functions_map === nothing
-        @eval modelmodule _expression_functions_map = Dict{Expr,Any}()
-    end
-    if expr ∈ keys(modelmodule._expression_functions_map)
-        resid, RJ, resid_param, chunk = modelmodule._expression_functions_map[expr]
-        _update_eqn_params!(resid, model.parameters)
-    else
-        funcs_expr = makefuncs(eqn_name, residual, tssyms, sssyms, psyms, modelmodule)
-        resid, RJ, resid_param, chunk = modelmodule.eval(funcs_expr)
-        modelmodule._expression_functions_map[expr] = (resid, RJ, resid_param, chunk)
-        _update_eqn_params!(resid, model.parameters)
-        thismodule = @__MODULE__
-        modelmodule.eval(:($(thismodule).precompilefuncs($resid, $RJ, $resid_param, $chunk)))
-    end
+    resid, RJ, resid_param, chunk = makefuncs(eqn_name, residual, tssyms, sssyms, psyms, modelmodule)
+    _update_eqn_params!(resid, model.parameters)
+    thismodule = @__MODULE__
+    modelmodule.eval(:($(thismodule).precompilefuncs($resid, $RJ, $resid_param, $chunk)))
     tsrefs′ = LittleDict{Tuple{ModelSymbol,Int},Symbol}()
     for ((modsym, i), sym) in tsrefs
         tsrefs′[(ModelSymbol(modsym), i)] = sym
@@ -1397,6 +1384,7 @@ function initialize!(model::Model, modelmodule::Module)
         modelerror("Model already initialized.")
     end
     initfuncs(modelmodule)
+    model._module_eval = modelmodule.eval
     samename = Symbol[intersect(model.allvars, keys(model.parameters))...]
     if !isempty(samename)
         modelerror("Found $(length(samename)) names that are both variables and parameters: $(join(samename, ", "))")
@@ -1445,7 +1433,6 @@ some other module, then this can be done by calling this function instead of the
 macro.
 """
 function reinitialize!(model::Model, modelmodule::Module=moduleof(model))
-    initfuncs(modelmodule)
     samename = Symbol[intersect(model.allvars, keys(model.parameters))...]
     if !isempty(samename)
         modelerror("Found $(length(samename)) names that are both variables and parameters: $(join(samename, ", "))")
@@ -1492,7 +1479,7 @@ end
 Prepare a model instance for analysis. Call this macro after all parameters,
 variable names, shock names and equations have been declared and defined.
 """
-macro initialize(model::Symbol)
+macro initialize(model)
     thismodule = @__MODULE__
     # @__MODULE__ is this module (ModelBaseEcon)
     # __module__ is the module where this macro is called (the module where the model exists)
@@ -1509,7 +1496,7 @@ equations, autoexogenize lists, and removed steadystate equations have been decl
 
 Additional/new steadystate constraints can be added after the call to `@reinitialize`.
 """
-macro reinitialize(model::Symbol)
+macro reinitialize(model)
     thismodule = @__MODULE__
     # @__MODULE__ is this module (ModelBaseEcon)
     # __module__ is the module where this macro is called (the module where the model exists)
