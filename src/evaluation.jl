@@ -44,40 +44,57 @@ function precompilefuncs(resid, RJ, resid_param, N::Int)
     return nothing
 end
 
-"""
-    funcsyms(mod::Module)
+# """
+#     funcsyms(mod::Module)
 
-Create a pair of identifiers that does not conflict with existing identifiers in
-the given module.
+# Create a pair of identifiers that does not conflict with existing identifiers in
+# the given module.
 
-!!! warning
-    Internal function. Do not call directly.
+#. !!! warning
+#     Internal function. Do not call directly.
 
-### Implementation (for developers)
-We need two identifiers `resid_N` and `RJ_N` where "N" is some integer number.
-The first is going to be the name of the function that evaluates the equation
-and the second is going to be the name of the function that evaluates both the
-equation and its gradient.
-"""
-function funcsyms end
+# ### Implementation (for developers)
+# We need two identifiers `resid_N` and `RJ_N` where "N" is some integer number.
+# The first is going to be the name of the function that evaluates the equation
+# and the second is going to be the name of the function that evaluates both the
+# equation and its gradient.
+# """
+# function funcsyms end
 
-function funcsyms(mod::Module, eqn_name::Symbol)
-    iterator = 1
-    fn1 = Symbol("resid_", eqn_name)
-    fn2 = Symbol("RJ_", eqn_name)
-    fn3 = Symbol("resid_param_", eqn_name)
-    while isdefined(mod, fn1) || isdefined(Main, fn1)
-        iterator += 1
-        fn1 = Symbol("resid_", eqn_name, "_", iterator)
-        fn2 = Symbol("RJ_", eqn_name, "_", iterator)
-        fn3 = Symbol("resid_param_", eqn_name, "_", iterator)
+# function funcsyms(mod::Module, eqn_name::Symbol, args...)
+#     iterator = 1
+#     fn1 = Symbol("resid_", eqn_name)
+#     fn2 = Symbol("RJ_", eqn_name)
+#     fn3 = Symbol("resid_param_", eqn_name)
+#     while isdefined(mod, fn1) || isdefined(Main, fn1)
+#         iterator += 1
+#         fn1 = Symbol("resid_", eqn_name, "_", iterator)
+#         fn2 = Symbol("RJ_", eqn_name, "_", iterator)
+#         fn3 = Symbol("resid_param_", eqn_name, "_", iterator)
+#     end
+#     return fn1, fn2, fn3
+# end
+
+function funcsyms(mod, eqn_name::Symbol, expr::Expr, tssyms, sssyms, psyms)
+    eqn_data = (expr, collect(tssyms), collect(sssyms), collect(psyms))
+    myhash = @static UInt == UInt64 ? 0x2270e9673a0822b5 : 0x2ce87a13
+    myhash = Base.hash(eqn_data, myhash)
+    he = mod._hashed_expressions
+    hits = get!(he, myhash, valtype(he)())
+    ind = indexin([eqn_data], hits)[1]
+    if isnothing(ind)
+        push!(hits, eqn_data)
+        ind = 1
     end
+    fn1 = Symbol("resid_", eqn_name, "_", ind, "_", myhash)
+    fn2 = Symbol("RJ_", eqn_name, "_", ind, "_", myhash)
+    fn3 = Symbol("resid_param_", eqn_name, "_", ind, "_", myhash)
     return fn1, fn2, fn3
 end
 
 const MAX_CHUNK_SIZE = 4
 
-# Used to avoid specialzing the ForwardDiff functions on
+# Used to avoid specializing the ForwardDiff functions on
 # every equation.
 struct FunctionWrapper <: Function
     f::Function
@@ -106,10 +123,13 @@ callable `EquationEvaluator` instance) and a second function that evaluates both
 the residual and its gradient (as a callable `EquationGradient` instance).
 """
 function makefuncs(eqn_name, expr, tssyms, sssyms, psyms, mod)
-    fn1, fn2, fn3 = funcsyms(mod, eqn_name)
-    x = gensym("x")
     nargs = length(tssyms) + length(sssyms)
     chunk = min(nargs, MAX_CHUNK_SIZE)
+    fn1, fn2, fn3 = funcsyms(mod, eqn_name, expr, tssyms, sssyms, psyms)
+    if isdefined(mod, fn1) && isdefined(mod, fn2) && isdefined(mod, fn3)
+        return mod.eval(:(($fn1, $fn2, $fn3, $chunk)))
+    end
+    x = gensym("x")
     has_psyms = !isempty(psyms)
     # This is the expression that goes inside the body of the "outer" function.
     # If the equation has no parameters, then we just unpack x and evaluate the expressions
@@ -137,7 +157,7 @@ function makefuncs(eqn_name, expr, tssyms, sssyms, psyms, mod)
     else
         :(const $fn3 = nothing)
     end
-    return quote
+    return mod.eval(quote
         function (ee::EquationEvaluator{$(QuoteNode(fn1))})($x::Vector{<:Real})
             $psym_expr
         end
@@ -146,7 +166,7 @@ function makefuncs(eqn_name, expr, tssyms, sssyms, psyms, mod)
         const $fn2 = EquationGradient($FunctionWrapper($fn1), $nargs, Val($chunk))
         $fn3_expr
         ($fn1, $fn2, $fn3, $chunk)
-    end
+    end)
 end
 
 """
@@ -168,8 +188,9 @@ together with a `DiffResult` and a `GradientConfig` used by `ForwardDiff`. Its
 call is defined here and computes the residual and the gradient.
 """
 function initfuncs(mod::Module)
-    if :EquationEvaluator ∉ names(mod; all=true)
+    if !isdefined(mod, :EquationEvaluator)
         mod.eval(quote
+            const _hashed_expressions = Dict{UInt,Vector{Tuple{Expr,Vector{Symbol},Vector{Symbol},Vector{Symbol}}}}()
             struct EquationEvaluator{FN} <: Function
                 rev::Ref{UInt}
                 params::$(@__MODULE__).LittleDictVec{Symbol,Any}
@@ -342,7 +363,7 @@ function ModelEvaluationData(model::AbstractModel)
     alleqns = collect(values(model.alleqns))
     neqns = length(alleqns)
     allvars = model.allvars
-    nvars = length(allvars) 
+    nvars = length(allvars)
     var_to_idx = _make_var_to_idx(allvars)
     allinds = [[CartesianIndex((time0 + ti, var_to_idx[var])) for (var, ti) in keys(eqn.tsrefs)] for eqn in alleqns]
     ntimes = 1 + model.maxlag + model.maxlead

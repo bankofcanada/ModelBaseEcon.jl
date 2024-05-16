@@ -98,10 +98,14 @@ Return the module in which the given equation or model was initialized.
 """
 function moduleof end
 moduleof(e::AbstractEquation) = parentmodule(eval_resid(e))
-function moduleof(m::AbstractModel)
-    eqns = equations(m)
-    if isempty(eqns)
-        error("Unable to determine the module containing the given model. Try adding equations to it and call `@initialize`.")
+function moduleof(m::M) where {M<:AbstractModel}
+    if hasfield(M, :_module_eval) 
+        mod_eval = m._module_eval
+        isnothing(mod_eval) || return parentmodule(mod_eval(:(EquationEvaluator)))
     end
-    return moduleof(first(eqns)[2])
+    # for (_, eqn) in equations(m)
+    #     mod = parentmodule(eval_resid(eqn))
+    #     (mod === @__MODULE__) || return mod
+    # end
+    error("Unable to determine the module containing the given model. Try adding equations to it and calling `@initialize`.")
 end
