@@ -245,9 +245,10 @@ function geteqn(i::Integer, ssd::SteadyStateData)
     ci = i - length(ssd.constraints)
     return ci > 0 ? get(ssd.equations, ci) : get(ssd.constraints, i)
 end
-function geteqn(key::Symbol, ssd::SteadyStateData)
-    return haskey(ssd.equations, key) ? ssd.equations[key] : ssd.constraints[key]
-end
+# method below is never called
+# function geteqn(key::Symbol, ssd::SteadyStateData)
+#     return haskey(ssd.equations, key) ? ssd.equations[key] : ssd.constraints[key]
+# end
 geteqn(i, m::AbstractModel) = geteqn(i, m.sstate)
 
 Base.show(io::IO, ::MIME"text/plain", ssd::SteadyStateData) = show(io, ssd)
@@ -719,8 +720,9 @@ function macro_steadystate_impl(__source__::LineNumberNode, model, block::Expr)
         elseif @capture(expr, lhs_ = rhs_)
             nothing
         else
-            err = ArgumentError("Expression does not appear to be an equation: $expr")
-            return :(throw($err))
+            # NOTE: this branch is unreachable
+            # err = ArgumentError("Expression does not appear to be an equation: $expr")
+            # return :(throw($err))
         end
         eqn_expr = Meta.quot(eqn)
         _source_ = Meta.quot(source_line)

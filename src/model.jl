@@ -790,7 +790,7 @@ function macro_equations_impl(model, block::Expr)
             continue
         end
         if @capture(expr, @delete tags__)
-            tags = collect(Symbol, tags)
+            tags = Symbol[t isa QuoteNode ? t.value : t for t in tags]
             push!(todo, :($thismodule.deleteequations!($model, $tags)))
             continue
         end
@@ -823,7 +823,7 @@ function split_doc_tag_eqn(expr)
     if Meta.isexpr(expr, :macrocall) && expr.args[1] == doc_macro
         _, src, doc, expr = expr.args
     end
-    local tag, eqtyp, lhs, rhs
+    # local tag, eqtyp, lhs, rhs
     if @capture(expr, @eqtyp_ lhs_ = rhs_)
         tag = :(:_unnamed_equation_)
         eqn = Expr(:macrocall, eqtyp, expr.args[2], :($lhs = $rhs))
