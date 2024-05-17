@@ -1668,7 +1668,10 @@ end
         # test the exception type
         @test_throws ArgumentError @initialize model
         # test the error message
-        @test_throws r".*Indexing parameters on time not allowed: p[t]*"i @initialize model
+        if Base.VERSION >= v"1.8"
+            # this version of @test_throws requires Julia 1.8
+            @test_throws r".*Indexing parameters on time not allowed: p[t]*"i @initialize model
+        end
     end
 end
 
