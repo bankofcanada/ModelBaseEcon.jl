@@ -1590,7 +1590,7 @@ end
 
 @testset "fix#58" begin
     @using_example E7
-    
+
     m = E7.newmodel()
 
     @test length(m.equations) == 7 && length(m.auxeqns) == 2
@@ -1655,5 +1655,23 @@ end
     end
     @test length(m.equations) == 6 && length(m.auxeqns) == 1
     @test (eq = m.equations[:E6]; eq.doc == "equation 6" && eq.name == :E6 && islin(eq) && !islog(eq))
+end
+
+@testset "fix#63" begin
+    let model = Model()
+        @variables model y
+        @shocks model y_shk
+        @parameters model p = 0.2
+        @equations model begin
+            y[t] = p[t] * y[t-1] + y_shk[t]
+        end
+        # test the exception type
+        @test_throws ArgumentError @initialize model
+        # test the error message
+        if Base.VERSION >= v"1.8"
+            # this version of @test_throws requires Julia 1.8
+            @test_throws r".*Indexing parameters on time not allowed: p[t]*"i @initialize model
+        end
+    end
 end
 
