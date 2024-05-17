@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020-2023, Bank of Canada
+# Copyright (c) 2020-2024, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -902,7 +902,7 @@ export islog, islin
 islog(eq::AbstractEquation) = flag(eq, :log)
 islin(eq::AbstractEquation) = flag(eq, :lin)
 
-function error_process(msg, expr, mod) 
+function error_process(msg, expr, mod)
     err = ArgumentError("$msg\n  During processing of\n  $(expr)")
     mod.eval(:(throw($err)))
 end
@@ -1040,25 +1040,28 @@ function process_equation(model::Model, expr::Expr;
         end
         if ex.head == :ref
             # expression is an indexing expression
-            name, index = ex.args
+            name, index... = ex.args
             if haskey(model.parameters, name)
                 # indexing in a parameter - leave it alone, but keep track
                 add_pref(name)
-                if has_t(index)
+                if any(has_t, index)
                     error_process("Indexing parameters on time not allowed: $ex", expr, modelmodule)
                 end
-                return Expr(:ref, name, modelmodule.eval(index))
+                return Expr(:ref, name, modelmodule.eval.(index)...)
             end
             vind = indexin([name], allvars)[1]  # the index of the variable
             if vind !== nothing
                 # indexing in a time series
+                if length(index) != 1
+                    error_process("Multiple indexing of variable or shock: $ex", expr, modelmodule)
+                end
                 tind = modelmodule.eval(:(
                     let t = 0
-                        $index
+                        $(index[1])
                     end
                 ))  # the lag or lead value
                 add_tsref(allvars[vind], tind)
-                return normal_ref(name, tind)
+                return Expr(:ref, name, normal_ref(tind))
             end
             error_process("Undefined reference $(ex).", expr, modelmodule)
         end

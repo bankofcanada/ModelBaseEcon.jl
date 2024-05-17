@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020-2023, Bank of Canada
+# Copyright (c) 2020-2024, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -12,7 +12,8 @@ has_t(sym::Symbol) = sym == :t
 has_t(expr::Expr) = has_t(expr.args...)
 
 # normalized :ref expression
-normal_ref(var, lag) = Expr(:ref, var, lag == 0 ? :t : lag > 0 ? :(t + $lag) : :(t - $(-lag)))
+# normal_ref(var, lag) = Expr(:ref, var, lag == 0 ? :t : lag > 0 ? :(t + $lag) : :(t - $(-lag)))
+normal_ref(lag) = lag == 0 ? :t : lag > 0 ? :(t + $lag) : :(t - $(-lag))
 
 """
     at_lag(expr[, n=1])
@@ -24,18 +25,22 @@ function at_lag(expr::Expr, n=1)
     if n == 0
         return expr
     elseif expr.head == :ref
-        var, index = expr.args
-        if has_t(index)
-            if @capture(index, t + lag_)
-                return normal_ref(var, lag - n)
-            elseif index == :t
-                return normal_ref(var, -n)
-            elseif @capture(index, t - lag_)
-                return normal_ref(var, -lag - n)
-            else
-                error("Must use `t`, `t+n` or `t-n`, not $index")
+        var, index... = expr.args
+        for i = eachindex(index)
+            ind_expr = index[i]
+            if has_t(ind_expr)
+                if @capture(ind_expr, t + lag_)
+                    index[i] = normal_ref(lag - n)
+                elseif ind_expr == :t
+                    index[i] = normal_ref(-n)
+                elseif @capture(ind_expr, t - lag_)
+                    index[i] = normal_ref(-lag - n)
+                else
+                    error("Must use `t`, `t+n` or `t-n`, not $(ind_expr)")
+                end
             end
         end
+        return Expr(:ref, var, index...)
     end
     return Expr(expr.head, at_lag.(expr.args, n)...)
 end
@@ -85,14 +90,6 @@ function at_d(expr::Expr, n=1, s=0)
         end
     end
     return ret
-    #### old implementation
-    # if s > 0
-    #     expr = :($expr - $(at_lag(expr, s)))
-    # end
-    # for i = 1:n
-    #     expr = :($expr - $(at_lag(expr)))
-    # end
-    # return expr
 end
 
 """
@@ -128,10 +125,11 @@ at_movav(expr::Expr, n::Integer) = MacroTools.unblock(:($(at_movsum(expr, n)) / 
 
 """
     at_movsumw(expr, n, weights)
+    at_movsumw(expr, n, w1, w2, ..., wn)
 
 Apply moving weighted sum with n periods backwards to the given expression with
 the given weights.
-For example: `at_movsumw(x[t], w, 3) = w[1]*x[t] + w[2]*x[t-1] + w[3]*x[t-2]`
+For example: `at_movsumw(x[t], 3, w) = w[1]*x[t] + w[2]*x[t-1] + w[3]*x[t-2]`
 
 See also [`at_lag`](@ref).
 """

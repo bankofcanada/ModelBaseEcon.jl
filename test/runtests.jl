@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020-2023, Bank of Canada
+# Copyright (c) 2020-2024, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -504,6 +504,8 @@ end
     @test @movavw(a[t] + b[t+1], 2, p) == :((p[1] * (a[t] + b[t+1]) + p[2] * (a[t-1] + b[t])) / (p[1] + p[2]))
     @test @movsumw(a[t] + b[t+1], 2, q, p) == :(q * (a[t] + b[t+1]) + p * (a[t-1] + b[t]))
     @test @movavw(a[t] + b[t+1], 2, q, p) == :((q * (a[t] + b[t+1]) + p * (a[t-1] + b[t])) / (q + p))
+    @test @lead(v[t, 2]) == :(v[t+1, 2])
+    @test @dlog(v[t-1, z, t+2], 1) == :(log(v[t-1, z, t+2]) - log(v[t-2, z, t+1]))
 end
 
 module MetaTest
@@ -1672,6 +1674,13 @@ end
             # this version of @test_throws requires Julia 1.8
             @test_throws r".*Indexing parameters on time not allowed: p[t]*"i @initialize model
         end
+
+        # do not allow multiple indexing of variables
+        @equations model begin
+            @delete :_EQ1
+            y[t, 1] = p[t] * y[t-1] + y_shk[t]
+        end
+        @test_throws ArgumentError @initialize model
+        Base.VERSION >= v"1.8" && @test_throws r".*Multiple indexing of variable or shock: y[t, 1]*"i @initialize model
     end
 end
-

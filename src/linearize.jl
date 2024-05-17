@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020-2022, Bank of Canada
+# Copyright (c) 2020-2024, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -219,11 +219,12 @@ function print_linearized(io::IO, model::Model; compact::Bool=true)
     sort!(nonzerosofjay, by=x -> x[1] * base^2 + x[2])
 
     # names of variables corresponding to columns of J
-    var_from_col = map(string, (
-        ModelBaseEcon.normal_ref(var.name, lag) for var in model.varshks for lag in -model.maxlag:model.maxlead
-    ))
+    var_from_col = String[
+        string(Expr(:ref, var.name, normal_ref(lag)))
+        for var in model.varshks for lag in -model.maxlag:model.maxlead
+    ]
 
-    io = IOContext(io, :compact=>get(io, :compact, compact))
+    io = IOContext(io, :compact => get(io, :compact, compact))
 
     # loop over the non-zeros of J and print
     this_r = 0
