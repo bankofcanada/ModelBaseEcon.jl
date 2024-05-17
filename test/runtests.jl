@@ -642,15 +642,15 @@ end
     p = 0
     @test_logs (:warn, r"Variable or shock .* without `t` reference.*"i) @assert ModelBaseEcon.process_equation(m, "x=$p", eqn_name=:_EQ4) isa Equation
     @test ModelBaseEcon.process_equation(m, :(x[t] = if true && true
-        1
-    else
-        2
-    end), eqn_name=:_EQ2) isa Equation
+            1
+        else
+            2
+        end), eqn_name=:_EQ2) isa Equation
     @test ModelBaseEcon.process_equation(m, :(x[t] = if true || x[t] == 1
-        2
-    else
-        1
-    end), eqn_name=:_EQ2) isa Equation
+            2
+        else
+            1
+        end), eqn_name=:_EQ2) isa Equation
 end
 
 @testset "Meta" begin
@@ -1510,7 +1510,7 @@ end
 
     @test_logs @reinitialize m
 
-     # option to not show a warning
+    # option to not show a warning
     m = S1.newmodel()
     @equations m begin
         @delete _EQ1
@@ -1587,3 +1587,73 @@ end
     m.pinf = pinf
     @test m.pinf isa ModelVariable
 end
+
+@testset "fix#58" begin
+    @using_example E7
+    
+    m = E7.newmodel()
+
+    @test length(m.equations) == 7 && length(m.auxeqns) == 2
+    @equations m begin
+        @delete _EQ6
+    end
+    @test length(m.equations) == 6 && length(m.auxeqns) == 2
+    @equations m begin
+        @delete :_EQ7
+    end
+    @test length(m.equations) == 5 && length(m.auxeqns) == 1
+    @test_throws ArgumentError @equations m begin
+        :E6 => ly[t] - ly[t-1]
+    end
+    @test length(m.equations) == 5 && length(m.auxeqns) == 1
+
+    @equations m begin
+        dly[t] = ly[t] - ly[t-1]
+    end
+    @test length(m.equations) == 6 && length(m.auxeqns) == 1
+    @test (eq = m.equations[:_EQ6]; eq.doc == "" && eq.name == :_EQ6 && !islin(eq) && !islog(eq))
+    @equations m begin
+        @delete _EQ6
+        :E6 => dly[t] = ly[t] - ly[t-1]
+    end
+    @test length(m.equations) == 6 && length(m.auxeqns) == 1
+    @test (eq = m.equations[:E6]; eq.doc == "" && eq.name == :E6 && !islin(eq) && !islog(eq))
+    @equations m begin
+        :E6 => @log dly[t] = ly[t] - ly[t-1]
+    end
+    @test length(m.equations) == 6 && length(m.auxeqns) == 1
+    @test (eq = m.equations[:E6]; eq.doc == "" && eq.name == :E6 && !islin(eq) && islog(eq))
+    @equations m begin
+        :E6 => @lin dly[t] = ly[t] - ly[t-1]
+    end
+    @test length(m.equations) == 6 && length(m.auxeqns) == 1
+    @test (eq = m.equations[:E6]; eq.doc == "" && eq.name == :E6 && islin(eq) && !islog(eq))
+
+    @equations m begin
+        @delete E6
+        "equation 6"
+        dly[t] = ly[t] - ly[t-1]
+    end
+    @test length(m.equations) == 6 && length(m.auxeqns) == 1
+    @test (eq = m.equations[:_EQ6]; eq.doc == "equation 6" && eq.name == :_EQ6 && !islin(eq) && !islog(eq))
+    @equations m begin
+        @delete _EQ6
+        "equation 6"
+        :E6 => dly[t] = ly[t] - ly[t-1]
+    end
+    @test length(m.equations) == 6 && length(m.auxeqns) == 1
+    @test (eq = m.equations[:E6]; eq.doc == "equation 6" && eq.name == :E6 && !islin(eq) && !islog(eq))
+    @equations m begin
+        "equation 6"
+        :E6 => @log dly[t] = ly[t] - ly[t-1]
+    end
+    @test length(m.equations) == 6 && length(m.auxeqns) == 1
+    @test (eq = m.equations[:E6]; eq.doc == "equation 6" && eq.name == :E6 && !islin(eq) && islog(eq))
+    @equations m begin
+        "equation 6"
+        :E6 => @lin dly[t] = ly[t] - ly[t-1]
+    end
+    @test length(m.equations) == 6 && length(m.auxeqns) == 1
+    @test (eq = m.equations[:E6]; eq.doc == "equation 6" && eq.name == :E6 && islin(eq) && !islog(eq))
+end
+

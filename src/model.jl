@@ -55,7 +55,7 @@ mutable struct Model <: AbstractModel
     Should not be directly manipulated."
     _state::Symbol
     "the module in which all model equations will be compiled"
-    _module_eval::Union{Nothing, Function}
+    _module_eval::Union{Nothing,Function}
     "Options are various hyper-parameters for tuning the algorithms"
     options::Options
     "Flags contain meta information about the type of model"
@@ -426,34 +426,6 @@ function parse_deletes(block::Expr)
     return removals, additions
 end
 
-function parse_equation_deletes(block::Expr)
-    removals = Expr(:block)
-    additions = Expr(:block)
-    has_lines = any(typeof.(block.args) .== LineNumberNode)
-    if (typeof(block.args[1]) == Symbol && block.args[1] == Symbol("@delete"))
-        args = filter(a -> !isa(a, LineNumberNode), block.args[2:end])
-        push!(removals.args, args...)
-    elseif has_lines == false
-        push!(additions.args, block)
-    else
-        stored_linenumber_node = nothing
-        for expr in block.args
-            if isa(expr, LineNumberNode)
-                stored_linenumber_node = expr
-                continue
-            elseif expr.args[1] isa Symbol && expr.args[1] == Symbol("@delete")
-                # line in a block starting with @delete
-                args = filter(a -> !isa(a, LineNumberNode), expr.args[2:end])
-                push!(removals.args, args...)
-            else
-                push!(additions.args, stored_linenumber_node)
-                push!(additions.args, expr)
-            end
-        end
-    end
-    return removals, additions
-end
-
 """
     @variables model name1 name2 ...
     @variables model begin
@@ -697,39 +669,36 @@ conveniently  swap exogenous and endogenous variables.
 You can also remove pairs from the model by prefacing each removed pair
 with `@delete`.
 """
-macro autoexogenize(model, block::Expr)
+macro autoexogenize(model, args::Expr...)
     thismodule = @__MODULE__
-    removals, additions = parse_equation_deletes(block)
     autoexos = Dict{Symbol,Any}()
     removed_autoexos = Dict{Symbol,Any}()
-    for expr in removals.args
-        if expr isa LineNumberNode
-            continue
-        elseif expr isa Expr && expr.head == :(=)
-            removed_autoexos[expr.args[1]] = expr.args[2]
-        elseif expr isa Expr && expr.head == :call && expr.args[1] == :(=>)
-            removed_autoexos[expr.args[2]] = expr.args[3]
+    for arg in args
+        for expr in (isexpr(arg, :block) ? arg.args : (arg,))
+            expr isa LineNumberNode && continue
+            if @capture(expr, @delete whats__)
+                for what in whats
+                    if @capture(what, (one_ = two_) | (one_ => two_))
+                        push!(removed_autoexos, one => two)
+                    else
+                        @warn "Failed to remove $what"
+                    end
+                end
+                continue
+            end
+            if @capture(expr, (one_ = two_) | (one_ => two_))
+                push!(autoexos, one => two)
+            else
+                @warn "Failed to autoexogenize $expr"
+            end
         end
     end
-    for expr in additions.args
-        if expr isa LineNumberNode
-            continue
-        elseif expr isa Expr && expr.head == :(=)
-            autoexos[expr.args[1]] = expr.args[2]
-        elseif expr isa Expr && expr.head == :call && expr.args[1] == :(=>)
-            autoexos[expr.args[2]] = expr.args[3]
-        else
-            err = ArgumentError("Expression does not appear to be an equation or pair: $expr")
-            return esc(:(throw($err)))
-        end
-    end
-
-    return esc(:(
-        $(thismodule).deleteautoexogenize!($(model).autoexogenize, $(removed_autoexos));
-        merge!($(model).autoexogenize, $(autoexos));
-        $(thismodule).update_model_state!($(model));
+    return esc(quote
+        $thismodule.deleteautoexogenize!($model.autoexogenize, $removed_autoexos)
+        merge!($model.autoexogenize, $autoexos)
+        $thismodule.update_model_state!($model)
         nothing
-    ))
+    end)
 end
 
 function deleteautoexogenize!(autoexogdict, entries)
@@ -777,11 +746,10 @@ end
 Returns the next available equation name of the form `:_EQ#`.
 The initial guess is at the number of equations + 1.
 """
-function get_next_equation_name(eqns::OrderedDict{Symbol,<:Union{Equation,SteadyStateEquation}}, prefix::String="_EQ")
-    existing_keys = keys(eqns)
-    incrementer = length(existing_keys) + 1
+function get_next_equation_name(eqns::OrderedDict{Symbol,<:AbstractEquation}, prefix::String="_EQ")
+    incrementer = length(eqns) + 1
     eqn_key = Symbol(prefix, incrementer)
-    while eqn_key ∈ existing_keys
+    while haskey(eqns, eqn_key)
         incrementer += 1
         eqn_key = Symbol(prefix, incrementer)
     end
@@ -804,51 +772,72 @@ To find the key for an equation, see [`summarize`](@ref). For equation details, 
 Changes like this should be followed by a call to [`@reinitialize`](@ref) on the model.
 """
 macro equations(model, block::Expr)
+    ret = macro_equations_impl(model, block)
+    return esc(ret)
+end
+
+function macro_equations_impl(model, block::Expr)
     thismodule = @__MODULE__
     if block.head != :block
         modelerror("A list of equations must be within a begin-end block")
     end
-    ret = Expr(:block)
-    removals, additions = parse_equation_deletes(block)
-
-    #removals
-    if length(removals.args) > 0
-        push!(ret.args, :($(thismodule).deleteequations!($(model), $(removals.args))))
-        push!(ret.args, :($(thismodule).update_model_state!($(model)); nothing))
-    end
-
-    # additions
-    eqn = Expr(:block)
-    for expr in additions.args
-        push!(eqn.args, expr)
-        if isa(expr, LineNumberNode)
+    global doc_macro
+    source_line::LineNumberNode = LineNumberNode(0)
+    todo = Expr[]
+    for expr in block.args
+        if expr isa LineNumberNode
+            source_line = expr
             continue
-        else
-            if expr.args[1] isa Symbol && expr.args[1] == :(=>)
-                sym = expr.args[2]
-                push!(ret.args, :($(thismodule).changeequations!($model.equations, $sym => $(Meta.quot(eqn)))))
-            elseif expr.args[1] isa Expr && expr.args[1].args[1] == :(=>)
-                sym = expr.args[1].args[2]
-                push!(ret.args, :($(thismodule).changeequations!($model.equations, $sym => $(Meta.quot(eqn)))))
-            elseif expr.head == :macrocall
-                # This situation happens when the equation has a docstring, 
-                if expr.args[end].head == :call && expr.args[end].args[1] == :(=>)
-                    sym = expr.args[end].args[2]
-                    push!(ret.args, :($(thismodule).changeequations!($model.equations, $(sym) => $(Meta.quot(eqn)))))
-                else
-                    push!(ret.args, :($(thismodule).changeequations!($model.equations, :_unnamed_equation_ => $(Meta.quot(eqn)))))
-                end
-            else
-                push!(ret.args, :($(thismodule).changeequations!($model.equations, :_unnamed_equation_ => $(Meta.quot(eqn)))))
-            end
-            eqn = Expr(:block)
         end
+        if @capture(expr, @delete tags__)
+            tags = Symbol[t isa QuoteNode ? t.value : t for t in tags]
+            push!(todo, :($thismodule.deleteequations!($model, $tags)))
+            continue
+        end
+        (; doc, src, tag, eqn) = split_doc_tag_eqn(Expr(:block, source_line, expr))
+        if ismissing(eqn)
+            err = ArgumentError("Expression does not appear to be an equation: $expr")
+            return :(throw($err))
+        end
+        if ismissing(doc)
+            eqn_expr = Meta.quot(Expr(:block, src, eqn))
+        else
+            eqn_expr = Meta.quot(Expr(:macrocall, doc_macro, src, doc, eqn))
+        end
+        push!(todo, :($thismodule.changeequations!($model.equations, $tag => $eqn_expr)))
     end
-    push!(ret.args,
-        :($(thismodule).process_new_equations!($(model))),
-        :($(thismodule).update_model_state!($(model)); nothing))
+    return quote
+        $thismodule.update_model_state!($model)
+        $(todo...)
+        $thismodule.process_new_equations!($model)
+    end
+end
 
-    return esc(ret)
+function split_doc_tag_eqn(expr)
+    global doc_macro
+    src = LineNumberNode(0)
+    doc = missing
+    if Meta.isexpr(expr, :block, 2) && expr.args[1] isa LineNumberNode
+        src, expr = expr.args
+    end
+    if Meta.isexpr(expr, :macrocall) && expr.args[1] == doc_macro
+        _, src, doc, expr = expr.args
+    end
+    # local tag, eqtyp, lhs, rhs
+    if @capture(expr, @eqtyp_ lhs_ = rhs_)
+        tag = :(:_unnamed_equation_)
+        eqn = Expr(:macrocall, eqtyp, expr.args[2], :($lhs = $rhs))
+    elseif @capture(expr, tag_ => @eqtyp_ lhs_ = rhs_)
+        eqn = Expr(:macrocall, eqtyp, expr.args[3].args[2], :($lhs = $rhs))
+    elseif @capture(expr, tag_ => lhs_ = rhs_)
+        eqn = :($lhs = $rhs)
+    elseif @capture(expr, lhs_ = rhs_)
+        tag = :(:_unnamed_equation_)
+        eqn = :($lhs = $rhs)
+    else
+        eqn = missing
+    end
+    return (; doc, src, tag, eqn)
 end
 
 function changeequations!(eqns::OrderedDict{Symbol,Equation}, (sym, e)::Pair{Symbol,Expr})
@@ -1281,10 +1270,7 @@ function add_equation!(model::Model, eqn_key::Symbol, expr::Expr; var_to_idx=get
             rhs = preprocess(rhs)
             return Expr(:(=), lhs, rhs)
         end
-        if ex.head == :call && ex.args[1] == :(=>)
-            eqn_key = ex.args[2].value
-            return preprocess(ex.args[3])
-        end
+
         # recursively preprocess all arguments
         ret = Expr(ex.head)
         for i in eachindex(ex.args)
