@@ -1674,6 +1674,13 @@ end
             # this version of @test_throws requires Julia 1.8
             @test_throws r".*Indexing parameters on time not allowed: p[t]*"i @initialize model
         end
+
+        # do not allow multiple indexing of variables
+        @equations model begin
+            @delete :_EQ1
+            y[t, 1] = p[t] * y[t-1] + y_shk[t]
+        end
+        @test_throws ArgumentError @initialize model
+        Base.VERSION >= v"1.8" && @test_throws r".*Multiple indexing of variable or shock: y[t, 1]*"i @initialize model
     end
 end
-
