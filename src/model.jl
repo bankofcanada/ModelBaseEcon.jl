@@ -902,8 +902,9 @@ export islog, islin
 islog(eq::AbstractEquation) = flag(eq, :log)
 islin(eq::AbstractEquation) = flag(eq, :lin)
 
-error_process(msg, expr) = begin
-    throw(ArgumentError("$msg\n  During processing of\n  $(expr)"))
+function error_process(msg, expr, mod) 
+    err = ArgumentError("$msg\n  During processing of\n  $(expr)")
+    mod.eval(:(throw($err)))
 end
 
 warn_process(msg, expr) = begin
@@ -999,7 +1000,7 @@ function process_equation(model::Model, expr::Expr;
             return sym
         end
         # no idea what this is!
-        error_process("Undefined `$(sym)`.", expr)
+        error_process("Undefined `$(sym)`.", expr, modelmodule)
     end
     # Main version of process() - it's recursive
     function process(ex::Expr)
@@ -1015,9 +1016,9 @@ function process_equation(model::Model, expr::Expr;
             macroname = Symbol(lstrip(string(ex.args[1]), '@'))  # strip the leading '@'
             # check if this is a steady state mention
             if macroname ∈ (:sstate,)
-                length(ex.args) == 3 || error_process("Invalid use of @(ex.args[1])", expr)
+                length(ex.args) == 3 || error_process("Invalid use of @(ex.args[1])", expr, modelmodule)
                 vind = get(var_to_idx, ex.args[3], nothing)
-                vind === nothing && error_process("Argument of @(ex.args[1]) must be a variable", expr)
+                vind === nothing && error_process("Argument of @(ex.args[1]) must be a variable", expr, modelmodule)
                 add_ssref(allvars[vind])
                 return ex
             end
@@ -1035,7 +1036,7 @@ function process_equation(model::Model, expr::Expr;
                 metaout = modelmodule.eval(Expr(:call, metafunc, metaargs...))
                 return process(metaout)
             end
-            error_process("Undefined meta function $(ex.args[1]).", expr)
+            error_process("Undefined meta function $(ex.args[1]).", expr, modelmodule)
         end
         if ex.head == :ref
             # expression is an indexing expression
@@ -1043,6 +1044,9 @@ function process_equation(model::Model, expr::Expr;
             if haskey(model.parameters, name)
                 # indexing in a parameter - leave it alone, but keep track
                 add_pref(name)
+                if has_t(index)
+                    error_process("Indexing parameters on time not allowed: $ex", expr, modelmodule)
+                end
                 return Expr(:ref, name, modelmodule.eval(index))
             end
             vind = indexin([name], allvars)[1]  # the index of the variable
@@ -1056,7 +1060,7 @@ function process_equation(model::Model, expr::Expr;
                 add_tsref(allvars[vind], tind)
                 return normal_ref(name, tind)
             end
-            error_process("Undefined reference $(ex).", expr)
+            error_process("Undefined reference $(ex).", expr, modelmodule)
         end
         if ex.head == :(=)
             # expression is an equation
@@ -1074,7 +1078,7 @@ function process_equation(model::Model, expr::Expr;
             if length(args) == 3
                 return Expr(:call, :if, args...)
             else
-                error_process("Unable to process an `if` statement with a single branch. Use function `ifelse` instead.", expr)
+                error_process("Unable to process an `if` statement with a single branch. Use function `ifelse` instead.", expr, modelmodule)
             end
         end
         if ex.head ∈ (:call, :(&&), :(||))
@@ -1086,9 +1090,9 @@ function process_equation(model::Model, expr::Expr;
         end
         if ex.head == :incomplete
             # for incomplete expression, args[1] contains the error message
-            error_process(ex.args[1], expr)
+            error_process(ex.args[1], expr, modelmodule)
         end
-        error_process("Can't process $(ex).", expr)
+        error_process("Can't process $(ex).", expr, modelmodule)
     end
 
     ##################
@@ -1113,7 +1117,7 @@ function process_equation(model::Model, expr::Expr;
                 elseif isa(tindex, Expr) && tindex.head == :call && tindex.args[1] == :+ && tindex.args[2] == :t
                     tind = +tindex.args[3]
                 else
-                    error_process("Unrecognized t-reference expression $tindex.", expr)
+                    error_process("Unrecognized t-reference expression $tindex.", expr, modelmodule)
                 end
                 var = allvars[vind]
                 newsym = tsrefs[(var, tind)]
@@ -1121,9 +1125,9 @@ function process_equation(model::Model, expr::Expr;
             end
         elseif ex.head === :macrocall
             macroname, _, varname = ex.args
-            macroname === Symbol("@sstate") || error_process("Unexpected macro call.", expr)
+            macroname === Symbol("@sstate") || error_process("Unexpected macro call.", expr, modelmodule)
             vind = get(var_to_idx, varname, nothing)
-            vind === nothing && error_process("Not a variable name in steady state reference $(ex)", expr)
+            vind === nothing && error_process("Not a variable name in steady state reference $(ex)", expr, modelmodule)
             var = allvars[vind]
             newsym = ssrefs[var]
             return make_residual_expression(var, newsym)
@@ -1140,7 +1144,7 @@ function process_equation(model::Model, expr::Expr;
 
     # call process() to gather information
     new_expr = process(expr)
-    MacroTools.isexpr(new_expr, :(=)) || error_process("Expected equation.", expr)
+    MacroTools.isexpr(new_expr, :(=)) || error_process("Expected equation.", expr, modelmodule)
     # if source information missing, set from argument
     filter!(l -> l !== nothing, source)
     push!(source, line)
@@ -1262,7 +1266,7 @@ function add_equation!(model::Model, eqn_key::Symbol, expr::Expr; var_to_idx=get
         end
         if ex.head === :(=)
             # expression is an equation
-            done_equalsign[] && error_process("Multiple equal signs.", expr)
+            done_equalsign[] && error_process("Multiple equal signs.", expr, modelmodule)
             done_equalsign[] = true
             # recursively process the two sides of the equation
             lhs, rhs = ex.args
