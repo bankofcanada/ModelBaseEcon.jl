@@ -210,7 +210,9 @@ Return a list of all steady state equations.
 The list contains all explicitly added steady state constraints and all
 equations derived from the dynamic system.
 """
-alleqns(ssd::SteadyStateData) = OrderedDict{Symbol, SteadyStateEquation}(key => eqn for (key, eqn) in vcat(pairs(ssd.constraints)..., pairs(ssd.equations)...))
+alleqns(ssd::SteadyStateData) = OrderedDict{Symbol,SteadyStateEquation}(
+    Iterators.flatten((pairs(ssd.constraints), pairs(ssd.equations))),
+)
 
 export neqns
 """
@@ -243,11 +245,10 @@ function geteqn(i::Integer, ssd::SteadyStateData)
     ci = i - length(ssd.constraints)
     return ci > 0 ? get(ssd.equations, ci) : get(ssd.constraints, i)
 end
-geteqn(i::Integer, m::AbstractModel) = geteqn(i, m.sstate)
 function geteqn(key::Symbol, ssd::SteadyStateData)
-    return key ∈ collect(keys(ssd.equations))  ? ssd.equations[key] : ssd.constraints[key]
+    return haskey(ssd.equations, key) ? ssd.equations[key] : ssd.constraints[key]
 end
-geteqn(key::Symbol, m::AbstractModel) = geteqn(i, m.sstate)
+geteqn(i, m::AbstractModel) = geteqn(i, m.sstate)
 
 Base.show(io::IO, ::MIME"text/plain", ssd::SteadyStateData) = show(io, ssd)
 Base.show(io::IO, ssd::SteadyStateData) = begin
@@ -491,7 +492,7 @@ end
 
 
 """
-    setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Module, eqn_key=:_undefined_, var_to_idx=get_var_to_idx(model))
+    setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Module, eqn_key=:_unnamed_equation_, var_to_idx=get_var_to_idx(model))
 
 Add a steady state equation to the model. Equations added by `setss!` are in
 addition to the equations generated automatically from the dynamic system.
@@ -501,8 +502,8 @@ addition to the equations generated automatically from the dynamic system.
     directly by users. Use [`@steadystate`](@ref) instead of calling this
     function.
 """
-function setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Module=moduleof(model), eqn_key=:_undefined_, var_to_idx=get_var_to_idx(model), _source_=LineNumberNode(0))
-    if eqn_key == :_undefined_
+function setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Module=moduleof(model), eqn_key=:_unnamed_equation_, var_to_idx=get_var_to_idx(model), _source_=LineNumberNode(0))
+    if eqn_key == :_unnamed_equation_
         eqn_key = get_next_equation_name(model.sstate.constraints, "_SSEQ")
     end
 
@@ -674,69 +675,63 @@ macro steadystate(model, type::Symbol, equation::Expr)
 end
 
 macro steadystate(model, block::Expr)
-    thismodule = @__MODULE__
-    _source_ = QuoteNode(__source__)
-    ret = Expr(:block)
-    removals, additions = parse_equation_deletes(block)
-    
-    #removals
-    if length(removals.args) > 0
-        push!(ret.args, :($(thismodule).delete_sstate_equations!($(model), $(removals.args))))
-        push!(ret.args, :($(thismodule).update_model_state!($(model)); nothing))
-    end
-    
-    # additions
-    for expr in additions.args
-        if isa(expr, LineNumberNode)
-            continue
-        elseif expr.head == :(=)
-            push!(ret.args, :($(thismodule).setss!($(model), $(Meta.quot(expr)); type=:level, _source_=$(_source_))))
-        elseif expr.head == :macrocall
-            if expr.args[1] == Symbol("@level")
-                push!(ret.args, :($(thismodule).setss!($(model), $(Meta.quot(expr.args[3])); type=:level, _source_=$(_source_))))
-            elseif expr.args[1] == Symbol("@slope")
-                push!(ret.args, :($(thismodule).setss!($(model), $(Meta.quot(expr.args[3])); type=:slope, _source_=$(_source_))))
-            else
-               #push the whole thing, get an error in setss!
-               push!(ret.args, :($(thismodule).setss!($(model), $(Meta.quot(expr)); type=:level, _source_=$(_source_)))) 
-            end
-        else
-            # not an equation
-            err = ArgumentError("Expression does not appear to be an equation: $expr")
-            return esc(:(throw($err)))
-        end
-    end
-    
+    ret = macro_steadystate_impl(__source__, model, block)
     return esc(ret)
 end
 
-# function parse_equation_deletes(block::Expr)
-#     removals = Expr(:block)
-#     additions = Expr(:block)
-#     if typeof(block.args[1]) !== LineNumberNode
-#         # entire block is one line
-#         if typeof(block.args[1]) == Symbol && block.args[1] == Symbol("@delete")
-#             args = filter(a -> !isa(a, LineNumberNode), expr.args[2:end])
-#             push!(removals.args, args...)
-#         else
-#             push!(additions.args, block)
-#         end
-#     else
-#         for expr in block.args
-#             if isa(expr, LineNumberNode)
-#                 continue
-#             elseif expr.args[1] isa Symbol && expr.args[1] == Symbol("@delete")
-#                 # line in a block starting with @delete
-#                 args = filter(a -> !isa(a, LineNumberNode), expr.args[2:end])
-#                 push!(removals.args, args...)
-#             else
-#                 # regular equation
-#                 push!(additions.args, expr)
-#             end
-#         end
-#     end
-#     return removals, additions
-# end
+function macro_steadystate_impl(__source__::LineNumberNode, model, block::Expr)
+    thismodule = @__MODULE__
+    source_line = __source__
+    todo = Expr[]
+    if !Meta.isexpr(block, :block)
+        block = Expr(:block, __source__, block)
+    end
+    for expr in block.args
+        if expr isa LineNumberNode
+            source_line = expr
+            continue
+        end
+        if @capture(expr, @delete tags__)
+            tags = collect(Symbol, tags)
+            push!(todo, :($thismodule.delete_sstate_equations!($model, $tags)))
+            continue
+        end
+        type = :(:level)
+        (; tag, eqn) = split_doc_tag_eqn(Expr(:block, source_line, expr))
+        if ismissing(eqn)
+            err = ArgumentError("Expression does not appear to be an equation: $expr")
+            return :(throw($err))
+        end
+        expr = eqn
+        if @capture(expr, @ty_ lhs_ = rhs_)
+            source_line = expr.args[2]
+            if ty === Symbol("@slope")
+                # strip @slope
+                eqn = expr.args[3]
+                type = :(:slope)
+            elseif ty === Symbol("@level")
+                # strip @level
+                eqn = expr.args[3]
+            else
+                # neither @level nor @slope - pass the whole expr to setss! and get an error there
+                nothing
+            end
+        elseif @capture(expr, lhs_ = rhs_)
+            nothing
+        else
+            err = ArgumentError("Expression does not appear to be an equation: $expr")
+            return :(throw($err))
+        end
+        eqn_expr = Meta.quot(eqn)
+        _source_ = Meta.quot(source_line)
+        push!(todo, :($thismodule.setss!($model, $eqn_expr; type=$type, _source_=$_source_, eqn_key=$tag)))
+    end
+    return quote
+        $thismodule.update_model_state!($model)
+        $(todo...)
+    end
+end
+
 
 """
     initssdata!(m::AbstractModel)
@@ -782,7 +777,7 @@ end
 """
 function updatessdata!(model::AbstractModel)
     ss = sstate(model)
- 
+
     # make new SteadyStateVariables (as they are immutable) and pass the relevant data from
     # the previous steadystate
     # this is slightly faster than a more piecemeal approach relying on mutable structs
@@ -796,7 +791,7 @@ function updatessdata!(model::AbstractModel)
     ind = 1
     for var in model.allvars
         push!(ss, var)
-        if var.name ∈ keys(old_vars) && var.vr_type ==  old_vars[var.name].name.vr_type
+        if haskey(old_vars, var.name) && var.vr_type == old_vars[var.name].name.vr_type
             oldind = old_vars[var.name].index
             ss.values[2ind-1:2ind] .= old_vals[2oldind-1:2oldind]
             ss.mask[2ind-1:2ind] .= old_mask[2oldind-1:2oldind]
@@ -805,7 +800,7 @@ function updatessdata!(model::AbstractModel)
     end
 
     # update vinds in the equations
-    vinds_map = Dict{Symbol, Integer}()
+    vinds_map = Dict{Symbol,Int}()
     for (i, var) in enumerate(model.allvars)
         vinds_map[Symbol("#$(var.name)#lvl#")] = 2i - 1
         vinds_map[Symbol("#$(var.name)#slp#")] = 2i
@@ -819,7 +814,7 @@ function updatessdata!(model::AbstractModel)
     for (key, eqn) in alleqns(model)
         eqn_name = eqn.name
         if eqn_name ∉ keys(ss.equations)
-            push!(ss.equations,eqn_name => make_sseqn(model, eqn, false, eqn_name))
+            push!(ss.equations, eqn_name => make_sseqn(model, eqn, false, eqn_name))
         end
     end
     if !model.flags.ssZeroSlope
