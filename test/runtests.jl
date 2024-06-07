@@ -1684,3 +1684,24 @@ end
         Base.VERSION >= v"1.8" && @test_throws r".*Multiple indexing of variable or shock: y[t, 1]*"i @initialize model
     end
 end
+
+
+@testset "issue68" begin
+    # Parameters with more than one index are parsed incorrectly (fixed by PR#67)
+    # This test fails in v0.6.2, fixed as of v0.6.3
+    let model = Model()
+        @variables model x
+        @shocks model e
+        @parameters model begin
+            c = [0.1 0.2]
+        end
+        @equations model begin
+            :E1 => x[t] = c[1, 1] * x[t-1] + c[1, 2] * x[t-2] + e[t]
+        end
+        @initialize model
+        x = Float64[0, 0.375, 0.128, 0]
+        x[1] = model.parameters.c[1] * x[2] + model.parameters.c[2] * x[3]
+        eq = model.equations[:E1]
+        @test 0 == eq.eval_resid(x)
+    end
+end
