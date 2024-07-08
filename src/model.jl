@@ -824,14 +824,14 @@ function split_doc_tag_eqn(expr)
         _, src, doc, expr = expr.args
     end
     # local tag, eqtyp, lhs, rhs
-    if @capture(expr, @eqtyp_ lhs_ = rhs_)
+    if @capture(expr, @eqtyp_ lhs_ = rhs_) || @capture(expr, (@eqtyp_ lhs_ = rhs_))
         tag = :(:_unnamed_equation_)
         eqn = Expr(:macrocall, eqtyp, expr.args[2], :($lhs = $rhs))
-    elseif @capture(expr, tag_ => @eqtyp_ lhs_ = rhs_)
+    elseif @capture(expr, tag_ => @eqtyp_ lhs_ = rhs_) || @capture(expr, tag_ => (@eqtyp_ lhs_ = rhs_))
         eqn = Expr(:macrocall, eqtyp, expr.args[3].args[2], :($lhs = $rhs))
-    elseif @capture(expr, tag_ => lhs_ = rhs_)
+    elseif @capture(expr, tag_ => lhs_ = rhs_) || @capture(expr, tag_ => (lhs_ = rhs_))
         eqn = :($lhs = $rhs)
-    elseif @capture(expr, lhs_ = rhs_)
+    elseif @capture(expr, lhs_ = rhs_) || @capture(expr, (lhs_ = rhs_))
         tag = :(:_unnamed_equation_)
         eqn = :($lhs = $rhs)
     else
