@@ -1729,3 +1729,18 @@ end
         @test 0 == eq.eval_resid(x)
     end
 end
+
+@testset "equation_parentheses" begin
+    @test let model = Model()
+        @variables model x
+        @equations model begin
+            :EQ_x1 => (x[t] = 0)
+            (x[t] = 0)
+            :EQ_x1 => (@lin x[t] = 0)
+            (@lin x[t] = 0)
+        end
+        @initialize(model)
+        true
+    end
+end
+nothing
