@@ -1079,12 +1079,12 @@ function process_equation(model::Model, expr::Expr;
         filter!(!isnothing, args)
         if ex.head == :if
             if length(args) == 3
-                return Expr(:call, :if, args...)
+                return Expr(:if, args...)
             else
                 error_process("Unable to process an `if` statement with a single branch. Use function `ifelse` instead.", expr, modelmodule)
             end
         end
-        if ex.head ∈ (:call, :(&&), :(||))
+        if ex.head ∈ (:call, :comparison, :(&&), :(||))
             return Expr(ex.head, args...)
         end
         if ex.head == :block && length(args) == 1

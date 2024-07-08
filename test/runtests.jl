@@ -655,6 +655,30 @@ end
         end), eqn_name=:_EQ2) isa Equation
 end
 
+@testset "ifelse_eval" begin
+    # this addresses issue #70
+    @test let model = Model()
+        @variables model a
+        @parameters model cond = true
+        @equations model begin
+            :A => a[t] = cond ? 1.0 : -1.0
+        end
+        @initialize model
+        r, j = eval_RJ(zeros(1,1), model)
+        r == [-1.0] && j == [1.0;;]
+    end
+    @test let model = Model()
+        @variables model b
+        @parameters model p = 0.5
+        @equations model begin
+            :B => b[t] = (0.0 <= p <= 1.0) 
+        end
+        @initialize model
+        r, j = eval_RJ(zeros(1,1), model)
+        r == [-1.0] && j == [1.0;;]
+    end
+end
+
 @testset "Meta" begin
     mod = Model()
     @parameters mod a = 0.1 b = @link(1.0 - a)
@@ -1526,7 +1550,7 @@ end
 
 @using_example E2sat
 m2_for_sattelite_tests = E2sat.newmodel()
-@testset "sattelite models" begin
+@testset "satellite models" begin
     m1 = E2.newmodel()
 
     m_sattelite = Model()
