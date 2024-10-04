@@ -497,6 +497,61 @@ function eval_RJ(point::Matrix{Float64}, slmed::SelectiveLinearizationMED)
 end
 
 """
+    eval_equation(model::AbstractModel, eqn::AbstractEquation, sim_data::AbstractMatrix{Float64}, rng::UnitRange{Int64} = 1:size(sim_data,1))
+
+Evaluate the residuals of a given equation over a range of time points.
+
+This function calculates the residuals of the provided equation `eqn` for each time step in the range `rng` from the simulated data `sim_data`. The model's lag and lead structure is respected during evaluation.
+
+# Arguments
+- `model::AbstractModel`: The model containing the equation to be evaluated.
+- `eqn::AbstractEquation`: The equation for which residuals are to be calculated.
+- `sim_data::AbstractMatrix{Float64}`: The simulated data, with rows representing time points and columns representing model.allvars (variables, shocks and auxiliary variables).
+- `rng::UnitRange{Int64}`: The range of time points over which to evaluate the equation. By default, evaluates over all time points in `sim_data`.
+
+# Returns
+- `res::Vector{Float64}`: A vector of residuals for each time point in the range `rng`. Entries for time points where residuals cannot be computed (due to insufficient lags or leads) are filled with `NaN`.
+"""
+function eval_equation(model::AbstractModel, eqn::AbstractEquation, sim_data::AbstractMatrix{Float64}, rng::UnitRange{Int64} = 1:size(sim_data,1))
+    # Check bounds
+    @assert rng[begin] >= 1 && rng[end] <= size(sim_data, 1) "Error: The range specified is out of bounds. Ensure that the range starts from 1 or higher and ends within the size of the data."
+
+    # Map the model variables to their respective indices
+    var_to_idx = _make_var_to_idx(model.allvars)
+
+    # Calculate t_start based on the model's maximum lag
+    t_start = 1 + model.maxlag
+
+    # Create index mapping for the equation's time series references
+    inds = [CartesianIndex((t_start + ti, var_to_idx[var])) for (var, ti) in keys(eqn.tsrefs)]
+
+    # Account for steady state values in case they are used
+    ed = DynEqnEvalData(eqn, model, var_to_idx)
+
+    # Initialize the residual vector with NaN values
+    res = fill(NaN, length(rng))
+
+    # Iterate over the specified time range
+    for (idx, t) = enumerate(rng)
+        # Define the range of data points required for evaluation, including lags and leads
+        rng_sub = t - model.maxlag : t + model.maxlead
+
+        # Ensure the subrange is within bounds of the data
+        if rng_sub[begin] >= 1 && rng_sub[end] <= size(sim_data, 1)
+            # Extract the relevant data points for the current time step
+            point = @view sim_data[rng_sub, :]
+
+            # Evaluate the residual for the current data point using the evaluation data structure
+            res[idx] = eval_resid(eqn, point[inds], ed)
+        end
+    end
+
+    # Return the vector of residuals
+    return res
+end
+export eval_equation
+
+"""
     selective_linearize!(model)
 
 Instruct the model instance to use selective linearization. Only equations
