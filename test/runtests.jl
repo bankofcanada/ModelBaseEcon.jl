@@ -1743,4 +1743,32 @@ end
         true
     end
 end
+
+@testset "eval_equation" begin
+    model = Model()
+    @parameters model p = 0.1
+    @variables model x
+    @shocks model x_shk
+    @equations model begin
+        :EQ01 => x[t] = (1-0.50)*@sstate(x) + 0.25*x[t-1] + 0.25*x[t+1] + x_shk[t]
+    end
+    @initialize model
+    @steadystate model x = 2.0
+    model.sstate.x.level = 2.0
+    sim_data = [0.5    0.0;
+    1.5980861244019138 0.0;
+    1.8923444976076556 0.0;
+    1.9712918660287082 0.0;
+    1.992822966507177  0.0;
+    2.0                0.0]
+
+    eqtn = model.equations[:EQ01]
+    res = eval_equation(model, eqtn, sim_data)
+    @test isnan(res[1]) && isapprox(res[2:5],[0.0, 0.0, 0.0, 0.0]; atol=1e-12) && isnan(res[6])
+
+    sim_data[3,1] += 1
+    @test eval_equation(model, eqtn, sim_data,3:4) ≈ [1.0, -0.25]
+
+    @test_throws AssertionError eval_equation(model, eqtn, sim_data, 1:7)
+end
 nothing
