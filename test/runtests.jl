@@ -664,17 +664,17 @@ end
             :A => a[t] = cond ? 1.0 : -1.0
         end
         @initialize model
-        r, j = eval_RJ(zeros(1,1), model)
+        r, j = eval_RJ(zeros(1, 1), model)
         r == [-1.0] && j == [1.0;;]
     end
     @test let model = Model()
         @variables model b
         @parameters model p = 0.5
         @equations model begin
-            :B => b[t] = (0.0 <= p <= 1.0) 
+            :B => b[t] = (0.0 <= p <= 1.0)
         end
         @initialize model
-        r, j = eval_RJ(zeros(1,1), model)
+        r, j = eval_RJ(zeros(1, 1), model)
         r == [-1.0] && j == [1.0;;]
     end
 end
@@ -1499,7 +1499,10 @@ end
     @test length(m.equations) == 2
     @test collect(keys(m.equations)) == [:_EQ1, :_EQ3]
 
-    @test_logs (:warn, "Model contains unused shocks: [:b_shk]") @reinitialize m
+    @test_logs(
+        (:warn, "Model contains unused shocks: [:b_shk]"),
+        (:warn, "Model contains different numbers of equations (2) and endogenous variables (3)."),
+        @reinitialize m)
 
     @equations m begin
         b[t] = @sstate(b) * (1 - α) + α * b[t-1] + b_shk[t]
@@ -1534,7 +1537,7 @@ end
     @test collect(keys(m.equations)) == [:_EQ1, :_EQ3]
     m.options.unused_varshks = [:b_shk]
 
-    @test_logs @reinitialize m
+    @test_logs (:warn, "Model contains different numbers of equations (2) and endogenous variables (3).") @reinitialize m
 
     # option to not show a warning
     m = S1.newmodel()
@@ -1545,7 +1548,7 @@ end
         @delete _SSEQ1
     end
     m.options.unused_varshks = [:a]
-    @test_logs @reinitialize m
+    @test_logs (:warn, "Model contains different numbers of equations (2) and endogenous variables (3).") @reinitialize m
 end
 
 @using_example E2sat
@@ -1750,24 +1753,24 @@ end
     @variables model x
     @shocks model x_shk
     @equations model begin
-        :EQ01 => x[t] = (1-0.50)*@sstate(x) + 0.25*x[t-1] + 0.25*x[t+1] + x_shk[t]
+        :EQ01 => x[t] = (1 - 0.50) * @sstate(x) + 0.25 * x[t-1] + 0.25 * x[t+1] + x_shk[t]
     end
     @initialize model
     @steadystate model x = 2.0
     model.sstate.x.level = 2.0
-    sim_data = [0.5    0.0;
-    1.5980861244019138 0.0;
-    1.8923444976076556 0.0;
-    1.9712918660287082 0.0;
-    1.992822966507177  0.0;
-    2.0                0.0]
+    sim_data = [0.5 0.0;
+        1.5980861244019138 0.0;
+        1.8923444976076556 0.0;
+        1.9712918660287082 0.0;
+        1.992822966507177 0.0;
+        2.0 0.0]
 
     eqtn = model.equations[:EQ01]
     res = eval_equation(model, eqtn, sim_data)
-    @test isnan(res[1]) && isapprox(res[2:5],[0.0, 0.0, 0.0, 0.0]; atol=1e-12) && isnan(res[6])
+    @test isnan(res[1]) && isapprox(res[2:5], [0.0, 0.0, 0.0, 0.0]; atol=1e-12) && isnan(res[6])
 
-    sim_data[3,1] += 1
-    @test eval_equation(model, eqtn, sim_data,3:4) ≈ [1.0, -0.25]
+    sim_data[3, 1] += 1
+    @test eval_equation(model, eqtn, sim_data, 3:4) ≈ [1.0, -0.25]
 
     @test_throws AssertionError eval_equation(model, eqtn, sim_data, 1:7)
 end

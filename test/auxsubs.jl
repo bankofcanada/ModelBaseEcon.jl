@@ -17,6 +17,7 @@ using Test
         (:info, "Found log(s), which is a shock or exogenous variable. Make sure s data is positive."),
         (:info, "Found log(lx). Consider making lx a log variable."),
         (:info, "Found log(lx). Consider making lx a log variable."),
+        (:warn, "Model contains different numbers of equations (6) and endogenous variables (2)."),
         include_string(@__MODULE__, """module ASUBS
 
 using ModelBaseEcon
