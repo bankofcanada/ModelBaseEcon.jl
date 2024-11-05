@@ -1359,6 +1359,27 @@ end
 ############################
 ### Initialization routines
 
+"""
+    checkmodel(model)
+
+Run diagnostic checks that may identify potential problems with the model
+definition. Failed checks produce warning messages, not errors.
+"""
+function checkmodel(model::Model)
+    unused = get_unused_symbols(model; filter_known_unused=true)
+    if length(unused[:variables]) > 0
+        @warn "Model contains unused variables: $(unused[:variables])"
+    end
+    if length(unused[:shocks]) > 0
+        @warn "Model contains unused shocks: $(unused[:shocks])"
+    end
+    nvars = sum(!isexog(x) for x in model.variables)
+    neqns = length(model.equations)
+    if neqns != nvars
+        @warn "Model contains different numbers of equations ($neqns) and endogenous variables ($nvars)."
+    end
+end
+
 export @initialize, @reinitialize
 
 """
@@ -1403,16 +1424,11 @@ function initialize!(model::Model, modelmodule::Module)
         # if dynss is true, then we need the steady state even for the standard MED
         nothing
     end
-    unused = get_unused_symbols(model; filter_known_unused=true)
-    if length(unused[:variables]) > 0
-        @warn "Model contains unused variables: $(unused[:variables])"
-    end
-    if length(unused[:shocks]) > 0
-        @warn "Model contains unused shocks: $(unused[:shocks])"
-    end
+    checkmodel(model)
     model._state = :ready
     return nothing
 end
+
 
 """
     reinitialize!(model, modelmodule)
@@ -1455,13 +1471,7 @@ function reinitialize!(model::Model, modelmodule::Module=moduleof(model))
         # if dynss is true, then we need the steady state even for the standard MED
         nothing
     end
-    unused = get_unused_symbols(model; filter_known_unused=true)
-    if length(unused[:variables]) > 0
-        @warn "Model contains unused variables: $(unused[:variables])"
-    end
-    if length(unused[:shocks]) > 0
-        @warn "Model contains unused shocks: $(unused[:shocks])"
-    end
+    checkmodel(model)
     model._state = :ready
     return nothing
 end
