@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020-2024, Bank of Canada
+# Copyright (c) 2020-2025, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -74,12 +74,13 @@ Notes
 [`DFMModel`](@ref) represents the model. It contains an observation block and a
 collection of components blocks.
 
-[`DFMBlock`](@ref) is an abstract type representing blocks of equations in the.
+[`DFMBlock`](@ref) is an abstract type representing a block of equations in a
+[`DFMModel`](@ref).
 
 [`DFMObsBlock`](@ref) `<: DFMBlock` represents a block of observation equations.
 
-[`DFMComponentBlock`](@ref)`{TYPE} <: DFMBlock` represents factor blocks.
-`TYPE` can be either `Dense` or `Diagonal`.
+[`ComponentsBlock`](@ref)`<: DFMBlock` represents a block of latent
+components.
 
 """
 DFMModels
@@ -97,18 +98,22 @@ export lags, leads
 """Abstract type for all DFM blocks"""
 abstract type DFMBlock end
 
+"""Abstract type for types providing concrete values for the `MIXEDFREQ`
+type-parameter of [`ComponentsBlock`](@ref)"""
 abstract type MixedFrequency end
 
 """
-    ComponentBlock{TYPE,MIXEDFREQ} <: DFMBlock
+    ComponentsBlock{TYPE,MIXEDFREQ} <: DFMBlock
 
 A struct representing a block of latent components in a DFM model.
 See also [`CommonComponents`](@ref), [`IdiosyncraticComponents`](@ref) and
 [`ObservedBlock`](@ref).
 
-If MIXEDFREQ is not specified it defaults to a single-frequency model. `:MQ` means a model where
-some observed variables are Monthly and the rest are Quarterly. The type of each observed variable is
-determined by its idiosyncratic component.
+ `TYPE` can be either `:Dense` (for a `CommonComponents` block) or
+`:Diagonal` (for `IdiosyncraticComponents` block).
+
+`MIXEDFREQ<:MixedFrequency` specifies if some, or all, variables in the
+block run at a lower frequency than the rest of the DFM model.
 """
 mutable struct ComponentsBlock{TYPE,MF<:MixedFrequency} <: DFMBlock
     vars::Vector{ModelVariable}
@@ -133,14 +138,51 @@ function ComponentsBlock{TYPE,MF}(name::Sym, size::Integer, order::Integer, nlag
     return ComponentsBlock{TYPE,MF}(vars, shks, Int(size), Int(order), Int(nlags))
 end
 
+"""
+    struct NoMixFreq <: MixedFrequency
+
+Indicates that all variables in the given block run at the DFM's highest frequency.
+"""
 struct NoMixFreq <: MixedFrequency end
+
+"""
+    struct MixFreq{WHICH} <: MixedFrequency
+
+Indicates that some or all variables in the given block run at a lower frequency
+than the DFM's highest frequency. The relationship between the two frequencies
+is specified by the type-parameter `WHICH`.
+
+For example, `MixFreq{:MQ}` indicates that this block runs at a quarterly
+frequency in a model in which the base frequency is Monthly.
+
+"""
 struct MixFreq{WHICH} <: MixedFrequency end
 
+"""
+    mf_ncoefs(MF::Type{<:MixedFrequency})
 
+Returns the number of coefficients in the mixing constraint for the given
+subtype of `MixedFrequency`.
+"""
 mf_ncoefs(MF::Type{<:MixedFrequency}) = length(mf_coefs(MF))
+
+"""
+    mf_coefs(MF::Type{<:MixedFrequency})
+
+Returns the coefficients of the mixing constraint for the given subtype of
+`MixedFrequency`.
+"""
+function mf_coefs end
+
 mf_coefs(::Type{NoMixFreq}) = (1,)
 mf_coefs(::Type{MixFreq{:MQ}}) = (1, 2, 3, 2, 1)
 
+"""
+    MixFreq(mf, blk)
+
+Convenience wrapper that re-construct the given block as a mixed-frequency block. 
+The given block must be a `NoMixFreq` block.
+"""
 function MixFreq(WHICH::Symbol, blk::ComponentsBlock{TYPE,NoMixFreq}) where {TYPE}
     MF = MixFreq{WHICH}
     ComponentsBlock{TYPE,MF}(blk.vars, blk.shks, blk.size, blk.order, max(blk.nlags, mf_ncoefs(MF)))
@@ -148,24 +190,28 @@ end
 export MixFreq, NoMixFreq
 
 """
-    CommonComponents = ComponentBlock{:Dense}
+    CommonComponents{MF<:MixedFrequency} = ComponentBlock{:Dense,MF}
 
 A struct type representing factors that are common to a block of observed
-variables. The loadings matrix, the trnasition matrices, and the shocks
+variables. The loadings matrix, the transition matrices, and the shocks
 covariance matrix for this type of block are all dense matrices. See also
 [`IdiosyncraticComponents`](@ref).
 """
+CommonComponents
+
 const CommonComponents{MF<:MixedFrequency} = ComponentsBlock{:Dense,MF}
 CommonComponents(name, size::Integer=name isa LikeVec ? length(name) : 1; order::Integer=1, nlags::Integer=order) = CommonComponents{NoMixFreq}(name, size, order, nlags)
 
 """
-    IdiosyncraticComponents = ComponentBlock{:Diagonal}
+    IdiosyncraticComponents{MF<:MixedFrequency} = ComponentBlock{:Diagonal, MF}
 
 A struct type representing factors that are common to a block of observed
-variables. The loadings matrix, the trnasition matrices, and the shocks
+variables. The loadings matrix, the transition matrices, and the shocks
 covariance matrix for this type of block are all diagonal. See also
 [`CommonComponents`](@ref).
 """
+IdiosyncraticComponents
+
 const IdiosyncraticComponents{MF<:MixedFrequency} = ComponentsBlock{:Diagonal,MF}
 IdiosyncraticComponents(or::Integer=1; order::Integer=or, nlags::Integer=order) = IdiosyncraticComponents{NoMixFreq}("", 0, order, nlags)
 
@@ -175,23 +221,84 @@ IdiosyncraticComponents(or::Integer=1; order::Integer=or, nlags::Integer=order) 
 ###  An observed can load the entire block (all components in it) or some components from a block.
 ###  In both cases, the entire block is needed, plus information specifying all or which components are loaded.
 
-"abstract type for a reference to components"
+"""
+    abstract type _BlockComponentRef{ALL,N,NAMES} end
+
+Abstract type for a reference to components.
+
+This is used internally when creating a map of references between observed and
+latent blocks, that is variables in which observed block load which latent
+block.
+
+* `ALL` is `true` or `false` indicating whether the entire block is being
+  referenced, or only some of the components in it.
+* `N` is the number of components in the block being referenced.
+* `NAMES` is a tuple of `Symbol`s with the names being referenced.
+
+Invariant: `N == length(NAMES)`. 
+
+Convention: `N=0` and `NAMES=()` means that all components in the block are
+being referenced. This is needed when we don't know the names of the components,
+but we know that they're all referenced.
+
+Convention: all derived types have inner constructors that take the list of
+`NAMES`.
+
+See also: [`comp_ref`](@ref), [`n_comp_refs`](@ref), [`inds_comp_refs`](@ref)
+
+"""
 abstract type _BlockComponentRef{ALL,N,NAMES} end
-"reference to an entire block (all components in it)"
+
+"""
+    struct _BlockRef{N,NAMES} <: _BlockComponentRef{true,N,NAMES} ... end
+        
+Indicates that all names in the given block are being referenced.
+"""
 struct _BlockRef{N,NAMES} <: _BlockComponentRef{true,N,NAMES}
-    names::NTuple{N,Symbol}
-    _BlockRef(names::SymVec) = (N = length(names); NAMES = ((Symbol(n) for n in names)...,); new{N,NAMES}(NAMES))
+    function _BlockRef(names::SymVec)
+        N = length(names)
+        NAMES = ((Symbol(n) for n in names)...,)
+        return new{N,NAMES}()
+    end
 end
-"reference to some, but not all, components in a block"
+
+"""
+    struct _CompRef{N,NAMES} <: _BlockComponentRef{false,N,NAMES} ... end
+    
+Indicates that some, but not all, names in the given block are being referenced.
+"""
 struct _CompRef{N,NAMES} <: _BlockComponentRef{false,N,NAMES}
-    names::NTuple{N,Symbol}
-    inds::Vector{Int}
-    _CompRef(names::SymVec) = (N = length(names); NAMES = ((Symbol(n) for n in names)...,); new{N,NAMES}(NAMES, Int[]))
+    inds::Vector{Int}  # maintains the indices in NAMES being referenced
+
+    function _CompRef(names::SymVec)
+        N = length(names)
+        NAMES = ((Symbol(n) for n in names)...,)
+        new{N,NAMES}(Int[])
+    end
 end
-"no reference to any components in a block"
+
+"""
+    struct _NoCompRef{N,NAMES} <: _BlockComponentRef{false,N,NAMES} end
+    
+Indicates that no names in the given block are being referenced.
+"""
 struct _NoCompRef{N,NAMES} <: _BlockComponentRef{false,N,NAMES}
-    _NoCompRef(names::SymVec) = (N = length(names); NAMES = ((Symbol(n) for n in names)...,); new{N,NAMES}())
+    function _NoCompRef(names::SymVec)
+        N = length(names)
+        NAMES = ((Symbol(n) for n in names)...,)
+        new{N,NAMES}()
+    end
 end
+
+"""
+    comp_ref(::ComponentsBlock)
+    comp_ref(::ComponentsBlock, ::Sym)
+
+Function used internally to "register" a reference to a component block, either
+for the entire block or for a specific  component within the block.
+Returns an instance of `_BlockComponentRef`
+"""
+function comp_ref end
 
 comp_ref(::_BlockComponentRef{ALL,N,NAMES}) where {ALL,N,NAMES} = _BlockRef(NAMES)
 comp_ref(::IdiosyncraticComponents) = _BlockRef(())
@@ -218,14 +325,14 @@ end
     end
 end
 
-_n_comp_refs(::_BlockRef{0}) = error("Cannot determine the number of referenced components")
-_n_comp_refs(::_BlockRef{N}) where {N} = N
-_n_comp_refs(c::_CompRef) = length(c.inds)
-_n_comp_refs(c::_NoCompRef) = 0
+n_comp_refs(::_BlockRef{0}) = error("Cannot determine the number of referenced components")
+n_comp_refs(::_BlockRef{N}) where {N} = N
+n_comp_refs(c::_CompRef) = length(c.inds)
+n_comp_refs(c::_NoCompRef) = 0
 
-_inds_comp_refs(r::_BlockRef) = 1:_n_comp_refs(r)
-_inds_comp_refs(r::_CompRef) = r.inds
-_inds_comp_refs(r::_NoCompRef) = Int[]
+inds_comp_refs(r::_BlockRef) = 1:n_comp_refs(r)
+inds_comp_refs(r::_CompRef) = r.inds
+inds_comp_refs(r::_NoCompRef) = Int[]
 
 Base.show(io::IO, c::_BlockComponentRef) = show(io, MIME"text/plain"(), c)
 Base.show(io::IO, ::MIME"text/plain", c::_BlockRef{N,NAMES}) where {N,NAMES} = print(io, NAMES)
@@ -262,8 +369,8 @@ function MixFreq(WHICH::Symbol, blk::ObservedBlock{NoMixFreq})
     ObservedBlock{MF}((getfield(blk, fn) for fn in fieldnames(typeof(blk)))...,)
 end
 
-mf_coefs(::ObservedBlock{MF}) where MF = mf_coefs(MF)
-mf_ncoefs(::ObservedBlock{MF}) where MF = mf_ncoefs(MF)
+mf_coefs(::ObservedBlock{MF}) where {MF} = mf_coefs(MF)
+mf_ncoefs(::ObservedBlock{MF}) where {MF} = mf_ncoefs(MF)
 
 """
     DFMModel
@@ -306,7 +413,7 @@ const DFMBlockOrModel = Union{DFMModel,DFMBlock}
 @inline leads(::DFMBlockOrModel) = 0
 @inline lags(::ObservedBlock{MF}) where {MF} = mf_ncoefs(MF) - 1
 @inline lags(b::ComponentsBlock) = b.nlags
-@inline lags(m::DFMModel) = maximum(lags, values(m.components))
+@inline lags(m::DFMModel) = maximum(lags, values(m.components); init=0)
 
 @inline order(b::ComponentsBlock) = b.order
 
@@ -318,12 +425,12 @@ const DFMBlockOrModel = Union{DFMModel,DFMBlock}
 @inline shocks(b::ObservedBlock) = b.shks
 @inline nshocks(b::ObservedBlock) = length(b.shks)
 
-add_state_shocks(m::DFMModel; init=ModelVariable[]) = mapfoldl(shocks, append!, values(m.components); init)
-add_nstate_shocks(m::DFMModel; init=0) = sum(nshocks, values(m.components); init)
-add_observed_shocks(m::DFMModel; init=ModelVariable[]) = mapfoldl(shocks, append!, values(m.observed); init)
-add_nobserved_shocks(m::DFMModel; init=0) = sum(nshocks, values(m.observed); init)
-@inline shocks(m::DFMModel) = (shks = add_observed_shocks(m); shks = add_state_shocks(m; init=shks); shks)
-@inline nshocks(m::DFMModel) = add_nobserved_shocks(m) + add_nstate_shocks(m)
+collect_state_shocks(m::DFMModel; init=ModelVariable[]) = mapfoldl(shocks, append!, values(m.components); init)
+count_state_shocks(m::DFMModel; init=0) = sum(nshocks, values(m.components); init)
+collect_observed_shocks(m::DFMModel; init=ModelVariable[]) = mapfoldl(shocks, append!, values(m.observed); init)
+count_observed_shocks(m::DFMModel; init=0) = sum(nshocks, values(m.observed); init)
+@inline shocks(m::DFMModel) = collect_state_shocks(m; init=collect_observed_shocks(m))
+@inline nshocks(m::DFMModel) = count_observed_shocks(m) + count_state_shocks(m)
 
 @inline endog(b::DFMBlock) = b.vars
 @inline nendog(b::DFMBlock) = b.size
@@ -367,29 +474,55 @@ nendog(m::DFMModel) = nobserved(m) + nstates(m)
 #  When the model is fully defined, call initialize
 #       initialize_dfm!(m)
 
+"""
+Add observed variable and observed blocks to a DFM model. 
+    
+    add_observed!(m; name = observed_block, ...)
+    
+`name` is the name of the observed block. Use this method if an instance of
+`ObservedBlock` is available. N.B. `observed_block` is added to the model
+without copying, so any changes (like adding variables or shocks) would be
+reflected in the same instance.
+    
+    add_observed!(m; name = vars, ...)
 
-add_observed!(m::DFMModel; kwargs...) = add_observed!(m, kwargs...)
-function add_observed!(m::DFMModel, args...)
-    for a in args
-        add_observed!(m, a)
+`name` is the name of the observed block and `vars` is a collection of variables
+to be added to the block with the given name. If the block doesn't already exist
+a new `ObservedBlock` is created and added to the model `m`.
+
+    add_observed!(m, vars)
+
+A shortcut for models with one observed block. A new `ObservedBlock` with a
+default name is created, if one does not already exist. If `m` already contains
+and observed block, `vars` added to it. It is an error to call this method if
+`m` already has more than one observed block.
+
+"""
+function add_observed! end
+
+add_observed!(m::DFMModel; kwargs...) = add_observed!(m, [kwargs...])
+add_observed!(m::DFMModel, arg, args...) = add_observed!(m, [arg, args...])
+function add_observed!(m::DFMModel, vec::AbstractVector)
+    for v in vec
+        add_observed!(m, v)
     end
     return m
 end
+
+#  method to be called like this: add_observed!(m, :blk_name => obs_blk)
 function add_observed!(m::DFMModel, (bname, blk)::Pair{<:Sym,<:ObservedBlock})
     m.observed[bname] = blk
     return m
 end
 
-function add_observed!(m::DFMModel, (bname, vnames)::Pair{<:Sym,<:SymVec})
-    add_observed_vars!(get!(m.observed, bname, ObservedBlock()), vnames)
-    return m
-end
+"""
+    b = add_observed_vars!(b, vars)
 
-function add_observed!(m::DFMModel, (bname, var)::Pair{<:Sym,<:Sym})
-    add_observed_vars!(get!(m.observed, bname, ObservedBlock()), (var,))
-    return m
-end
+Add variables to the given [`ObservedBlock`](@ref) `b`. `vars` is a `Vector` of
+variable names, which can be specified as string or symbols. Variables in `vars`
+that already exist in `b` are silently ignored.
 
+"""
 function add_observed_vars!(b::ObservedBlock, vars::SymVec)
     v2c = b.var2comps
     for var in vars
@@ -398,19 +531,31 @@ function add_observed_vars!(b::ObservedBlock, vars::SymVec)
     return b
 end
 
-const dobn = :observed  # default observed block name
+#  method to be called like this: add_observed!(m, :blk_name => (:var1, :var2))
+function add_observed!(m::DFMModel, (bname, vnames)::Pair{<:Sym,<:SymVec})
+    add_observed_vars!(get!(m.observed, bname, ObservedBlock()), vnames)
+    return m
+end
+
+#  method to be called like this: add_observed!(m, :blk_name => :var1)
+function add_observed!(m::DFMModel, (bname, var)::Pair{<:Sym,<:Sym})
+    add_observed_vars!(get!(m.observed, bname, ObservedBlock()), (var,))
+    return m
+end
+
+const _dobn = :observed  # default observed block name
 
 function add_observed!(m::DFMModel, varnames::SymVec)
     o = m.observed
     if isempty(o)
-        push!(o, dobn => add_observed_vars!(ObservedBlock(), varnames))
+        push!(o, _dobn => add_observed_vars!(ObservedBlock(), varnames))
         return m
     end
-    if (length(o) == 1 && haskey(o, dobn))
-        add_observed_vars!(o[dobn], varnames)
+    if length(o) == 1
+        add_observed_vars!(first(values(o)), varnames)
         return m
     end
-    error("Observed block not specified. Use `add_observed(m, block_name => (vars, ...))`.")
+    error("In a model with more than one observed block the name of the block must be explicitly given.")
 end
 export add_observed!
 
@@ -464,7 +609,7 @@ _add_var2comp_ref(observed::NamedList{ObservedBlock}, var::Sym, blk_name::Sym, b
 function _add_var2comp_ref(observed::NamedList{ObservedBlock}, vars::SymVec, blk_name::Sym, blk::ComponentsBlock, comp::Sym...)
     if isempty(observed)
         # no observed block - create a default one
-        push!(observed, dobn => ObservedBlock())
+        push!(observed, _dobn => ObservedBlock())
     end
     if length(observed) == 1
         # if there's only one observed block, all variables go into it
@@ -528,52 +673,56 @@ function map_loadings!(m::DFMModel, args::Pair...)
     return m
 end
 
+
 export add_shocks!
-# add_shocks!(b::ObservedBlock) = b
-@inline function add_shocks!(b::ObservedBlock, var::Sym)
-    push!(b.var2shk, var => _make_shock(var))
-    return b
-end
-function add_shocks!(b::ObservedBlock, pair::Pair{<:Sym,<:Sym})
-    var = Symbol(pair.first)
-    shk = Symbol(pair.second)
-    push!(b.var2shk, var => shk)
+add_shocks!(b::Union{DFMModel,ObservedBlock}, arg, args...) = add_shocks!(b, [arg, args...])
+function add_shocks!(b::Union{DFMModel,ObservedBlock}, args::AbstractVector)
+    for arg in args
+        add_shocks!(b, arg)
+    end
     return b
 end
 
-add_shocks!(m::DFMModel, args...) = add_shocks!(m, args)
-function add_shocks!(m::DFMModel, args)
+# method where the variable is given and a default shock name is made for it
+add_shocks!(b::ObservedBlock, var::Sym) = add_shocks!(b, var => _make_shock(var))
+
+# method where the variable and its shock name are given 
+function add_shocks!(b::ObservedBlock, varshk::Pair{<:Sym,<:Sym})
+    v2s = b.var2shk
+    (var, shk) = varshk
+    var = Symbol(var)
+    if haskey(v2s, var)
+        error("Variable `$var` already has a shock: `$(v2s[var])`.")
+    end
+    v2s[var] = Symbol(shk)
+    return b
+end
+
+add_shocks!(m::DFMModel, var::Sym) = add_shocks!(m, var => _make_shock(var))
+function add_shocks!(m::DFMModel, varshk::Pair{<:Sym,<:Sym})
     mobs = m.observed
     if isempty(mobs)
-        push!(mobs, dobn => ObservedBlock())
-    end
-    if length(mobs) == 1
-        _, oblk = first(mobs)
-        for a in args
-            add_shocks!(oblk, a)
-        end
+        # no observed blocks -- create the default one
+        mobs[_dobn] = add_shocks(ObservedBlock(), varshk)
         return m
     end
-    for a in args
-        sv = a isa Sym ? Symbol(a) : Symbol(a[1])
-        found = false
-        for (_, oblk) in mobs
-            if haskey(oblk.var2comps, sv)
-                add_shocks!(oblk, a)
-                found = true
-                break
-            end
-        end
-        if !found
-            error("Variable $sv is not assigned to any observed block.")
+    if length(mobs) == 1
+        # one observed block -- use it
+        oblk = first(values(mobs))
+        add_shocks!(oblk, varshk)
+        return m
+    end
+    # more than one observed block - we find the one that has the variable
+    var = varshk.first
+    var = Symbol(var)
+    for oblk in values(mobs)
+        if haskey(oblk.var2comps, var) || haskey(oblk.var2shk, var)
+            add_shocks!(oblk, varshk)
+            return m
         end
     end
-    return m
+    error("Variable `$var` not found in any observed block.")
 end
-
-
-add_shocks!(b::ObservedBlock, var::Union{Sym,Pair{<:Sym,<:Sym}}, vars...) = add_shocks!(add_shocks!(b, var), vars...)
-add_shocks!(b::ObservedBlock, vars::LikeVec) = add_shocks!(b, vars...)
 
 # function _check_ic_shk(b::ObservedBlock)
 #     v2s = b.var2shk
@@ -642,19 +791,67 @@ function _init_observed!(b::ObservedBlock)
     return b
 end
 
-"""
-    initialize_dfm!(m::DFMModel)
+function check_dfm(m::DFMModel)
+    if m._state != :ready
+        throw(ArgumentError("Model must be initialized first."))
+    end
+    m._state = :check
+    # check observed blocks
+    if isempty(m.observed)
+        error("Model does not have any observed variables.")
+    end
+    for (onm, oblk) in pairs(m.observed)
+        # check for duplicate variables (in previous blocks only)
+        for (onm1, oblk1) in pairs(m.observed)
+            onm1 == onm && break
+            dups = intersect(oblk.vars, oblk1.vars)
+            if !isempty(dups)
+                error("""Duplicate variable(s) found: $("(`"*join(dups, "`,`")*"`)") in blocks `$(onm)` and `$(onm1)`""")
+            end
+        end
+        # check for observed that don't load anything
+        if isempty(oblk.components)
+            error("Observed block does not load any components: $(onm)")
+        end
+        # each variable must either have a shock or an idiosyncratic 
+        # component (autocorrelated shock), but not both. check for violation
+        ic_names = [k for (k,v) in pairs(oblk.components) if v isa IdiosyncraticComponents]
+        for var in oblk.vars
+            if !haskey(oblk.var2comps, var)
+                error("Internal error: connectivity map is corrupt.")
+            end
+            has_comps = !isempty(oblk.var2comps[var])
+            has_shk = haskey(oblk.var2shk, var)
+            if !has_comps && !has_shk
+                error("Variable `$var` in block `$onm`` does not load any component and does not have a shock.")
+            end
+            if has_comps
+                nic = has_shk + sum(Base.Fix2(in, ic_names), keys(oblk.var2comps[var]))
+                if nic == 0
+                    error("Variable `$var` in block `$onm` has neither a shock nor an idiosyncratic component.")
+                elseif nic > 1
+                    error("Variable `$var` in block `$onm` has more than one shock or idiosyncratic components.")
+                end
+            end
+        end
+    end
+    m._state = :ready
+    return m
+end
 
-Initialize the internal data structures of a `DFMModel` instance after it is done
-receiving inputs from the model developer. Also perform checks for the integrity 
-of the model provided by the model developer.
 """
-function initialize_dfm!(m::DFMModel)
+    initialize_dfm!(m; check=true)
+
+Initialize the internal data structures of a `DFM` or `DFMModel` instance after
+it is done receiving inputs from the model developer. Also perform checks for
+the integrity of the model provided by the model developer.
+"""
+function initialize_dfm!(m::DFMModel; check=true)
     for oblk in values(m.observed)
         _init_observed!(oblk)
     end
     m._state = :ready
-    return m
+    return check ? check_dfm(m) : m
 end
 export initialize_dfm!
 
@@ -667,7 +864,7 @@ mutable struct DFM <: AbstractModel
     model::DFMModel
     params::DFMParams
 end
-DFM(T::Type{<:Real}=Float64) = DFM(DFMModel(), DFMParams{T}())
+DFM(name::Sym=:dfm, T::Type{<:Real}=Float64) = DFM(DFMModel(name), DFMParams{T}())
 
 eval_resid(point::AbstractMatrix, dfm::DFM) = eval_resid(point, dfm.model, dfm.params)
 eval_RJ(point::AbstractMatrix, dfm::DFM) = eval_RJ(point, dfm.model, dfm.params)
@@ -677,8 +874,8 @@ add_components!(dfm::DFM; kwargs...) = (add_components!(dfm.model, kwargs...); d
 add_components!(dfm::DFM, args...) = (add_components!(dfm.model, args...); dfm)
 map_loadings!(dfm::DFM, args::Pair...) = (map_loadings!(dfm.model, args...); dfm)
 add_shocks!(dfm::DFM, args...) = (add_shocks!(dfm.model, args...); dfm)
-add_observed!(dfm::DFM, args...) = (add_observed!(dfm.model, args...); dfm)
-initialize_dfm!(dfm::DFM) = (initialize_dfm!(dfm.model); dfm.params = init_params(dfm.model); dfm)
+add_observed!(dfm::DFM, args...; kwargs...) = (add_observed!(dfm.model, args...; kwargs...); dfm)
+initialize_dfm!(dfm::DFM, args...; kwargs...) = (initialize_dfm!(dfm.model, args...; kwargs...); dfm.params = init_params(dfm.model); dfm)
 
 lags(dfm::DFM) = lags(dfm.model)
 leads(dfm::DFM) = leads(dfm.model)
@@ -698,17 +895,17 @@ end
 
 nstates_with_lags(m::DFM) = nstates_with_lags(m.model)
 nstates_with_lags(m::DFMModel) = sum(nstates_with_lags, values(m.components), init=0)
-nstates_with_lags((n,b)::Pair{Symbol,<:DFMBlock}) = nstates_with_lags(b)
+nstates_with_lags((n, b)::Pair{Symbol,<:DFMBlock}) = nstates_with_lags(b)
 nstates_with_lags(::ObservedBlock) = 0
 nstates_with_lags(b::ComponentsBlock) = nstates(b) * lags(b)
 
 states_with_lags(m::DFM) = states_with_lags(m.model)
 states_with_lags(m::DFMModel) = mapfoldl(states_with_lags, append!, values(m.components), init=Symbol[])
-states_with_lags((n,b)::Pair{Symbol,<:DFMBlock}) = states_with_lags(b)
+states_with_lags((n, b)::Pair{Symbol,<:DFMBlock}) = states_with_lags(b)
 states_with_lags(::ObservedBlock) = Symbol[]
 function states_with_lags(blk::ComponentsBlock)
     return Symbol[
-        (Symbol(v, "_lag_", lags(blk)-l) for l = 1:lags(blk)-1 for v in states(blk))..., 
+        (Symbol(v, "_lag_", lags(blk) - l) for l = 1:lags(blk)-1 for v in states(blk))...,
         states(blk)...]
 end
 

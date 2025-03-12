@@ -13,7 +13,7 @@ const DFMParams{T<:Real} = ComponentArray{T}
 function _make_loading(blk::CommonComponents, vars_comprefs::LittleDictVec{Symbol,_BlockComponentRef}, T::Type{<:Real}=Float64)
     nobserved = length(vars_comprefs)
     all(c -> c isa _BlockRef, values(vars_comprefs)) && return Matrix{T}(undef, nobserved, blk.size)
-    nnz = sum(_n_comp_refs, values(vars_comprefs))
+    nnz = sum(n_comp_refs, values(vars_comprefs))
     @assert (0 < nnz < nobserved * blk.size) "Unexpected number of non-zeros in loading."
     return Vector{T}(undef, nnz)
 end

@@ -35,9 +35,9 @@ function _getloading!(Λ::AbstractMatrix, (nm, b)::Pair{Symbol,<:ComponentsBlock
     end
     idx_p = 0
     for (i, cr) in enumerate(values(crefs))
-        nvals = _n_comp_refs(cr)
+        nvals = n_comp_refs(cr)
         nvals == 0 && continue
-        Λ[i, _inds_comp_refs(cr)] = pvals[idx_p.+(1:nvals)]
+        Λ[i, inds_comp_refs(cr)] = pvals[idx_p.+(1:nvals)]
         idx_p = idx_p + nvals
     end
     return Λ
@@ -52,8 +52,8 @@ function _setloading!((name, _)::Pair{Symbol,<:ComponentsBlock}, var_comprefs::N
     pvals = getproperty(pl, name)
     idx_p = 0
     for (i, cr) in enumerate(values(var_comprefs))
-        nvals = _n_comp_refs(cr)
-        pvals[idx_p.+(1:nvals)] = val[i, _inds_comp_refs(cr)]
+        nvals = n_comp_refs(cr)
+        pvals[idx_p.+(1:nvals)] = val[i, inds_comp_refs(cr)]
         idx_p = idx_p + nvals
     end
     return nothing
