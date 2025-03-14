@@ -1,20 +1,25 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020-2024, Bank of Canada
+# Copyright (c) 2020-2025, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
 
-
+"""spell a number using subscript digits e.g., `num2sub(5)` returns "₅"`"""
 _num2sub(n::Integer) = n < 0 ? '₋' * _num2sub(-n) :
                        n < 10 ? string('₀' + n) :
                        _num2sub(n ÷ 10) * _num2sub(n % 10)
 
-@inline _make_factor_names(name::Sym, size::Integer)::Vector{Symbol} = _make_factor_names(name, Val(Int(size)))
-@inline _make_factor_names(name::Sym, ::Val{1})::Vector{Symbol} = Symbol[Symbol(name)]
-@inline _make_factor_names(name::Sym, ::Val{N}) where {N} = Symbol[Symbol(name, _num2sub(i)) for i = 1:N]
+const sup_nums = ('⁰', '¹', '²', '³', '⁴', '⁵', '⁶', '⁷', '⁸', '⁹')
+"""spell a number using supperscript digits e.g., `num2sup(5)` returns "⁵"`"""
+_num2sup(n::Integer) = n < 0 ? '⁻' * _num2sup(-n) :
+                       n < 10 ? sup_nums[n+1] :
+                       _num2sup(n ÷ 10) * _num2sup(n % 10)
 
+@inline _make_factor_names(name::Sym, N::Integer)::Vector{Symbol} = (N == 1) ? Symbol[Symbol(name)] : Symbol[Symbol(name, _num2sup(i)) for i = 1:N]
+
+@inline _tosymvec(::A) where {A} = error("No method available to convert from $A to Vector{Symbol}.")
 @inline _tosymvec(s::Symbol)::Vector{Symbol} = Symbol[s]
 @inline _tosymvec(s::Sym)::Vector{Symbol} = Symbol[Symbol(s)]
 @inline _tosymvec(v::Vector{Symbol})::Vector{Symbol} = v
@@ -22,8 +27,19 @@ _num2sub(n::Integer) = n < 0 ? '₋' * _num2sub(-n) :
 @inline _tosymvec(v::Vector{<:Sym})::Vector{Symbol} = Symbol[Symbol(s) for s in v]
 @inline _tosymvec(v::SymVec)::Vector{Symbol} = Symbol[Symbol(s) for s in v]
 
+"default name of shock associated with a variable"
 @inline _make_shock(name::Sym) = to_shock(Symbol(name, "_shk"))
+
+"default names of shocks associated with a list of variables"
 @inline _make_shocks(names) = ModelVariable[_make_shock(name) for name in names]
+
+"""default name for an idiosyncratic component associated with a variable"""
+@inline _make_ic_name(name::Sym) = Symbol(name, "_cor")
+
+"name given to the lag of a variable"
+@inline _make_lag_name(name::Sym, lag::Int) = 
+    lag < 0 ? error("Negative lag") : 
+    lag == 0 ? Symbol(name) : Symbol(name, "ₜ₋", _num2sub(lag))
 
 @inline _enumerate_vars(vars) = (; (Symbol(v) => n for (n, v) = enumerate(vars))...)
 
@@ -66,6 +82,6 @@ function _wrap_arrays(bm::DFMBlockOrModel, R, J, point)
 end
 
 @inline ComponentArrays.toval(v::ModelVariable) = ComponentArrays.toval(Symbol(v))
-@inline ComponentArrays.toval(tv::NTuple{N,ModelVariable}) where {N} = ComponentArrays.toval(Symbol.(tv))
-@inline ComponentArrays.toval(av::AbstractArray{<:ModelVariable}) = ComponentArrays.toval(Symbol.(av))
+@inline ComponentArrays.toval(tv::NTuple{N,ModelVariable}) where {N} = ComponentArrays.toval(Symbol[t fot t in tv])
+@inline ComponentArrays.toval(av::AbstractArray{<:ModelVariable}) = ComponentArrays.toval(Symbol[a for a in av])
 

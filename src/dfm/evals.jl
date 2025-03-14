@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020-2024, Bank of Canada
+# Copyright (c) 2020-2025, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -11,18 +11,19 @@ _getcoef(::IdiosyncraticComponents, p::DFMParams, i::Integer=1) = Diagonal(@view
 _setcoef!(::ComponentsBlock, p::DFMParams, val, i::Integer=1) = (p.coefs[:, :, i] = val; val)
 _setcoef!(::IdiosyncraticComponents, p::DFMParams, val, i::Integer=1) = (p.coefs[:, i] = diag(val); val)
 
-function _getloading((name, blk)::Pair{Symbol,<:ComponentsBlock}, crefs::NamedList{_BlockComponentRef}, p::DFMParams)
-    L = zeros(eltype(p), length(crefs), blk.size)
-    _getloading!(L, name=>blk, crefs, p)
+function _getloading(name_blk::Pair{Symbol,<:ComponentsBlock}, crefs::NamedList{_BlockComponentRef}, p::DFMParams)
+    L = zeros(eltype(p), length(crefs), name_blk.second.size)
+    _getloading!(L, name_blk, crefs, p)
     return L
 end
 
 @inline function _getloading!(Λ::AbstractMatrix, ::Pair{Symbol,<:IdiosyncraticComponents}, crefs::NamedList{_BlockComponentRef}, ::DFMParams)
-    col = 0
-    for (row, c) in enumerate(values(crefs))
-        c isa _NoCompRef && continue
-        col = col + 1
-        Λ[row, col] = 1
+    # all loadings to idiosyncratic components are 1.0 or 0.0 and they are not stored in the parameters vector
+    for (row, cref) in enumerate(values(crefs))
+        cols = inds_comp_refs(cref)
+        isempty(cols) && continue
+        @assert(length(cols) == 1)
+        Λ[row, cols[1]] = 1.0
     end
     return Λ
 end
@@ -234,8 +235,7 @@ function get_loading!(A::AbstractMatrix{<:Number}, ob::ObservedBlock{MF}, par::D
     if isnothing(crefs)
         return A
     end
-    yinds =
-        C = mf_coefs(MF)
+    C = mf_coefs(MF)
     NC = length(C)
     L = lags(cb)
     if NC > L
@@ -254,9 +254,9 @@ end
 function get_loading!(A::AbstractMatrix, ob::ObservedBlock, par::DFMParams)
     @assert size(A) == (nobserved(ob), sum(nstates_with_lags, ob.components, init=0))
     offset = 0
-    for (cn, cb) in ob.components
-        cols = offset .+ (1:nstates_with_lags(cb))
-        get_loading!(view(A, :, cols), ob, par, cn => cb)
+    for cn_cb in ob.components
+        cols = offset .+ (1:nstates_with_lags(cn_cb.second))
+        get_loading!(view(A, :, cols), ob, par, cn_cb)
         offset = last(cols)
     end
     return A

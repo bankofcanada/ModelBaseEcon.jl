@@ -11,6 +11,8 @@ using Test
 
 import ModelBaseEcon.update
 
+## #=
+
 @testset "Tranformations" begin
     @test_throws ErrorException transformation(Transformation)
     @test_throws ErrorException inverse_transformation(Transformation)
@@ -1774,4 +1776,9 @@ end
 
     @test_throws AssertionError eval_equation(model, eqtn, sim_data, 1:7)
 end
+
+## =#
+
+include("dfmmodels.jl")
+
 nothing

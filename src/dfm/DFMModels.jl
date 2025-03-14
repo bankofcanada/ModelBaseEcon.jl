@@ -91,7 +91,7 @@ export DFMModel, DFMParams
 export DFMBlock, ComponentsBlock, ObservedBlock, CommonComponents, IdiosyncraticComponents
 export observed, nobserved, states, nstates
 export varshks, nvarshks, endog, nendog, exog, nexog
-export lags, leads
+export lags, leads, order
 
 ####################################################
 
@@ -269,7 +269,6 @@ Indicates that some, but not all, names in the given block are being referenced.
 """
 struct _CompRef{N,NAMES} <: _BlockComponentRef{false,N,NAMES}
     inds::Vector{Int}  # maintains the indices in NAMES being referenced
-
     function _CompRef(names::SymVec)
         N = length(names)
         NAMES = ((Symbol(n) for n in names)...,)
@@ -325,14 +324,19 @@ end
     end
 end
 
-n_comp_refs(::_BlockRef{0}) = error("Cannot determine the number of referenced components")
+n_comp_refs(::_BlockRef{0}) = error("Cannot determine the number of referenced components.")
 n_comp_refs(::_BlockRef{N}) where {N} = N
 n_comp_refs(c::_CompRef) = length(c.inds)
-n_comp_refs(c::_NoCompRef) = 0
+n_comp_refs(::_NoCompRef) = 0
 
-inds_comp_refs(r::_BlockRef) = 1:n_comp_refs(r)
-inds_comp_refs(r::_CompRef) = r.inds
+inds_comp_refs(c::_BlockRef) = 1:n_comp_refs(c)
+inds_comp_refs(c::_CompRef) = c.inds
 inds_comp_refs(r::_NoCompRef) = Int[]
+
+vars_comp_refs(::_BlockRef{0}) = error("Cannot determine the names of referenced components.")
+vars_comp_refs(::_BlockRef{N,NAMES}) where {N,NAMES} = NAMES
+vars_comp_refs(c::_CompRef{N,NAMES}) where {N,NAMES} = NAMES[c.inds]
+vars_comp_refs(::_NoCompRef) = Symbol[]
 
 Base.show(io::IO, c::_BlockComponentRef) = show(io, MIME"text/plain"(), c)
 Base.show(io::IO, ::MIME"text/plain", c::_BlockRef{N,NAMES}) where {N,NAMES} = print(io, NAMES)
@@ -437,10 +441,14 @@ count_observed_shocks(m::DFMModel; init=0) = sum(nshocks, values(m.observed); in
 
 @inline exog(::ComponentsBlock) = ModelVariable[]
 @inline nexog(::ComponentsBlock) = 0
-@inline exog(b::ObservedBlock) = mapfoldl(endog, append!, values(b.components), init=ModelVariable[])
-@inline nexog(b::ObservedBlock) = sum(nendog, values(b.components))
 @inline exog(::DFMModel) = ModelVariable[]
 @inline nexog(::DFMModel) = 0
+
+# implementation of exog for ObservedBlock is more complicated because each 
+# variable may reference some but not all components in a block
+_comp_exog(crefs) = unique!(mapreduce(vars_comp_refs, append!, values(crefs), init=ModelVariable[]))
+exog(b::ObservedBlock) = mapfoldl(_comp_exog, append!, values(b.comp2vars), init=ModelVariable[])
+nexog(b::ObservedBlock) = sum(length ∘ _comp_exog, values(b.comp2vars))
 
 @inline allvars(bm::DFMBlockOrModel) = varshks(bm)
 @inline nallvars(bm::DFMBlockOrModel) = nvarshks(bm)
@@ -448,6 +456,7 @@ count_observed_shocks(m::DFMModel; init=0) = sum(nshocks, values(m.observed); in
 endog(m::DFMModel) = [observed(m); states(m)]
 nendog(m::DFMModel) = nobserved(m) + nstates(m)
 
+################################################################################
 
 ## ##########################################################################
 #    user interface to setup the dfm model 
@@ -559,6 +568,7 @@ function add_observed!(m::DFMModel, varnames::SymVec)
 end
 export add_observed!
 
+################################################################################
 
 """
     add_components!(m::DFMModel; name = component, ...)
@@ -578,6 +588,8 @@ function add_components!(m::DFMModel, args::Pair{<:Sym,<:ComponentsBlock}...)
     end
     return m
 end
+
+################################################################################
 
 """
     map_loadings!(m::DFMModel, :var => [:comp1, ...], ...)
@@ -636,7 +648,7 @@ function _add_var2comp_ref(observed::NamedList{ObservedBlock}, vars::SymVec, blk
         end
     end
     if any(not_done)
-        not_assigned = ((v for (i, v) in enumerate(vars) if not_done[i])...,)
+        not_assigned = [v for (i, v) in enumerate(vars) if not_done[i]]
         error("Variables not assigned to an observed block: $(not_assigned)")
     end
     return
@@ -666,15 +678,38 @@ function map_loadings!(m::DFMModel, args::Pair...)
                     break
                 end
             end
-            found && continue
-            throw(ArgumentError("Component $cn not found in the model."))
+            found || error("Component $cn not found in the model.")
         end
     end
     return m
 end
 
+################################################################################
 
+"""
+    add_shocks!(m, :var, ...)
+    add_shocks!(m, :var => :shk, ...)
+
+Add shocks to the given *observed* variables. The shock name can be given
+explicitly (using the `=>` syntax) or, if omitted, it will be generated
+automatically from the variable name.
+
+If the observed variable already exists, the shock is added to the  
+observed block that contains the variable. If the variable already has a shock
+it is an error.
+
+If the observed variable does not exist, then the behaviour depends on whether
+the model contains one or many observed blocks. If one observed block, the
+variable and the shock are added. If many observed blocks, then it is an error.
+
+Note that components blocks handle their shocks automatically, so this is only
+necessary for observed shocks. Observed shocks are not automatic because some
+observed variables may have idiosyncratic components.
+
+"""
+function add_shocks! end
 export add_shocks!
+
 add_shocks!(b::Union{DFMModel,ObservedBlock}, arg, args...) = add_shocks!(b, [arg, args...])
 function add_shocks!(b::Union{DFMModel,ObservedBlock}, args::AbstractVector)
     for arg in args
@@ -703,7 +738,7 @@ function add_shocks!(m::DFMModel, varshk::Pair{<:Sym,<:Sym})
     mobs = m.observed
     if isempty(mobs)
         # no observed blocks -- create the default one
-        mobs[_dobn] = add_shocks(ObservedBlock(), varshk)
+        mobs[_dobn] = add_shocks!(ObservedBlock(), varshk)
         return m
     end
     if length(mobs) == 1
@@ -724,28 +759,11 @@ function add_shocks!(m::DFMModel, varshk::Pair{<:Sym,<:Sym})
     error("Variable `$var` not found in any observed block.")
 end
 
-# function _check_ic_shk(b::ObservedBlock)
-#     v2s = b.var2shk
-#     v2c = b.var2comps
-#     for var in b.vars
-#         x = haskey(v2s, var)
-#         comps = getindex(v2c, var)
-#         for (n, c) in b.components
-#             c isa IdiosyncraticComponents || continue
-#             n ∈ comps || continue
-#             x = x + 1
-#         end
-#         x == 1 && continue
-#         if x == 0
-#             @warn "$var has neither shock nor idiosyncratic component."
-#         else
-#             @warn "$var has more than one shock or idiosyncratic components."
-#         end
-#     end
-#     return b
-# end
+################################################################################
 
-function _init_observed!(b::ObservedBlock)
+# add variables and shocks. Also updates IdiosyncraticComponents with 
+# variables from the given block that load on it
+function _init_observed_pass1!(b::ObservedBlock)
     # add variables and shocks mentioned in the loadings and shocks maps
     empty!(b.vars)
     append!(b.vars, keys(b.var2comps))
@@ -754,46 +772,59 @@ function _init_observed!(b::ObservedBlock)
     b.size = length(b.vars)
     empty!(b.shks)
     append!(b.shks, values(b.var2shk))
+    # add idiosyncratic components referenced in this observed block to 
+    # their idiosyncratic block
+    for (ic_name, ic_blk) in b.components
+        ic_blk isa IdiosyncraticComponents || continue
+        any_loaders = false
+        for (var, crefs) in b.var2comps
+            if haskey(crefs, ic_name)
+                any_loaders = true
+                push!(ic_blk.vars, _make_ic_name(var))
+            end
+        end
+        any_loaders || error("Internal error: $ic_name mentioned but no observed variable loads it.")
+        ic_blk.size = length(ic_blk.vars)
+        ic_blk.shks = _make_shocks(ic_blk.vars)
+    end
+end
+
+# assuming pass1 was done. 
+# here we finalize the connectivity maps
+# var2comps is updated for idiosyncratic components
+# inverse map, comp2vars, is created 
+function _init_observed_pass2!(b::ObservedBlock)
+    # update the var2comp map for idiosyncratic components
+    for (var, crefs) in pairs(b.var2comps)
+        for cn in keys(crefs)
+            cr = crefs[cn]
+            if cr isa _BlockRef{0}
+                comp = b.components[cn]
+                crefs[cn] = comp_ref(_CompRef(comp.vars), _make_ic_name(var))
+            end
+        end
+    end
     # build the inverse loadings map
     b_c2v = b.comp2vars
     empty!(b_c2v)
     for cn in keys(b.components)
-        tmp = b_c2v[cn] = NamedList{_BlockComponentRef}()
+        tmp = NamedList{_BlockComponentRef}()
         for vn in b.vars
             tmp[vn] = _NoCompRef(b.vars)
         end
+        b_c2v[cn] = tmp
     end
-    for (varname, blkcomprefs) in b.var2comps
-        for (blkname, c) in blkcomprefs
-            b_c2v[blkname][varname] = c
-            # tmp = get!(b_c2v, blkname, NamedList{_BlockComponentRef}())
-            # push!(tmp, varname => c)
+    for (var, crefs) in b.var2comps
+        for (bname, c) in crefs
+            b_c2v[bname][var] = c
         end
     end
-    # resize idiosyncratic blocks as needed
-    for (name, block) in b.components
-        block isa IdiosyncraticComponents || continue
-        vars = block.vars
-        found = false
-        for (var, refs) in b_c2v[name]
-            refs isa _NoCompRef && continue
-            found = true
-            push!(vars, Symbol(var, "_cor"))
-        end
-        if !found
-            @warn "No variables are loading the components in $name"
-            continue
-        end
-        block.size = length(vars)
-        block.shks = _make_shocks(vars)
-    end
-    # _check_ic_shk(b)
-    return b
 end
+
 
 function check_dfm(m::DFMModel)
     if m._state != :ready
-        throw(ArgumentError("Model must be initialized first."))
+        error("Model must be initialized first.")
     end
     m._state = :check
     # check observed blocks
@@ -815,12 +846,9 @@ function check_dfm(m::DFMModel)
         end
         # each variable must either have a shock or an idiosyncratic 
         # component (autocorrelated shock), but not both. check for violation
-        ic_names = [k for (k,v) in pairs(oblk.components) if v isa IdiosyncraticComponents]
+        ic_names = [k for (k, v) in pairs(oblk.components) if v isa IdiosyncraticComponents]
         for var in oblk.vars
-            if !haskey(oblk.var2comps, var)
-                error("Internal error: connectivity map is corrupt.")
-            end
-            has_comps = !isempty(oblk.var2comps[var])
+            has_comps = haskey(oblk.var2comps, var) && !isempty(oblk.var2comps[var])
             has_shk = haskey(oblk.var2shk, var)
             if !has_comps && !has_shk
                 error("Variable `$var` in block `$onm`` does not load any component and does not have a shock.")
@@ -830,11 +858,13 @@ function check_dfm(m::DFMModel)
                 if nic == 0
                     error("Variable `$var` in block `$onm` has neither a shock nor an idiosyncratic component.")
                 elseif nic > 1
-                    error("Variable `$var` in block `$onm` has more than one shock or idiosyncratic components.")
+                    @warn("Variable `$var` in block `$onm` has more than one shock or idiosyncratic components.")
                 end
             end
         end
     end
+    # make sure there are no duplicate variables (this is an internal check)
+    varshks(m) == unique(varshks(m)) || error("Duplicate variables or shocks")
     m._state = :ready
     return m
 end
@@ -847,17 +877,33 @@ it is done receiving inputs from the model developer. Also perform checks for
 the integrity of the model provided by the model developer.
 """
 function initialize_dfm!(m::DFMModel; check=true)
+    m._state = :new
+    # empty idiosyncratic blocks, so they can be re-populated from scratch
+    for cblk in values(m.components)
+        cblk isa IdiosyncraticComponents || continue
+        empty!(cblk.vars)
+        empty!(cblk.shks)
+    end
     for oblk in values(m.observed)
-        _init_observed!(oblk)
+        # add variables and shocks. also, update idiosyncratic component blocks
+        _init_observed_pass1!(oblk)
+    end
+    for oblk in values(m.observed)
+        # update the var2comps map and create the comp2vars map
+        _init_observed_pass2!(oblk)
     end
     m._state = :ready
     return check ? check_dfm(m) : m
 end
 export initialize_dfm!
 
+################################################################################
+
 include("params.jl")
 include("evals.jl")
 include("utils.jl")
+
+################################################################################
 
 export DFM
 mutable struct DFM <: AbstractModel
@@ -872,7 +918,7 @@ eval_R!(R::AbstractVector, point::AbstractMatrix, dfm::DFM) = eval_R!(R, point, 
 eval_RJ!(R::AbstractVector, J::AbstractMatrix, point::AbstractMatrix, dfm::DFM) = eval_RJ!(R, J, point, dfm.model, dfm.params)
 add_components!(dfm::DFM; kwargs...) = (add_components!(dfm.model, kwargs...); dfm)
 add_components!(dfm::DFM, args...) = (add_components!(dfm.model, args...); dfm)
-map_loadings!(dfm::DFM, args::Pair...) = (map_loadings!(dfm.model, args...); dfm)
+map_loadings!(dfm::DFM, args...) = (map_loadings!(dfm.model, args...); dfm)
 add_shocks!(dfm::DFM, args...) = (add_shocks!(dfm.model, args...); dfm)
 add_observed!(dfm::DFM, args...; kwargs...) = (add_observed!(dfm.model, args...; kwargs...); dfm)
 initialize_dfm!(dfm::DFM, args...; kwargs...) = (initialize_dfm!(dfm.model, args...; kwargs...); dfm.params = init_params(dfm.model); dfm)
@@ -901,13 +947,17 @@ nstates_with_lags(b::ComponentsBlock) = nstates(b) * lags(b)
 
 states_with_lags(m::DFM) = states_with_lags(m.model)
 states_with_lags(m::DFMModel) = mapfoldl(states_with_lags, append!, values(m.components), init=Symbol[])
-states_with_lags((n, b)::Pair{Symbol,<:DFMBlock}) = states_with_lags(b)
+# states_with_lags((n, b)::Pair{Symbol,<:DFMBlock}) = states_with_lags(b)
 states_with_lags(::ObservedBlock) = Symbol[]
 function states_with_lags(blk::ComponentsBlock)
-    return Symbol[
-        (Symbol(v, "_lag_", lags(blk) - l) for l = 1:lags(blk)-1 for v in states(blk))...,
-        states(blk)...]
+    return [_make_lag_name(v, lags(blk)-l) for l = 1:lags(blk) for v in states(blk)]
 end
+
+get_mean(dfm::DFM) = get_mean!(Vector{eltype(dfm.params)}(undef, nobserved(dfm)), dfm)
+get_mean!(x::AbstractVector, dfm::DFM) = get_mean!(x, dfm.model, dfm.params)
+
+get_loading(dfm::DFM) = get_loading!(Matrix{eltype(dfm.params)}(undef, nobserved(dfm), nstates_with_lags(dfm)), dfm)
+get_loading!(x::AbstractMatrix, dfm::DFM) = get_loading!(x, dfm.model, dfm.params)
 
 export states_with_lags, nstates_with_lags
 
