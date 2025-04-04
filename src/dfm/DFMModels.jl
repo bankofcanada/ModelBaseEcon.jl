@@ -174,8 +174,8 @@ Returns the coefficients of the mixing constraint for the given subtype of
 """
 function mf_coefs end
 
-mf_coefs(::Type{NoMixFreq}) = (1,)
-mf_coefs(::Type{MixFreq{:MQ}}) = (1, 2, 3, 2, 1)
+Base.@propagate_inbounds mf_coefs(::Type{NoMixFreq}, i=:) = @inbounds (1,)[i]
+Base.@propagate_inbounds mf_coefs(::Type{MixFreq{:MQ}}, i=:) = (1, 2, 3, 2, 1)[i]
 
 """
     MixFreq(mf, blk)
@@ -196,6 +196,24 @@ A struct type representing factors that are common to a block of observed
 variables. The loadings matrix, the transition matrices, and the shocks
 covariance matrix for this type of block are all dense matrices. See also
 [`IdiosyncraticComponents`](@ref).
+
+    CommonComponents(name, size; order, nlags)
+
+Create an instance. `name` is mandatory and can be a single name (string or
+symbol) or a list of names. The second positional argument, `size`, is optional
+and defaults to the number of names.
+
+If you provide a single name and size greater than 1 then the names of 
+the variables are generated from the given name with superscript digits.
+
+The `order` named argument is the VAR order of the components in this block. The
+default is 1. 
+
+The `nlags` named argument typically equals `order`, however it may be different
+in mixed-frequency models in the block with the lower frequency. Normally this
+would be handled automatically and there is no need for the user to specify
+`nlags` directly.
+
 """
 CommonComponents
 
@@ -227,8 +245,8 @@ IdiosyncraticComponents(or::Integer=1; order::Integer=or, nlags::Integer=order) 
 Abstract type for a reference to components.
 
 This is used internally when creating a map of references between observed and
-latent blocks, that is variables in which observed block load which latent
-block.
+latent blocks, that is which variables in each observed block load on which
+variables in which latent blocks.
 
 * `ALL` is `true` or `false` indicating whether the entire block is being
   referenced, or only some of the components in it.
@@ -239,10 +257,10 @@ Invariant: `N == length(NAMES)`.
 
 Convention: `N=0` and `NAMES=()` means that all components in the block are
 being referenced. This is needed when we don't know the names of the components,
-but we know that they're all referenced.
+but we do know that they're all referenced.
 
-Convention: all derived types have inner constructors that take the list of
-`NAMES`.
+Convention: all derived types have inner constructors that take just a list of
+`NAMES` to construct the instance.
 
 See also: [`comp_ref`](@ref), [`n_comp_refs`](@ref), [`inds_comp_refs`](@ref)
 
@@ -252,7 +270,8 @@ abstract type _BlockComponentRef{ALL,N,NAMES} end
 """
     struct _BlockRef{N,NAMES} <: _BlockComponentRef{true,N,NAMES} ... end
         
-Indicates that all names in the given block are being referenced.
+A specific [`_BlockComponentRef`](@ref) type indicating that all names in the
+latent block are being referenced.
 """
 struct _BlockRef{N,NAMES} <: _BlockComponentRef{true,N,NAMES}
     function _BlockRef(names::SymVec)
@@ -265,10 +284,12 @@ end
 """
     struct _CompRef{N,NAMES} <: _BlockComponentRef{false,N,NAMES} ... end
     
-Indicates that some, but not all, names in the given block are being referenced.
+A specific [`_BlockComponentRef`](@ref) that some, but not all, names in the
+latent block are being referenced.
 """
 struct _CompRef{N,NAMES} <: _BlockComponentRef{false,N,NAMES}
-    inds::Vector{Int}  # maintains the indices in NAMES being referenced
+    # `NAMES` are all names in the latent block. 
+    inds::Vector{Int}  # maintains the indices in `NAMES` being referenced
     function _CompRef(names::SymVec)
         N = length(names)
         NAMES = ((Symbol(n) for n in names)...,)
@@ -279,7 +300,8 @@ end
 """
     struct _NoCompRef{N,NAMES} <: _BlockComponentRef{false,N,NAMES} end
     
-Indicates that no names in the given block are being referenced.
+A specific [`_BlockComponentRef`](@ref) indicating that no names in the given
+block are being referenced.
 """
 struct _NoCompRef{N,NAMES} <: _BlockComponentRef{false,N,NAMES}
     function _NoCompRef(names::SymVec)
@@ -292,25 +314,41 @@ end
 """
     comp_ref(::ComponentsBlock)
     comp_ref(::ComponentsBlock, ::Sym)
+    comp_ref(::_BlockComponentRef)
+    comp_ref(::_BlockComponentRef, ::Sym)
 
 Function used internally to "register" a reference to a component block, either
 for the entire block or for a specific  component within the block.
-Returns an instance of `_BlockComponentRef`
+Returns an instance of [`_BlockComponentRef`](@ref).
 """
 function comp_ref end
 
-comp_ref(::_BlockComponentRef{ALL,N,NAMES}) where {ALL,N,NAMES} = _BlockRef(NAMES)
-comp_ref(::IdiosyncraticComponents) = _BlockRef(())
+# reference a variable in a block of idiosyncratic components. 
+comp_ref(::IdiosyncraticComponents) = _BlockRef(())  # names are not known yet
+# reference a block of common components - either the entire block ...
 comp_ref(b::CommonComponents) = _BlockRef(b.vars)
+# ... or add a component to the reference list
 comp_ref(b::CommonComponents, comp::Sym) = comp_ref(_CompRef(b.vars), Val(Symbol(comp)))
+
+# ???
+comp_ref(::_BlockComponentRef{ALL,N,NAMES}) where {ALL,N,NAMES} = _BlockRef(NAMES)
+
+# method to add a component to an existing reference
 comp_ref(c::_BlockComponentRef, comp::Sym) = comp_ref(c, Val(Symbol(comp)))
+# add a component to a reference to the entire block - it's a no-op, but we check that the component exists within the block
 @generated function comp_ref(c::_BlockRef{N,NAMES}, ::Val{comp}) where {N,NAMES,comp}
     if N == 0 || comp in NAMES
         return :(c)
     end
     return :(throw(ArgumentError(string(comp) * " is not a component.")))
 end
+# add a component to a partial reference.
 @generated function comp_ref(c::_CompRef{N,NAMES}, ::Val{comp}) where {N,NAMES,comp}
+    # find the index of the component; if not found - error
+    # if the component is already referenced, do nothing
+    # if this is the last component, change the reference to a _BlockRef, 
+    # i.e. a reference to the entire block
+    # otherwise, push the index into the list
     ind = 1
     while ind <= N && NAMES[ind] != comp
         ind += 1
@@ -789,10 +827,10 @@ function _init_observed_pass1!(b::ObservedBlock)
     end
 end
 
-# assuming pass1 was done. 
+# assuming _init_observed_pass1! was done,
 # here we finalize the connectivity maps
-# var2comps is updated for idiosyncratic components
-# inverse map, comp2vars, is created 
+# update var2comps for idiosyncratic components
+# create the inverse map, comp2vars
 function _init_observed_pass2!(b::ObservedBlock)
     # update the var2comp map for idiosyncratic components
     for (var, crefs) in pairs(b.var2comps)
@@ -822,6 +860,13 @@ function _init_observed_pass2!(b::ObservedBlock)
 end
 
 
+"""
+    check_dfm(m)
+
+Verify the consistency of internal data structures. Throw and `ErrorException`
+with an appropriate error message if any problem is found.
+
+"""
 function check_dfm(m::DFMModel)
     if m._state != :ready
         error("Model must be initialized first.")
@@ -927,9 +972,14 @@ lags(dfm::DFM) = lags(dfm.model)
 leads(dfm::DFM) = leads(dfm.model)
 
 get_covariance(dfm::DFM) = get_covariance(dfm.model, dfm.params)
-get_covariance(dfm::DFM, blk::Sym) = get_covariance(dfm, Val(Symbol(blk)))
-get_covariance(dfm::DFM, ::Val{:observed}) = get_covariance(dfm.model.observed_block, dfm.params.observed)
-get_covariance(dfm::DFM, v::Val{B}) where {B} = (@nospecialize(v); get_covariance(dfm.model.components[B], getproperty(dfm.params, B)))
+function get_covariance(dfm::DFM, B::Sym) 
+    model = dfm.model
+    if haskey(model.observed, B)
+        return get_covariance(model.observed[B], getproperty(dfm.params, B))
+    else
+        return get_covariance(model.components[B], getproperty(dfm.params, B))
+    end
+end
 
 for f in (:observed, :states, :shocks, :endog, :exog, :varshks, :allvars)
     nf = Symbol("n", f)
@@ -958,6 +1008,9 @@ get_mean!(x::AbstractVector, dfm::DFM) = get_mean!(x, dfm.model, dfm.params)
 
 get_loading(dfm::DFM) = get_loading!(Matrix{eltype(dfm.params)}(undef, nobserved(dfm), nstates_with_lags(dfm)), dfm)
 get_loading!(x::AbstractMatrix, dfm::DFM) = get_loading!(x, dfm.model, dfm.params)
+
+get_transition(dfm::DFM) = get_transition!(Matrix{eltype(dfm.params)}(undef, nstates_with_lags(dfm), nstates_with_lags(dfm)), dfm)
+get_transition!(x::AbstractMatrix, dfm::DFM) = get_transition!(x, dfm.model, dfm.params)
 
 export states_with_lags, nstates_with_lags
 

@@ -76,10 +76,10 @@ using LinearAlgebra
 
 end
 
-## 
+##
 
 @testset "dfm.2" begin
-# begin
+    # begin
     dfm = DFM(:test)
     @test dfm isa DFM && dfm.model isa DFMModel && dfm.params isa DFMParams
 
@@ -180,37 +180,114 @@ end
 
     @test get_covariance(O1, params.O1) == Float64[7;;]
     @test get_covariance(O2, params.O2) == Float64[;;]
-    @test get_covariance(C1, params.C1) == Float64[20 22;22 23;]
-    @test get_covariance(C2, params.C2) == Float64[36 38;38 39;]
-    @test get_covariance(IC, params.IC) == diagm(Float64[42,43])
-    let 
-        C = zeros(7,7)
-        C[1,1] = 7
-        C[2:3,2:3] = [20 22;22 23;]
-        C[4:5,4:5] = [36 38;38 39;]
-        C[6,6] = 42
-        C[7,7] = 43
+    @test get_covariance(C1, params.C1) == Float64[20 22; 22 23]
+    @test get_covariance(C2, params.C2) == Float64[36 38; 38 39]
+    @test get_covariance(IC, params.IC) == diagm(Float64[42, 43])
+    let
+        C = [7 0 0 0 0 0 0
+            0 20 22 0 0 0 0
+            0 22 23 0 0 0 0
+            0 0 0 36 38 0 0
+            0 0 0 38 39 0 0
+            0 0 0 0 0 42 0
+            0 0 0 0 0 0 43]
         @test get_covariance(dfm) == C
+        @test get_covariance(dfm, :O1) == [7;;]
+        @test get_covariance(dfm, :O2) == [;;]
+        @test get_covariance(dfm, :C1) == [20 22; 22 23]
+        @test get_covariance(dfm, :C2) == [36 38; 38 39]
+        @test get_covariance(dfm, :IC) == [42 0; 0 43]
     end
 
-    @test DFMModels.get_mean!(zeros(2), O1, params.O1) == Float64[1,2]
+    @test DFMModels.get_mean!(zeros(2), O1, params.O1) == Float64[1, 2]
     @test DFMModels.get_mean!(zeros(1), O2, params.O2) == Float64[8]
-    @test DFMModels.get_mean!(zeros(3), dfm) == Float64[1,2,8]
-    @test DFMModels.get_mean(dfm) == Float64[1,2,8]
+    @test DFMModels.get_mean!(zeros(3), dfm) == Float64[1, 2, 8]
+    @test DFMModels.get_mean(dfm) == Float64[1, 2, 8]
 
-    
-    @test DFMModels.get_loading!(zeros(2,4), O1, params.O1, :C1=>C1) == [zeros(2,2) [3 0; 4 5]]
-    @test DFMModels.get_loading!(zeros(2,6), O1, params.O1, :C2=>C2) == [zeros(2,4) [6 0; 0 0]]
-    @test DFMModels.get_loading!(zeros(2,2), O1, params.O1, :IC=>IC) == [1 0; 0 0]
-    @test DFMModels.get_loading!(zeros(2,12), O1, params.O1) == [zeros(2,2) [3 0; 4 5] [1 0; 0 0] zeros(2,4) [6 0; 0 0]]
 
-    @test DFMModels.get_loading!(zeros(1,4), O2, params.O2, :C1=>C1) == [zeros(1,2) [9 0]]
-    @test DFMModels.get_loading!(zeros(1,6), O2, params.O2, :C2=>C2) == [zeros(1,4) [10 11]]
-    @test DFMModels.get_loading!(zeros(1,2), O2, params.O2, :IC=>IC) == [0 1]
-    @test DFMModels.get_loading!(zeros(1,12), O2, params.O2) == [zeros(1,2) [9 0] [0 1] zeros(1,4) [10 11]]
+    @test DFMModels.get_loading!(zeros(2, 4), O1, params.O1, :C1 => C1) == [zeros(2, 2) [3 0; 4 5]]
+    @test DFMModels.get_loading!(zeros(2, 6), O1, params.O1, :C2 => C2) == [zeros(2, 4) [6 0; 0 0]]
+    @test DFMModels.get_loading!(zeros(2, 2), O1, params.O1, :IC => IC) == [1 0; 0 0]
+    @test DFMModels.get_loading!(zeros(2, 12), O1, params.O1) == [zeros(2, 2) [3 0; 4 5] [1 0; 0 0] zeros(2, 4) [6 0; 0 0]]
 
-    @test DFMModels.get_loading!(zeros(3,12), dfm) == [zeros(3,2) [3 0; 4 5; 9 0] zeros(3,4) [6 0; 0 0; 10 11] [1 0; 0 0; 0 1]]
-    @test DFMModels.get_loading(dfm) == [zeros(3,2) [3 0; 4 5; 9 0] zeros(3,4) [6 0; 0 0; 10 11] [1 0; 0 0; 0 1]]
+    @test DFMModels.get_loading!(zeros(1, 4), O2, params.O2, :C1 => C1) == [zeros(1, 2) [9 0]]
+    @test DFMModels.get_loading!(zeros(1, 6), O2, params.O2, :C2 => C2) == [zeros(1, 4) [10 11]]
+    @test DFMModels.get_loading!(zeros(1, 2), O2, params.O2, :IC => IC) == [0 1]
+    @test DFMModels.get_loading!(zeros(1, 12), O2, params.O2) == [zeros(1, 2) [9 0] [0 1] zeros(1, 4) [10 11]]
+
+    @test DFMModels.get_loading!(zeros(3, 12), dfm) == [zeros(3, 2) [3 0; 4 5; 9 0] zeros(3, 4) [6 0; 0 0; 10 11] [1 0; 0 0; 0 1]]
+    @test DFMModels.get_loading(dfm) == [zeros(3, 2) [3 0; 4 5; 9 0] zeros(3, 4) [6 0; 0 0; 10 11] [1 0; 0 0; 0 1]]
+
+    let
+        T_C1 = [0 0 1 0; 0 0 0 1; 16 18 12 14; 17 19 13 15]
+        T_C2 = [0 0 1 0 0 0; 0 0 0 1 0 0; 0 0 0 0 1 0; 0 0 0 0 0 1; 32 34 28 30 24 26; 33 35 29 31 25 27]
+        T_IC = [40 0; 0 41]
+        @test DFMModels.get_transition!(zeros(4, 4), C1, params.C1) == T_C1
+        @test DFMModels.get_transition!(zeros(6, 6), C2, params.C2) == T_C2
+        @test DFMModels.get_transition!(zeros(2, 2), IC, params.IC) == T_IC
+        @test DFMModels.get_transition(dfm) == [T_C1 zeros(4, 8); zeros(6, 4) T_C2 zeros(6, 2); zeros(2, 10) T_IC]
+    end
+
+
+
+
+
+    @test (1 + lags(C1) == 3) && (nvarshks(C1) == 4)
+    @test DFMModels.eval_resid(ones(3, 4), C1, params.C1) == [-60; -64]
+    @test begin
+        R, J = DFMModels.eval_RJ(ones(3, 4), C1, params.C1)
+        (R == [-60; -64]) &&
+            (J == [-16 -12 1 -18 -14 0 0 0 -1 0 0 0; -17 -13 0 -19 -15 1 0 0 0 0 0 -1])
+    end
+
+    @test (1 + lags(C2) == 4) && (nvarshks(C2) == 4)
+    @test DFMModels.eval_resid(ones(4, 4), C2, params.C2) == [-174; -180]
+    @test begin
+        R, J = DFMModels.eval_RJ(ones(4, 4), C2, params.C2)
+        (R == [-174; -180]) &&
+            (J == [-32.0 -28.0 -24.0 1.0 -34.0 -30.0 -26.0 0.0 0.0 0.0 0.0 -1.0 0.0 0.0 0.0 0.0;
+                -33.0 -29.0 -25.0 0.0 -35.0 -31.0 -27.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -1.0])
+    end
+
+    @test (1 + lags(IC) == 2) && (nvarshks(IC) == 4)
+    @test DFMModels.eval_resid(ones(2, 4), IC, params.IC) == [-40; -41]
+    @test begin
+        R, J = DFMModels.eval_RJ(ones(2, 4), IC, params.IC)
+        (R == [-40; -41]) && (J == [-40 1 0 0 0 -1 0 0; 0 0 -41 1 0 0 0 -1])
+    end
+
+    @test (1 + lags(O1) == 1) && (nvarshks(O1) == 7)
+    @test DFMModels.eval_resid(ones(1, 7), O1, params.O1) == [-10; -11]
+    @test begin
+        R, J = DFMModels.eval_RJ(ones(1, 7), O1, params.O1)
+        (R == [-10; -11]) && (J == [1 0 -3 0 -1 -6 0; 0 1 -4 -5 0 0 -1])
+    end
+
+    @test (1 + lags(O2) == 1) && (nvarshks(O2) == 5)
+    @test DFMModels.eval_resid(ones(1, 5), O2, params.O2) == [-38]
+    @test begin
+        R, J = DFMModels.eval_RJ(ones(1, 5), O2, params.O2)
+        (R == [-38]) && (J == [1 -9 -1 -10 -11])
+    end
+
+    let CR = zeros(9), CJ = zeros(9, 64)
+        CR[:] = [-10, -11, -38, -60, -64, -174, -180, -40, -41]
+        CJ[1, [4, 16, 24, 32]] = [1 -3 -6 -1]
+        CJ[2, [8, 16, 20, 40]] = [1 -4 -5 -1]
+        CJ[3, [12, 16, 24, 28, 36]] = [1 -9 -10 -11 -1]
+        CJ[4, [13:20..., 44]] = [0 -16 -12 1 0 -18 -14 0 -1]
+        CJ[5, [13:20..., 48]] = [0 -17 -13 0 0 -19 -15 1 -1]
+        CJ[6, [21:28..., 52]] = [-32 -28 -24 1 -34 -30 -26 0 -1]
+        CJ[7, [21:28..., 56]] = [-33 -29 -25 0 -35 -31 -27 1 -1]
+        CJ[8, [31, 32, 60]] = [-40 1 -1]
+        CJ[9, [35, 36, 64]] = [-41 1 -1]
+        @test (1 + lags(dfm) == 4) && (nvarshks(dfm) == 16)
+        @test DFMModels.eval_resid(ones(4, 16), dfm) == CR
+        @test begin
+            R, J = DFMModels.eval_RJ(ones(4, 16), dfm)
+            (R == CR) && (J == CJ)
+        end
+    end
 
 end
 

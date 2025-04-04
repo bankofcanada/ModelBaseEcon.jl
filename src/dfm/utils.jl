@@ -12,7 +12,7 @@ _num2sub(n::Integer) = n < 0 ? '₋' * _num2sub(-n) :
                        _num2sub(n ÷ 10) * _num2sub(n % 10)
 
 const sup_nums = ('⁰', '¹', '²', '³', '⁴', '⁵', '⁶', '⁷', '⁸', '⁹')
-"""spell a number using supperscript digits e.g., `num2sup(5)` returns "⁵"`"""
+"""spell a number using superscript digits e.g., `num2sup(5)` returns "⁵"`"""
 _num2sup(n::Integer) = n < 0 ? '⁻' * _num2sup(-n) :
                        n < 10 ? sup_nums[n+1] :
                        _num2sup(n ÷ 10) * _num2sup(n % 10)
@@ -43,9 +43,9 @@ _num2sup(n::Integer) = n < 0 ? '⁻' * _num2sup(-n) :
 
 @inline _enumerate_vars(vars) = (; (Symbol(v) => n for (n, v) = enumerate(vars))...)
 
-_do_wrap(::Nothing, AXES...) = nothing
+# _do_wrap(::Nothing, AXES...) = nothing
 _do_wrap(X::AbstractArray, AXES...) = ComponentArray(X, AXES...)
-_do_wrap(X, AXES...) = error("Unable to wrap $(nameof(typeof(X))) in a ComponentArray")
+# _do_wrap(X, AXES...) = error("Unable to wrap $(nameof(typeof(X))) in a ComponentArray")
 
 function _wrap_arrays(bm::DFMBlockOrModel, R, J, point)
     # number of equations (same as number of endogenous variables)
@@ -75,7 +75,7 @@ function _wrap_arrays(bm::DFMBlockOrModel, R, J, point)
     end
 
     CR = _do_wrap(R, A1())
-    CJ = _do_wrap(reshape(J, ne, nt, nv), A1(), A2(), A3())
+    CJ = isnothing(J) ? nothing : _do_wrap(reshape(J, ne, nt, nv), A1(), A2(), A3())
     Cpoint = _do_wrap(point, A2(), A3())
 
     return CR, CJ, Cpoint

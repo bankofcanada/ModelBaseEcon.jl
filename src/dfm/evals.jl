@@ -116,15 +116,14 @@ function _eval_dfm_R!(CR, Cpoint, blk::ObservedBlock{MF}, p::DFMParams) where {M
     CR[vars] = Cpoint[end, vars] - p.mean
     CR[svars] -= Cpoint[end, sshks]
     for (name, fblk) in blk.components
-        # names of factors in this block
-        fnames = endog(fblk)
-        # names of observed vars that are loading the factors in this block
         comprefs = blk.comp2vars[name]
-        onames = comprefs.keys
         Λ = _getloading(name => fblk, comprefs, p)
-        C = mf_coefs(MF)
-        for i = 1:mf_ncoefs(MF)
-            CR[onames] -= C[i] * Λ * Cpoint[end-i+1, fnames]
+        for (r, (x, cref)) in enumerate(comprefs)
+            vv = vars_comp_refs(cref)
+            ll = Λ[r, inds_comp_refs(cref)]
+            @inbounds for i = 1:mf_ncoefs(MF)
+                CR[x] -= mf_coefs(MF, i) * dot(ll , Cpoint[end-i+1, vv])
+            end
         end
     end
     return CR
@@ -142,16 +141,15 @@ function _eval_dfm_RJ!(CR, CJ, Cpoint, blk::ObservedBlock{MF}, p::DFMParams) whe
     CJ[vars, end, vars] = I(nvars)
     CJ[svars, end, sshks] = -I(length(sshks))
     for (name, fblk) in blk.components
-        # names of factors in this block
-        fnames = endog(fblk)
-        # names of observed that are loading the factors in this block
         comprefs = blk.comp2vars[name]
-        onames = comprefs.keys
         Λ = _getloading(name => fblk, comprefs, p)
-        C = mf_coefs(MF)
-        for i = 1:mf_ncoefs(MF)
-            CR[onames] -= C[i] * Λ * Cpoint[end-i+1, fnames]
-            CJ[onames, end-i+1, fnames] = -C[i] * Λ
+        for (r, (x, cref)) in enumerate(comprefs)
+            vv = vars_comp_refs(cref)
+            ll = Λ[r, inds_comp_refs(cref)]
+            @inbounds for i = 1:mf_ncoefs(MF)
+                CR[x] -= mf_coefs(MF, i) * dot(ll , Cpoint[end-i+1, vv])
+                CJ[x, end-i+1, vv] = -mf_coefs(MF, i) * ll
+            end
         end
     end
     return CR, CJ

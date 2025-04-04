@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020-2024, Bank of Canada
+# Copyright (c) 2020-2025, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -18,11 +18,11 @@ function _make_loading(blk::CommonComponents, vars_comprefs::LittleDictVec{Symbo
     return Vector{T}(undef, nnz)
 end
 
-function _make_loading(blk::IdiosyncraticComponents, vars_comprefs::LittleDictVec{Symbol,_BlockComponentRef}, T::Type{<:Real}=Float64)
-    nobserved = length(vars_comprefs)
-    nobserved == blk.size || throw(DimensionMismatch("Size of idiosyncratic components block ($(blk.size)) does not match number of observed variables ($nobserved)."))
-    Vector{T}(undef, nobserved)
-end
+# function _make_loading(blk::IdiosyncraticComponents, vars_comprefs::LittleDictVec{Symbol,_BlockComponentRef}, T::Type{<:Real}=Float64)
+#     nobserved = length(vars_comprefs)
+#     nobserved == blk.size || throw(DimensionMismatch("Size of idiosyncratic components block ($(blk.size)) does not match number of observed variables ($nobserved)."))
+#     Vector{T}(undef, nobserved)
+# end
 
 @inline init_params(any::DFMBlockOrModel, T::Type{<:Real}=Float64) = init_params!(DFMParams{T}(), any)
 
