@@ -10,15 +10,15 @@ export init_params, init_params!
 const DFMParams{T<:Real} = ComponentArray{T}
 # DFMParams(x::DFMParams{T}; kwargs...)::DFMParams{T} where {T} = DFMParams{T}(; x..., kwargs...)
 
-function _make_loading(blk::CommonComponents, vars_comprefs::LittleDictVec{Symbol,_BlockComponentRef}, T::Type{<:Real}=Float64)
-    nobserved = length(vars_comprefs)
-    all(c -> c isa _BlockRef, values(vars_comprefs)) && return Matrix{T}(undef, nobserved, blk.size)
-    nnz = sum(n_comp_refs, values(vars_comprefs))
+function _make_loading(blk::CommonComponents, crefs::NamedList{_BlockComponentRef}, T::Type{<:Real}=Float64)
+    nobserved = length(crefs)
+    all_BlockRef(crefs) && return Matrix{T}(undef, nobserved, blk.size)
+    nnz = sum(n_comp_refs, crefs.vals)
     @assert (0 < nnz < nobserved * blk.size) "Unexpected number of non-zeros in loading."
     return Vector{T}(undef, nnz)
 end
 
-# function _make_loading(blk::IdiosyncraticComponents, vars_comprefs::LittleDictVec{Symbol,_BlockComponentRef}, T::Type{<:Real}=Float64)
+# function _make_loading(blk::IdiosyncraticComponents, vars_comprefs::NamedList{_BlockComponentRef}, T::Type{<:Real}=Float64)
 #     nobserved = length(vars_comprefs)
 #     nobserved == blk.size || throw(DimensionMismatch("Size of idiosyncratic components block ($(blk.size)) does not match number of observed variables ($nobserved)."))
 #     Vector{T}(undef, nobserved)
@@ -76,7 +76,7 @@ get_covariance(::ObservedBlock, p::DFMParams) = Diagonal(p.covar)
 function get_covariance(m::DFMModel, p::DFMParams)
     shks = shocks(m)
     nshks = length(shks)
-    COV = zeros(nshks, nshks)
+    COV = zeros(eltype(p), nshks, nshks)
     AX = Axis{_enumerate_vars(shks)}
     C = ComponentArray(COV, AX(), AX())
     isdiagonal = false

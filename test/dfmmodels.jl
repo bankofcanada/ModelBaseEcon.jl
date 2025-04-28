@@ -40,11 +40,13 @@ using LinearAlgebra
     add_shocks!(dfm, :b)
     @test length(obs.var2shk) == 1 && haskey(obs.var2shk, :b)
     @test_throws ErrorException initialize_dfm!(dfm)
-    @test_throws ErrorException add_shocks!(dfm, :b)
+    # @test_throws ErrorException add_shocks!(dfm, :b)
+    @test_logs (:warn, r".*`b`.*has a shock") add_shocks!(dfm, :b)
 
     empty!(obs.var2shk)
     add_shocks!(dfm, :a, :b)
-    @test_logs (:warn, r".*more than one.*"i) initialize_dfm!(dfm)
+    # @test_logs (:warn, r".*more than one.*"i) initialize_dfm!(dfm)
+    @test_nowarn initialize_dfm!(dfm)
 
     empty!(obs.var2shk)
     add_shocks!(dfm, :a)
@@ -183,7 +185,7 @@ end
     @test get_covariance(C1, params.C1) == Float64[20 22; 22 23]
     @test get_covariance(C2, params.C2) == Float64[36 38; 38 39]
     @test get_covariance(IC, params.IC) == diagm(Float64[42, 43])
-    let
+    begin
         C = [7 0 0 0 0 0 0
             0 20 22 0 0 0 0
             0 22 23 0 0 0 0
@@ -197,6 +199,13 @@ end
         @test get_covariance(dfm, :C1) == [20 22; 22 23]
         @test get_covariance(dfm, :C2) == [36 38; 38 39]
         @test get_covariance(dfm, :IC) == [42 0; 0 43]
+        #
+        Cobs = zeros(3, 3)
+        Cobs[2, 2] = C[1, 1]
+        Csts = zeros(12, 12)
+        Csts[[3, 4, 9, 10, 11, 12], [3, 4, 9, 10, 11, 12]] = C[2:end, 2:end]
+        @test get_covariance(dfm, Val(:Observed)) == Cobs
+        @test get_covariance(dfm, Val(:State)) == Csts
     end
 
     @test DFMModels.get_mean!(zeros(2), O1, params.O1) == Float64[1, 2]
@@ -218,19 +227,16 @@ end
     @test DFMModels.get_loading!(zeros(3, 12), dfm) == [zeros(3, 2) [3 0; 4 5; 9 0] zeros(3, 4) [6 0; 0 0; 10 11] [1 0; 0 0; 0 1]]
     @test DFMModels.get_loading(dfm) == [zeros(3, 2) [3 0; 4 5; 9 0] zeros(3, 4) [6 0; 0 0; 10 11] [1 0; 0 0; 0 1]]
 
-    let
+    begin
         T_C1 = [0 0 1 0; 0 0 0 1; 16 18 12 14; 17 19 13 15]
         T_C2 = [0 0 1 0 0 0; 0 0 0 1 0 0; 0 0 0 0 1 0; 0 0 0 0 0 1; 32 34 28 30 24 26; 33 35 29 31 25 27]
         T_IC = [40 0; 0 41]
+        T_full = [T_C1 zeros(4, 8); zeros(6, 4) T_C2 zeros(6, 2); zeros(2, 10) T_IC]
         @test DFMModels.get_transition!(zeros(4, 4), C1, params.C1) == T_C1
         @test DFMModels.get_transition!(zeros(6, 6), C2, params.C2) == T_C2
         @test DFMModels.get_transition!(zeros(2, 2), IC, params.IC) == T_IC
-        @test DFMModels.get_transition(dfm) == [T_C1 zeros(4, 8); zeros(6, 4) T_C2 zeros(6, 2); zeros(2, 10) T_IC]
+        @test DFMModels.get_transition(dfm) == T_full
     end
-
-
-
-
 
     @test (1 + lags(C1) == 3) && (nvarshks(C1) == 4)
     @test DFMModels.eval_resid(ones(3, 4), C1, params.C1) == [-60; -64]
@@ -289,7 +295,84 @@ end
         end
     end
 
+
+    pp = deepcopy(dfm.params)
+    fill!(dfm.params, NaN)
+
+    DFMModels.set_mean!(dfm, [1, 2, 8])
+    @test DFMModels.get_mean(dfm) == Float64[1, 2, 8]
+
+    DFMModels.set_loading!(dfm, [zeros(3, 2) [3 0; 4 5; 9 0] zeros(3, 4) [6 0; 0 0; 10 11] [1 0; 0 0; 0 1]])
+    @test DFMModels.get_loading(dfm) == Float64[zeros(3, 2) [3 0; 4 5; 9 0] zeros(3, 4) [6 0; 0 0; 10 11] [1 0; 0 0; 0 1]]
+
+    DFMModels.set_transition!(dfm, T_full)
+    @test dfm.params.C1.coefs == reshape(12:19, 2, 2, 2)
+    @test dfm.params.C2.coefs == reshape(24:35, 2, 2, 3)
+    @test dfm.params.IC.coefs == [40; 41;;]
+
+    @test_throws AssertionError DFMModels.set_covariance!(dfm, Csts, Val(:Observed))
+    DFMModels.set_covariance!(dfm, Cobs, Val(:Observed))
+    @test dfm.params.O1.covar == [7]
+    @test dfm.params.O2.covar == []
+
+    @test_throws AssertionError DFMModels.set_covariance!(dfm, Cobs, Val(:State))
+    DFMModels.set_covariance!(dfm, Csts, Val(:State))
+    @test dfm.params.C1.covar == [20 22; 22 23]
+    @test dfm.params.C2.covar == [36 38; 38 39]
+    @test dfm.params.IC.covar == [42, 43]
+
 end
 
 ##
+
+@testset "dfm.3.mq" begin
+
+    # mixed frequency example
+    dfm = DFM(:test_mq)
+
+    add_observed!(dfm,
+        :OM => ObservedBlock(:a, :b, :c),             # monthly observed variables
+        :OQ => ObservedBlock(MixFreq{:MQ}, :y, :z),   # quarterly observed variables
+        :OQ => :k,       # add another quarterly variable to existing block
+    )
+
+    add_components!(dfm,
+        :F => CommonComponents(MixFreq{:MQ}, [:U, :G], order=2),    # factor with two blocks - U and G
+        :CM => IdiosyncraticComponents(),               # auto-correlated noise in monthly variables
+        :CQ => IdiosyncraticComponents(MixFreq{:MQ}),   # auto-correlated noise in quarterly variables
+    )
+
+    map_loadings!(dfm,
+        (:a, :b, :y) => :U,
+        (:c, :z) => :G,
+        :k => :F,
+        :OM => :CM,
+        :OQ => :CQ,
+    )
+
+    add_shocks!(dfm)
+    initialize_dfm!(dfm)
+
+    OM = dfm.model.observed[:OM]
+    OQ = dfm.model.observed[:OQ]
+    F = dfm.model.components[:F]
+    CM = dfm.model.components[:CM]
+    CQ = dfm.model.components[:CQ]
+
+    # make sure the lags are correct according to mixed frequency
+    @test lags(OM) == 0
+    @test lags(OQ) == 4
+    @test lags(F) == 5
+    @test lags(CM) == 1
+    @test lags(CQ) == 5
+
+    params = dfm.params
+    copyto!(params, 1:length(params))
+
+    @test (DFMModels.get_mean(dfm); true)
+    @test (DFMModels.get_loading(dfm); true)
+    @test (DFMModels.get_covariance(dfm); true)
+    @test (DFMModels.get_transition(dfm); true)
+    
+end
 

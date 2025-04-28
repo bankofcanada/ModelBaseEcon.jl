@@ -37,8 +37,8 @@ _num2sup(n::Integer) = n < 0 ? '⁻' * _num2sup(-n) :
 @inline _make_ic_name(name::Sym) = Symbol(name, "_cor")
 
 "name given to the lag of a variable"
-@inline _make_lag_name(name::Sym, lag::Int) = 
-    lag < 0 ? error("Negative lag") : 
+@inline _make_lag_name(name::Sym, lag::Int) =
+    lag < 0 ? error("Negative lag") :
     lag == 0 ? Symbol(name) : Symbol(name, "ₜ₋", _num2sub(lag))
 
 @inline _enumerate_vars(vars) = (; (Symbol(v) => n for (n, v) = enumerate(vars))...)
@@ -84,4 +84,8 @@ end
 @inline ComponentArrays.toval(v::ModelVariable) = ComponentArrays.toval(Symbol(v))
 @inline ComponentArrays.toval(tv::NTuple{N,ModelVariable}) where {N} = ComponentArrays.toval(Symbol[t fot t in tv])
 @inline ComponentArrays.toval(av::AbstractArray{<:ModelVariable}) = ComponentArrays.toval(Symbol[a for a in av])
+
+"Check if the reference includes the entire block (`true`) or only some components in it (`false`)"
+isa_BlockRef(x) = x isa _BlockRef
+all_BlockRef(x::NamedList) = all(isa_BlockRef, x.vals)
 

@@ -19,43 +19,46 @@ end
 
 @inline function _getloading!(Λ::AbstractMatrix, ::Pair{Symbol,<:IdiosyncraticComponents}, crefs::NamedList{_BlockComponentRef}, ::DFMParams)
     # all loadings to idiosyncratic components are 1.0 or 0.0 and they are not stored in the parameters vector
-    for (row, cref) in enumerate(values(crefs))
-        cols = inds_comp_refs(cref)
-        isempty(cols) && continue
-        @assert(length(cols) == 1)
-        Λ[row, cols[1]] = 1.0
+    for (row, cr) in enumerate(values(crefs))
+        nvals = n_comp_refs(cr)
+        nvals == 0 && continue
+        @assert(nvals == 1)
+        Λ[row, inds_comp_refs(cr)[1]] = 1.0
     end
     return Λ
 end
 
 function _getloading!(Λ::AbstractMatrix, (nm, b)::Pair{Symbol,<:ComponentsBlock}, crefs::NamedList{_BlockComponentRef}, p::DFMParams)
     pvals = getproperty(p.loadings, nm)
-    if all(c -> isa(c, _BlockRef), values(crefs))
+    if all_BlockRef(crefs)
         Λ[:, :] = pvals
         return Λ
     end
     idx_p = 0
     for (i, cr) in enumerate(values(crefs))
         nvals = n_comp_refs(cr)
-        nvals == 0 && continue
-        Λ[i, inds_comp_refs(cr)] = pvals[idx_p.+(1:nvals)]
-        idx_p = idx_p + nvals
+        if nvals > 0
+            Λ[i, inds_comp_refs(cr)] = pvals[idx_p.+(1:nvals)]
+            idx_p = idx_p + nvals
+        end
     end
     return Λ
 end
 
-_setloading!(::Pair{Symbol,<:IdiosyncraticComponents}, var_comprefs::NamedList{_BlockComponentRef}, ::DFMParams, val) = nothing
-function _setloading!((name, _)::Pair{Symbol,<:ComponentsBlock}, var_comprefs::NamedList{_BlockComponentRef}, p::DFMParams, val)
+_setloading!(::Pair{Symbol,<:IdiosyncraticComponents}, crefs::NamedList{_BlockComponentRef}, ::DFMParams, val) = nothing
+function _setloading!((name, _)::Pair{Symbol,<:ComponentsBlock}, crefs::NamedList{_BlockComponentRef}, p::DFMParams, val)
     pl = p.loadings
-    if all(c -> c isa _BlockRef, values(var_comprefs))
+    if all_BlockRef(crefs)
         setproperty!(pl, name, val)
     end
     pvals = getproperty(pl, name)
     idx_p = 0
-    for (i, cr) in enumerate(values(var_comprefs))
+    for (i, cr) in enumerate(values(crefs))
         nvals = n_comp_refs(cr)
-        pvals[idx_p.+(1:nvals)] = val[i, inds_comp_refs(cr)]
-        idx_p = idx_p + nvals
+        if nvals > 0
+            pvals[idx_p.+(1:nvals)] = val[i, inds_comp_refs(cr)]
+            idx_p = idx_p + nvals
+        end
     end
     return nothing
 end
@@ -122,7 +125,7 @@ function _eval_dfm_R!(CR, Cpoint, blk::ObservedBlock{MF}, p::DFMParams) where {M
             vv = vars_comp_refs(cref)
             ll = Λ[r, inds_comp_refs(cref)]
             @inbounds for i = 1:mf_ncoefs(MF)
-                CR[x] -= mf_coefs(MF, i) * dot(ll , Cpoint[end-i+1, vv])
+                CR[x] -= mf_coefs(MF, i) * dot(ll, Cpoint[end-i+1, vv])
             end
         end
     end
@@ -147,7 +150,7 @@ function _eval_dfm_RJ!(CR, CJ, Cpoint, blk::ObservedBlock{MF}, p::DFMParams) whe
             vv = vars_comp_refs(cref)
             ll = Λ[r, inds_comp_refs(cref)]
             @inbounds for i = 1:mf_ncoefs(MF)
-                CR[x] -= mf_coefs(MF, i) * dot(ll , Cpoint[end-i+1, vv])
+                CR[x] -= mf_coefs(MF, i) * dot(ll, Cpoint[end-i+1, vv])
                 CJ[x, end-i+1, vv] = -mf_coefs(MF, i) * ll
             end
         end
@@ -391,6 +394,8 @@ function set_transition!(P::DFMParams, bm::ComponentsBlock, A::AbstractMatrix)
 end
 
 function set_covariance!(P::DFMParams, M::DFMModel, A::AbstractMatrix, ::Val{:Observed})
+    nobs = nobserved(M)
+    @assert size(A) == (nobs, nobs) "Incorrect Covariance Matrix Dimensions"
     yinds = _enumerate_vars(observed(M))
     for (on, ob) in M.observed
         shk_inds = Int[yinds[v] for v in keys(ob.var2shk)]
@@ -400,6 +405,8 @@ function set_covariance!(P::DFMParams, M::DFMModel, A::AbstractMatrix, ::Val{:Ob
 end
 
 function set_covariance!(P::DFMParams, M::DFMModel, A::AbstractMatrix, ::Val{:State})
+    nsts = nstates_with_lags(M)
+    @assert size(A) == (nsts, nsts) "Incorrect Covariance Matrix Dimensions"
     offset = 0
     for (bname, blk) in M.components
         L = lags(blk)
