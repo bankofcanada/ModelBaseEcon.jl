@@ -283,6 +283,7 @@ function get_mean!(mu::AbstractVector, ::ObservedBlock, bpar::DFMParams)
     return mu
 end
 
+get_mean(M::DFMModel, P::DFMParams) = get_mean!(Vector{eltype(P)}(undef, nobserved(M)), M, P)
 function get_mean!(mu::AbstractVector, M::DFMModel, P::DFMParams)
     nm_obs = M.observed
     if length(nm_obs) == 1

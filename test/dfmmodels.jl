@@ -9,14 +9,97 @@ using Test
 using ModelBaseEcon
 using ModelBaseEcon.DFMModels
 using LinearAlgebra
+using SparseArrays
+
+##
+
+@testset "dfm.internals" begin
+    @test_throws r"Number of names .* must match factor size .*\."i DFMModels.ComponentsBlock{:Dense,DFMModels.MixFreq{:MQ}}(["A", "B"], 3, 1, 1)
+
+    # we can change the default, but `:observed` is already hardcoded in too many places...
+    @test DFMModels._default_ObservedBlock_name == :observed
+
+    # empty _BlockRef() refers to all components, but doesn't store the names, so anything goes
+    R = DFMModels._BlockRef()
+    @test DFMModels.comp_ref(R) == R
+    @test DFMModels.comp_ref(R, Val(:A)) == R
+    @test_throws "Cannot determine" DFMModels.n_comp_refs(R)
+    @test_throws "Cannot determine" DFMModels.inds_comp_refs(R)
+    @test_throws "Cannot determine" DFMModels.vars_comp_refs(R)
+
+    # non-empty _BlockRef() must not refer to invalid names
+    R1 = DFMModels._BlockRef((:B,))
+    @test_throws r".* is not a component." DFMModels.comp_ref(R1, Val(:A))
+
+    # 
+    @test DFMModels.mf_ncoefs(ObservedBlock()) == 1
+    @test DFMModels.mf_coefs(ObservedBlock()) == (1,)
+
+end
+
+##
+
+@testset "dfm.0" begin
+
+
+
+    dfm = DFMModel(:simple)
+    add_observed!(dfm, :x)
+    add_components!(dfm, :factors => CommonComponents("F"))
+    map_loadings!(dfm, :observed => :F)
+    add_shocks!(dfm, :observed)
+
+    @test keys(dfm.observed) == Set([:observed])
+    @test dfm.observed[:observed].vars == []
+    @test dfm.observed[:observed].shks == []
+    @test dfm.observed[:observed].size == 0
+    @test keys(dfm.observed[:observed].components) == Set([:factors])
+    @test keys(dfm.observed[:observed].var2comps) == Set([:x])
+    @test keys(dfm.observed[:observed].var2shk) == Set([:x])
+    @test keys(dfm.observed[:observed].comp2vars) == Set()
+
+    @test keys(dfm.components) == Set([:factors])
+    @test dfm.components[:factors].vars == [:F]
+    @test dfm.components[:factors].shks == [:F_shk]
+    @test dfm.components[:factors].size == 1
+    @test dfm.components[:factors].order == 1
+    @test dfm.components[:factors].nlags == 1
+
+    initialize_dfm!(dfm)
+
+    @test keys(dfm.observed) == Set([:observed])
+    @test dfm.observed[:observed].vars == [:x]
+    @test dfm.observed[:observed].shks == [:x_shk]
+    @test dfm.observed[:observed].size == 1
+    @test keys(dfm.observed[:observed].components) == Set([:factors])
+    @test keys(dfm.observed[:observed].var2comps) == Set([:x])
+    @test keys(dfm.observed[:observed].var2shk) == Set([:x])
+    @test keys(dfm.observed[:observed].comp2vars) == Set([:factors])
+
+    @test keys(dfm.components) == Set([:factors])
+    @test dfm.components[:factors].vars == [:F]
+    @test dfm.components[:factors].shks == [:F_shk]
+    @test dfm.components[:factors].size == 1
+    @test dfm.components[:factors].order == 1
+    @test dfm.components[:factors].nlags == 1
+
+    params = init_params(dfm)
+    params .= 1:length(params)
+
+    @test DFMModels.get_mean(dfm, params) == [1]
+    @test (DFMModels.set_mean!(params, dfm, [200]); params.observed.mean[:] == [200])
+
+end
+
+## 
 
 @testset "dfm.1" begin
 
     dfm = DFMModel(:test)
     @test dfm isa DFMModel
 
-    @test_throws ErrorException DFMModels.check_dfm(dfm)
-    @test_throws ErrorException initialize_dfm!(dfm)
+    @test_throws "Model must be initialized" DFMModels.check_dfm(dfm)
+    @test_throws "Model does not have any observed variables" initialize_dfm!(dfm)
 
     add_components!(dfm, F=CommonComponents("F"), IC=IdiosyncraticComponents())
     @test length(dfm.components) == 2 && keys(dfm.components) == Set((:F, :IC))
@@ -27,7 +110,13 @@ using LinearAlgebra
     add_observed!(dfm, q=(:x, :y, :z))
     @test length(dfm.observed) == 2 && haskey(dfm.observed, :q)
 
-    @test_throws ErrorException add_observed!(dfm, (:w, :h))
+    @test_throws "block must be explicitly given" add_observed!(dfm, (:w, :h))
+    @test_throws r"Variable .* not found" add_shocks!(dfm, (:w, :h))
+
+    empty!(dfm.observed)
+    @test isempty(dfm.observed)
+    add_shocks!(dfm, :a, :b, :c)
+    @test length(dfm.observed) == 1 && haskey(dfm.observed, :observed)
 
     empty!(dfm.observed)
     add_observed!(dfm, (:a, :b, :c))
@@ -35,7 +124,7 @@ using LinearAlgebra
 
     map_loadings!(dfm, (:a, :b) => :F, (:b, :c) => :IC)
     @test length(obs.var2comps) == 3 && keys(obs.var2comps) == Set((:a, :b, :c))
-    @test_throws ErrorException initialize_dfm!(dfm)
+    @test_throws "neither a shock nor an idiosyncratic" initialize_dfm!(dfm)
 
     add_shocks!(dfm, :b)
     @test length(obs.var2shk) == 1 && haskey(obs.var2shk, :b)
@@ -73,8 +162,26 @@ using LinearAlgebra
     @test all(isempty.(states.(values(dfm.observed))))
     @test all(nstates.(values(dfm.observed)) .== 0)
 
+    @test (map_loadings!(dfm, (:observed) => :F); true)
+
+    add_observed!(dfm, :obs2 => (:a,))
+    @test_throws r"duplicate variable"i initialize_dfm!(dfm)
+
+    delete!(dfm.observed, :obs2)
     add_observed!(dfm, :z)
-    @test_throws ErrorException initialize_dfm!(dfm)
+    @test_throws "does not load any component and does not have a shock" initialize_dfm!(dfm)
+
+    dfm = DFMModel(:test)
+    add_components!(dfm, IC=IdiosyncraticComponents())
+    # test that we can add observed variables without explicitly creating any ObservedBlock
+    @test (map_loadings!(dfm, :a => :IC); true)
+    # test that we can map the entire default observed block when it is the only one
+    @test (map_loadings!(dfm, (:observed,) => :IC); true)
+    # test that we can map an entire observed block when there's more than one
+    add_observed!(dfm, obs2=(:b))
+    @test (map_loadings!(dfm, (:obs2,) => :IC); true)
+    @test_throws r"variables not assigned to an observed block"i map_loadings!(dfm, :c => :IC)
+    #  initialize_dfm!(dfm)
 
 end
 
@@ -176,6 +283,17 @@ end
 
     @test states_with_lags(dfm) == [:A¹ₜ₋₁, :A²ₜ₋₁, :A¹, :A², :Uₜ₋₂, :Vₜ₋₂, :Uₜ₋₁, :Vₜ₋₁, :U, :V, :x_cor, :z_cor]
     @test nstates_with_lags(dfm) == 12
+
+    @test exog(dfm) == []
+    @test nexog(dfm) == 0
+    @test observed(dfm) == [:x, :y, :z]
+    @test nobserved(dfm) == 3
+    @test states(dfm) == [:A¹, :A², :U, :V, :x_cor, :z_cor]
+    @test nstates(dfm) == 2 + 2 + 2
+    @test states_with_lags(dfm) == [:A¹ₜ₋₁, :A²ₜ₋₁, :A¹, :A², :Uₜ₋₂, :Vₜ₋₂, :Uₜ₋₁, :Vₜ₋₁, :U, :V, :x_cor, :z_cor]
+    @test nstates_with_lags(dfm) == 2 * 2 + 3 * 2 + 2
+    @test leads(dfm) == 0
+    @test lags(dfm) == 3
 
     params = dfm.params
     copyto!(params, 1:length(params))
@@ -293,6 +411,11 @@ end
             R, J = DFMModels.eval_RJ(ones(4, 16), dfm)
             (R == CR) && (J == CJ)
         end
+        @test DFMModels.eval_R!(similar(CR), ones(4, 16), dfm) == CR
+        @test begin
+            R, J = DFMModels.eval_RJ!(similar(CR), similar(CJ), ones(4, 16), dfm)
+            (R == CR) && (J == CJ)
+        end
     end
 
 
@@ -320,6 +443,23 @@ end
     @test dfm.params.C1.covar == [20 22; 22 23]
     @test dfm.params.C2.covar == [36 38; 38 39]
     @test dfm.params.IC.covar == [42, 43]
+
+
+    params = dfm.params
+    params .= NaN
+    params.O1.loadings.C1[2] = 1.1
+    Λ = DFMModels.get_loading!(zeros(2, 12), O1, params.O1)
+    lc = DFMModels.loading_constraint(Λ, O1)
+    @test lc.blk === O1
+    @test findall(lc.estimcols) == [3, 4, 11, 12]
+    @test all(lc.estimcols .!= lc.fixedcols)
+    @test length(lc.estimblocks) == 2 && haskey(lc.estimblocks, :C1) && haskey(lc.estimblocks, :C2)
+    lc1 = lc.estimblocks[:C1]
+    @test size(lc1.W) == (2, 4) && lc1.W == [0 1 0 0; 0 0 1 0]
+    @test size(lc1.q) == (2,) && lc1.q == [1.1, 0]
+    lc1 = lc.estimblocks[:C2]
+    @test size(lc1.W) == (3, 4) && lc1.W == [[0; 0; 0] I]
+    @test size(lc1.q) == (3,) && all(iszero, lc1.q)
 
 end
 
@@ -353,6 +493,17 @@ end
     add_shocks!(dfm)
     initialize_dfm!(dfm)
 
+    @test observed(dfm) == [:a, :b, :c, :y, :z, :k]
+    @test nobserved(dfm) == 6
+    @test states(dfm) == [:U, :G, :a_cor, :b_cor, :c_cor, :y_cor, :z_cor, :k_cor]
+    @test nstates(dfm) == 8  # 2 + 3 + 3
+    @test states_with_lags(dfm) == [:Uₜ₋₄, :Gₜ₋₄, :Uₜ₋₃, :Gₜ₋₃, :Uₜ₋₂, :Gₜ₋₂, :Uₜ₋₁, :Gₜ₋₁, :U, :G, :a_cor, :b_cor, :c_cor, :y_corₜ₋₄, :z_corₜ₋₄, :k_corₜ₋₄, :y_corₜ₋₃, :z_corₜ₋₃, :k_corₜ₋₃, :y_corₜ₋₂, :z_corₜ₋₂, :k_corₜ₋₂, :y_corₜ₋₁, :z_corₜ₋₁, :k_corₜ₋₁, :y_cor, :z_cor, :k_cor]
+    @test nstates_with_lags(dfm) == 28  # 2*5 + 3 + 3*5
+    @test shocks(dfm) == [:a_shk, :b_shk, :c_shk, :y_shk, :z_shk, :k_shk, :U_shk, :G_shk, :a_cor_shk, :b_cor_shk, :c_cor_shk, :y_cor_shk, :z_cor_shk, :k_cor_shk]
+    @test nshocks(dfm) == 14
+    @test exog(dfm) == []
+    @test nexog(dfm) == 0
+
     OM = dfm.model.observed[:OM]
     OQ = dfm.model.observed[:OQ]
     F = dfm.model.components[:F]
@@ -365,14 +516,53 @@ end
     @test lags(F) == 5
     @test lags(CM) == 1
     @test lags(CQ) == 5
+    @test leads(OM) == 0
+    @test leads(OQ) == 0
+    @test leads(F) == 0
+    @test leads(CM) == 0
+    @test leads(CQ) == 0
 
     params = dfm.params
     copyto!(params, 1:length(params))
 
-    @test (DFMModels.get_mean(dfm); true)
-    @test (DFMModels.get_loading(dfm); true)
-    @test (DFMModels.get_covariance(dfm); true)
-    @test (DFMModels.get_transition(dfm); true)
-    
+    @test DFMModels.get_mean(dfm) == [1, 2, 3, 10, 11, 12]
+    T2 = [4 0; 5 0; 0 6]
+    @test DFMModels.get_loading!(zeros(3, 13), OM, params.OM) == [zeros(3, 8) T2 I]
+    T1 = [13 0; 0 14; 15 16]
+    @test DFMModels.get_loading!(zeros(3, 25), OQ, params.OQ) == [T1 2T1 3T1 2T1 T1 I 2I 3I 2I I]
+    @test DFMModels.get_loading(dfm) == [zeros(3, 8) T2 I zeros(3, 15); T1 2T1 3T1 2T1 T1 zeros(3, 3) I 2I 3I 2I I]
+    @test DFMModels.get_covariance(dfm) == [Diagonal([7, 8, 9]) zeros(3, 11); 0I Diagonal([17, 18, 19]) zeros(3, 8); zeros(2, 6) [28 30; 30 31] zeros(2, 6); zeros(6, 8) Diagonal([35, 36, 37, 41, 42, 43])]
+
+    T3 = spzeros(28, 28)
+    T3[1:8, 3:10] = I(8)
+    T3[9:10, 7:10] = [24 26 20 22; 25 27 21 23]
+    T3[11:13, 11:13] = Diagonal([32, 33, 34])
+    T3[14:25, 17:28] = I(12)
+    T3[26:28, 26:28] = Diagonal([38, 39, 40])
+    DFMModels.get_transition(dfm)
+    @test DFMModels.get_transition(dfm) == T3
+
+
+    params .= NaN
+    Λ = DFMModels.get_loading!(zeros(3, 13), OM, params.OM)
+    lc = DFMModels.loading_constraint(Λ, OM)
+    @test lc.blk === OM
+    @test findall(lc.estimcols) == [9, 10]
+    @test all(lc.estimcols .!= lc.fixedcols)
+    @test length(lc.estimblocks) == 1 && haskey(lc.estimblocks, :F)
+    lc1 = lc.estimblocks[:F]
+    @test size(lc1.W) == (3, 6) && lc1.W == [0 0 1 0 0 0; 0 0 0 1 0 0; 0 0 0 0 1 0]
+    @test size(lc1.q) == (3,) && all(iszero, lc1.q)
+
+    Λ = DFMModels.get_loading!(zeros(3, 25), OQ, params.OQ)
+    lc = DFMModels.loading_constraint(Λ, OQ)
+    @test lc.blk === OQ
+    @test findall(lc.estimcols) == 1:10
+    @test all(lc.estimcols .!= lc.fixedcols)
+    @test length(lc.estimblocks) == 1 && haskey(lc.estimblocks, :F)
+    lc1 = lc.estimblocks[:F]
+    @test size(lc1.W) == (26, 30) && lc1.W == [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1 0 0 0 0 0 2 0 0 0 0 0; 0 0 0 0 0 0 0 0 0 0 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 3 0 0 0 0 0; 0 0 0 0 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2 0 0 0 0 0; -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0; 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0; 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1 0 0 0 0 0 2 0 0 0 0; 0 0 0 0 0 0 0 0 0 0 0 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 3 0 0 0 0; 0 0 0 0 0 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2 0 0 0 0; 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0; 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1 0 0 0 0 0 2 0 0 0; 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 3 0 0 0; 0 0 0 0 0 0 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2 0 0 0; 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0; 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0; 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1 0 0 0 0 0 2 0 0; 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 3 0 0; 0 0 0 0 0 0 0 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2 0 0; 0 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0; 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1 0 0 0 0 0 2 0; 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 3 0; 0 0 0 0 0 0 0 0 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2 0; 0 0 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0; 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1 0 0 0 0 0 2; 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 3; 0 0 0 0 0 0 0 0 0 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2; 0 0 0 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1]
+    @test size(lc1.q) == (26,) && all(iszero, lc1.q)
+
 end
 

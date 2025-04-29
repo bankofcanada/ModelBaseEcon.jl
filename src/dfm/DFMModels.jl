@@ -282,7 +282,7 @@ A specific [`_BlockComponentRef`](@ref) type indicating that all names in the
 latent block are being referenced.
 """
 struct _BlockRef{N,NAMES} <: _BlockComponentRef{true,N,NAMES}
-    function _BlockRef(names::SymVec)
+    function _BlockRef(names::SymVec=())
         N = length(names)
         NAMES = ((Symbol(n) for n in names)...,)
         return new{N,NAMES}()
@@ -338,7 +338,8 @@ comp_ref(b::CommonComponents) = _BlockRef(b.vars)
 # ... or add a component to the reference list
 comp_ref(b::CommonComponents, comp::Sym) = comp_ref(_CompRef(b.vars), Val(Symbol(comp)))
 
-# ???
+# ?? is this needed? 
+# method to convert any reference to a reference to the entire block
 comp_ref(::_BlockComponentRef{ALL,N,NAMES}) where {ALL,N,NAMES} = _BlockRef(NAMES)
 
 # method to add a component to an existing reference
@@ -506,8 +507,8 @@ _comp_exog(crefs) = unique!(mapreduce(vars_comp_refs, append!, values(crefs), in
 exog(b::ObservedBlock) = mapfoldl(_comp_exog, append!, values(b.comp2vars), init=ModelVariable[])
 nexog(b::ObservedBlock) = sum(length ∘ _comp_exog, values(b.comp2vars))
 
-@inline allvars(bm::DFMBlockOrModel) = varshks(bm)
-@inline nallvars(bm::DFMBlockOrModel) = nvarshks(bm)
+# @inline allvars(bm::DFMBlockOrModel) = varshks(bm)
+# @inline nallvars(bm::DFMBlockOrModel) = nvarshks(bm)
 
 endog(m::DFMModel) = [observed(m); states(m)]
 nendog(m::DFMModel) = nobserved(m) + nstates(m)
@@ -818,10 +819,9 @@ end
 
 # methods that allow multiple arguments, yet they are processed one at a time
 add_shocks!(b::Union{DFMModel,ObservedBlock}, args...) = _add_shocks_loop!(b, args)
-add_shocks!(b::Union{DFMModel,ObservedBlock}, args::AbstractVector) = _add_shocks_loop!(b, args)
+add_shocks!(b::Union{DFMModel,ObservedBlock}, args::SymVec) = _add_shocks_loop!(b, args)
+# add_shocks!(b::Union{DFMModel,ObservedBlock}, args::AbstractVector) = _add_shocks_loop!(b, args)
 
-# method where only the variable name is given and its shock name is made up by default
-add_shocks!(b::Union{DFMModel,ObservedBlock}, var::Sym) = add_shocks!(b, var => _make_shock(var))
 
 ##### methods that add a shock directly to an ObservedBlock
 
@@ -829,6 +829,9 @@ add_shocks!(b::Union{DFMModel,ObservedBlock}, var::Sym) = add_shocks!(b, var => 
 # names to all variables in the block that are already mapped to latent
 # components.
 add_shocks!(b::ObservedBlock) = _add_shocks_loop!(b, b.var2comps.keys)
+
+# method where only the variable name is given and its shock name is made up by default
+add_shocks!(b::ObservedBlock, var::Sym) = add_shocks!(b, var => _make_shock(var))
 
 # method where the variable and its shock name are explicitly given
 function add_shocks!(b::ObservedBlock, varshk::Pair{<:Sym,<:Sym})
@@ -844,6 +847,17 @@ function add_shocks!(b::ObservedBlock, varshk::Pair{<:Sym,<:Sym})
 end
 
 ##### methods that add a shock to a model, that is, we have to find the relevant ObservedBlock 
+
+# method where only the variable name is given and its shock name is made up by default
+function add_shocks!(m::DFMModel, var::Sym) 
+    obs = m.observed
+    svar = Symbol(var)
+    if haskey(obs, svar)
+        add_shocks!(obs[svar])
+    else
+        add_shocks!(m, svar => _make_shock(var))
+    end
+end
 
 # method where no variables are given, therefore we add shocks to all observed variable 
 # in all observed blocks.
