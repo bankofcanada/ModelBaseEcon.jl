@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020-2024, Bank of Canada
+# Copyright (c) 2020-2025, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -13,7 +13,7 @@ import ModelBaseEcon.update
 
 ## #=
 
-@testset "Tranformations" begin
+@testset "Transformations" begin
     @test_throws ErrorException transformation(Transformation)
     @test_throws ErrorException inverse_transformation(Transformation)
     let m = Model()
