@@ -95,12 +95,12 @@ export lags, leads, order
 
 ####################################################
 
-"""Abstract type for all DFM blocks"""
-abstract type DFMBlock end
-
 """Abstract type for types providing concrete values for the `MIXEDFREQ`
 type-parameter of [`ComponentsBlock`](@ref)"""
 abstract type MixedFrequency end
+
+"""Abstract type for all DFM blocks"""
+abstract type DFMBlock{MF<:MixedFrequency} end
 
 """
     ComponentsBlock{TYPE,MIXEDFREQ} <: DFMBlock
@@ -115,7 +115,7 @@ See also [`CommonComponents`](@ref), [`IdiosyncraticComponents`](@ref) and
 `MIXEDFREQ<:MixedFrequency` specifies if some, or all, variables in the
 block run at a lower frequency than the rest of the DFM model.
 """
-mutable struct ComponentsBlock{TYPE,MF<:MixedFrequency} <: DFMBlock
+mutable struct ComponentsBlock{TYPE,MF<:MixedFrequency} <: DFMBlock{MF}
     vars::Vector{ModelVariable}
     shks::Vector{ModelVariable}
     size::Int
@@ -150,6 +150,9 @@ end
 Indicates that all variables in the given block run at the DFM's highest frequency.
 """
 struct NoMixFreq <: MixedFrequency end
+
+ismixfreq(cb::DFMBlock{M}) where {M} = M != NoMixFreq
+export ismixfreq
 
 """
     struct MixFreq{WHICH} <: MixedFrequency
@@ -396,7 +399,7 @@ Base.show(io::IO, ::MIME"text/plain", c::_NoCompRef{N,NAMES}) where {N,NAMES} = 
 A struct representing the observed variables in a DFM model.
 See also [`ComponentBlock`](@ref).
 """
-mutable struct ObservedBlock{MF<:MixedFrequency} <: DFMBlock
+mutable struct ObservedBlock{MF<:MixedFrequency} <: DFMBlock{MF}
     vars::Vector{ModelVariable}
     shks::Vector{ModelVariable}
     size::Int
@@ -1123,6 +1126,6 @@ set_transition!(dfm::DFM, T::AbstractMatrix) = set_transition!(dfm.params, dfm.m
 export states_with_lags, nstates_with_lags
 
 include("constraints.jl")
-
+include("show.jl")
 end
 
