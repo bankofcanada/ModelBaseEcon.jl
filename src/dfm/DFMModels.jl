@@ -19,6 +19,7 @@ import ..eval_R!
 # import ..eval_RJ!
 
 import ..to_shock
+import ..isshock
 
 import ..AbstractModel
 
@@ -904,7 +905,9 @@ function _init_observed_pass1!(b::ObservedBlock)
     unique!(b.vars)
     b.size = length(b.vars)
     empty!(b.shks)
-    append!(b.shks, values(b.var2shk))
+    for shk in values(b.var2shk)
+        push!(b.shks, to_shock(shk))
+    end
     # add idiosyncratic components referenced in this observed block to
     # their idiosyncratic block
     for (ic_name, ic_blk) in b.components
@@ -972,6 +975,8 @@ function check_dfm(m::DFMModel)
         error("Model does not have any observed variables.")
     end
     for (onm, oblk) in pairs(m.observed)
+        # check that shocks are shocks
+        all(isshock, oblk.shks) || error("Not all shocks are shocks in $onm")
         # check for duplicate variables (in previous blocks only)
         for (onm1, oblk1) in pairs(m.observed)
             onm1 == onm && break
@@ -1002,6 +1007,10 @@ function check_dfm(m::DFMModel)
                 end
             end
         end
+    end
+    for (cnm, cblk) in pairs(m.components)
+        # check that shocks are shocks
+        all(isshock, cblk.shks) || error("Not all shocks are shocks in $cnm")
     end
     # make sure there are no duplicate variables (this is an internal check)
     varshks(m) == unique(varshks(m)) || error("Duplicate variables or shocks")

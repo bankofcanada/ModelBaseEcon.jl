@@ -147,6 +147,7 @@ end
     @test states(dfm) == [:F, :b_cor, :c_cor]
     @test nstates(dfm) == 3
     @test shocks(dfm) == [:a_shk, :F_shk, :b_cor_shk, :c_cor_shk]
+    @test all(isshock, shocks(dfm))
     @test nshocks(dfm) == 4
     @test varshks(dfm) == [:a, :b, :c, :F, :b_cor, :c_cor, :a_shk, :F_shk, :b_cor_shk, :c_cor_shk]
     @test nvarshks(dfm) == 10
@@ -221,6 +222,7 @@ end
     @test exog(C1) == []
     @test nexog(C1) == 0
     @test shocks(C1) == [:A¹_shk, :A²_shk]
+    @test all(isshock, shocks(C1))
     @test nshocks(C1) == 2
     @test varshks(C1) == [:A¹, :A², :A¹_shk, :A²_shk]
     @test nvarshks(C1) == 4
@@ -232,6 +234,7 @@ end
     @test exog(C2) == []
     @test nexog(C2) == 0
     @test shocks(C2) == [:U_shk, :V_shk]
+    @test all(isshock, shocks(C2))
     @test nshocks(C2) == 2
     @test varshks(C2) == [:U, :V, :U_shk, :V_shk]
     @test nvarshks(C2) == 4
@@ -243,6 +246,7 @@ end
     @test exog(IC) == []
     @test nexog(IC) == 0
     @test shocks(IC) == [:x_cor_shk, :z_cor_shk]
+    @test all(isshock, shocks(IC))
     @test nshocks(IC) == 2
     @test varshks(IC) == [:x_cor, :z_cor, :x_cor_shk, :z_cor_shk]
     @test nvarshks(IC) == 4
@@ -254,6 +258,7 @@ end
     @test exog(O1) == [:A¹, :A², :x_cor, :U]
     @test nexog(O1) == 4
     @test shocks(O1) == [:y_shk]
+    @test all(isshock, shocks(O1))
     @test nshocks(O1) == 1
     @test varshks(O1) == [:x, :y, :A¹, :A², :x_cor, :U, :y_shk]
     @test nvarshks(O1) == 7
@@ -264,6 +269,7 @@ end
     @test exog(O2) == [:A¹, :z_cor, :U, :V]
     @test nexog(O2) == 4
     @test shocks(O2) == []
+    @test all(isshock, shocks(O2))
     @test nshocks(O2) == 0
     @test varshks(O2) == [:z, :A¹, :z_cor, :U, :V]
     @test nvarshks(O2) == 5
@@ -501,6 +507,7 @@ end
     @test nstates_with_lags(dfm) == 28  # 2*5 + 3 + 3*5
     @test shocks(dfm) == [:a_shk, :b_shk, :c_shk, :y_shk, :z_shk, :k_shk, :U_shk, :G_shk, :a_cor_shk, :b_cor_shk, :c_cor_shk, :y_cor_shk, :z_cor_shk, :k_cor_shk]
     @test nshocks(dfm) == 14
+    @test all(isshock, shocks(dfm))
     @test exog(dfm) == []
     @test nexog(dfm) == 0
 
