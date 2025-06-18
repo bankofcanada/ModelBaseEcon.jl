@@ -1055,11 +1055,11 @@ include("evals.jl")
 ################################################################################
 
 export DFM
-mutable struct DFM <: AbstractModel
+mutable struct DFM{T} <: AbstractModel
     model::DFMModel
-    params::DFMParams
+    params::DFMParams{T}
 end
-DFM(name::Sym=:dfm, T::Type{<:Real}=Float64) = DFM(DFMModel(name), DFMParams{T}())
+DFM(name::Sym=:dfm, T::Type{<:Real}=Float64) = DFM{T}(DFMModel(name), DFMParams{T}())
 
 eval_resid(point::AbstractMatrix, dfm::DFM) = eval_resid(point, dfm.model, dfm.params)
 eval_RJ(point::AbstractMatrix, dfm::DFM) = eval_RJ(point, dfm.model, dfm.params)
