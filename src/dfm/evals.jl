@@ -220,6 +220,7 @@ function get_transition!(A::AbstractMatrix, bm::ComponentsBlock, params::DFMPara
     return A
 end
 
+get_transition(M::DFMModel, P::DFMParams) = get_transition!(Matrix{eltype(P)}(undef, nstates_with_lags(M), nstates_with_lags(M)), M, P)
 function get_transition!(A::AbstractMatrix, M::DFMModel, params::DFMParams)
     fill!(A, 0)
     offset = 0
@@ -263,6 +264,7 @@ function get_loading!(A::AbstractMatrix, ob::ObservedBlock, par::DFMParams)
     return A
 end
 
+get_loading(M::DFMModel, P::DFMParams) = get_loading!(Matrix{eltype(P)}(undef, nobserved(M), nstates_with_lags(M)), M::DFMModel, P::DFMParams)
 function get_loading!(A::AbstractMatrix, M::DFMModel, P::DFMParams)
     fill!(A, 0)
     yinds = _enumerate_vars(observed(M))
@@ -298,6 +300,11 @@ function get_mean!(mu::AbstractVector, M::DFMModel, P::DFMParams)
     return mu
 end
 
+function get_covariance(M::DFMModel, P::DFMParams, V::Val{:Observed})
+    nobs = nobserved(M)
+    A = Matrix{eltype(P)}(undef, nobs, nobs)
+    get_covariance!(A, M, P, V)
+end
 function get_covariance!(A::AbstractMatrix, M::DFMModel, P::DFMParams, ::Val{:Observed})
     fill!(A, 0)
     yinds = _enumerate_vars(observed(M))
@@ -308,6 +315,13 @@ function get_covariance!(A::AbstractMatrix, M::DFMModel, P::DFMParams, ::Val{:Ob
     return A
 end
 
+
+
+function get_covariance(M::DFMModel, P::DFMParams, V::Val{:State})
+    nsts = nstates_with_lags(M)
+    A = Matrix{eltype(P)}(undef, nsts, nsts)
+    get_covariance!(A, M, P, V)
+end
 function get_covariance!(A::AbstractMatrix, M::DFMModel, P::DFMParams, ::Val{:State})
     fill!(A, 0)
     offset = 0

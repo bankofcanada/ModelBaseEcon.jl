@@ -1084,18 +1084,7 @@ function get_covariance(dfm::DFM, B::Sym)
     end
 end
 
-function get_covariance(dfm::DFM, V::Val{:Observed})
-    nobs = nobserved(dfm)
-    A = Matrix{eltype(dfm.params)}(undef, nobs, nobs)
-    get_covariance!(A, dfm.model, dfm.params, V)
-end
-
-function get_covariance(dfm::DFM, V::Val{:State})
-    nsts = nstates_with_lags(dfm)
-    A = Matrix{eltype(dfm.params)}(undef, nsts, nsts)
-    get_covariance!(A, dfm.model, dfm.params, V)
-end
-
+get_covariance(dfm::DFM, V::Val) = get_covariance(dfm.model, dfm.params, V)
 set_covariance!(dfm::DFM, COV::AbstractMatrix, V::Val) = set_covariance!(dfm.params, dfm.model, COV, V)
 
 for f in (:observed, :states, :shocks, :endog, :exog, :varshks, :allvars)
@@ -1114,7 +1103,7 @@ nstates_with_lags(b::ComponentsBlock) = nstates(b) * lags(b)
 
 states_with_lags(m::DFM) = states_with_lags(m.model)
 states_with_lags(m::DFMModel) = mapfoldl(states_with_lags, append!, values(m.components), init=Symbol[])
-# states_with_lags((n, b)::Pair{Symbol,<:DFMBlock}) = states_with_lags(b)
+states_with_lags((n, b)::Pair{Symbol,<:DFMBlock}) = states_with_lags(b)
 states_with_lags(::ObservedBlock) = Symbol[]
 function states_with_lags(blk::ComponentsBlock)
     return [_make_lag_name(v, lags(blk) - l) for l = 1:lags(blk) for v in states(blk)]
@@ -1124,11 +1113,11 @@ get_mean(dfm::DFM) = get_mean!(Vector{eltype(dfm.params)}(undef, nobserved(dfm))
 get_mean!(x::AbstractVector, dfm::DFM) = get_mean!(x, dfm.model, dfm.params)
 set_mean!(dfm::DFM, mu::AbstractVector) = set_mean!(dfm.params, dfm.model, mu)
 
-get_loading(dfm::DFM) = get_loading!(Matrix{eltype(dfm.params)}(undef, nobserved(dfm), nstates_with_lags(dfm)), dfm)
+get_loading(dfm::DFM) = get_loading(dfm.model, dfm.params)
 get_loading!(x::AbstractMatrix, dfm::DFM) = get_loading!(x, dfm.model, dfm.params)
 set_loading!(dfm::DFM, x::AbstractMatrix) = set_loading!(dfm.params, dfm.model, x)
 
-get_transition(dfm::DFM) = get_transition!(Matrix{eltype(dfm.params)}(undef, nstates_with_lags(dfm), nstates_with_lags(dfm)), dfm)
+get_transition(dfm::DFM) = get_transition(dfm.model, dfm.params)
 get_transition!(x::AbstractMatrix, dfm::DFM) = get_transition!(x, dfm.model, dfm.params)
 set_transition!(dfm::DFM, T::AbstractMatrix) = set_transition!(dfm.params, dfm.model, T)
 
