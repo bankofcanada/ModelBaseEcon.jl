@@ -152,7 +152,8 @@ Indicates that all variables in the given block run at the DFM's highest frequen
 """
 struct NoMixFreq <: MixedFrequency end
 
-ismixfreq(cb::DFMBlock{M}) where {M} = M != NoMixFreq
+ismixfreq(cb::DFMBlock{NoMixFreq}) = false
+ismixfreq(cb::DFMBlock{M}) where {M} = true
 export ismixfreq
 
 """
@@ -455,6 +456,16 @@ const DFMBlockOrModel = Union{DFMModel,DFMBlock}
 
 ## ##########################################################################
 #    functions
+
+function ismixfreq(m::DFMModel)
+    for b in values(m.observed)
+        ismixfreq(b) && return true
+    end
+    for b in values(m.components)
+        ismixfreq(b) && return true
+    end
+    return false
+end
 
 # info related to state-space representation of model
 @inline observed(::ComponentsBlock) = ModelVariable[]
@@ -1060,6 +1071,8 @@ mutable struct DFM{T} <: AbstractModel
     params::DFMParams{T}
 end
 DFM(name::Sym=:dfm, T::Type{<:Real}=Float64) = DFM{T}(DFMModel(name), DFMParams{T}())
+
+@inline ismixfreq(dfm::DFM) = ismixfreq(dfm.model)
 
 eval_resid(point::AbstractMatrix, dfm::DFM) = eval_resid(point, dfm.model, dfm.params)
 eval_RJ(point::AbstractMatrix, dfm::DFM) = eval_RJ(point, dfm.model, dfm.params)

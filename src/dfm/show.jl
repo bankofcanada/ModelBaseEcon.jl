@@ -25,21 +25,23 @@ function Base.show(io::IO, dfm::DFM)
     end
 end
 
+print_block_type(io, block, mixfreq::Val{true}) = print(io, typeof(block))
+print_block_type(io, block, mixfreq::Val{false}) = print(io, replace(string(typeof(block)), "{NoMixFreq}" => ""))
 function Base.show(io::IO, model::DFMModel)
     if model._state != :ready
         println(io, "DFMModel ", model.name, " (not ready)")
         return
     end
-    println(io, "DFMModel ", model.name,)
+    println(io, "DFMModel ", model.name)
+    io = IOContext(io, :compact=>true)
+    mixfreq = Val(ismixfreq(model))
     if length(model.observed) == 0
         println(io, "  No observed variables")
     else
-        for (name, block) in model.observed
-            if ismixfreq(block)
-                println(io, "  ", typeof(block), " ", name)
-            else
-                println(io, "  ", nameof(typeof(block)), " ", name)
-            end
+        for (name,block) in model.observed
+            print(io, "  ")
+            print_block_type(io, block, mixfreq)
+            println(io, " ", name)
             print_padded(io, "    ", block.vars .=> block.shks)
         end
     end
@@ -47,17 +49,18 @@ function Base.show(io::IO, model::DFMModel)
         println(io, "  No latent variables")
     else
         for (name, block) in model.components
-            if ismixfreq(block)
-                println(io, "  ", typeof(block), " ", name)
-            else
-                println(io, "  ", nameof(typeof(block)), " ", name)
+            print(io, "  ")
+            print_block_type(io, block, mixfreq)
+            if order(block) > 1
+                print(io, "(order=", order(block), ")")
             end
+            println(io, " ", name)
             print_padded(io, "    ", block.vars .=> block.shks)
         end
     end
     if !isempty(model.observed)
         println(io, "  Loadings map")
-        for (name, block) in model.observed
+        for block in values(model.observed)
             for (var, refs) in block.var2comps
                 print_padded(io, "     $var ~", Iterators.map(DFMModels.vars_comp_refs, values(refs))..., delim=" + ")
             end
