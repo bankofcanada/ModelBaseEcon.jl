@@ -61,7 +61,7 @@ end"""))
     @test !occursin("@exog ", text)
     @test occursin("@shocks", text)
     @test !occursin("@shock ", text)
-    include_string(@__MODULE__, text)
+    @test_warn "Model contains different numbers of equations (10) and endogenous variables (6)." include_string(@__MODULE__, text)
     m1 = ASUBS1.model
     @test Set(m1.variables) == Set(vcat(m.variables, m.auxvars))
     @test m1.shocks == m.shocks

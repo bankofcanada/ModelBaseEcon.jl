@@ -1736,7 +1736,7 @@ end
 end
 
 @testset "equation_parentheses" begin
-    @test let model = Model()
+    @test_warn "Model contains different numbers of equations (3) and endogenous variables (1)." let model = Model()
         @variables model x
         @equations model begin
             :EQ_x1 => (x[t] = 0)
