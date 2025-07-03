@@ -314,7 +314,7 @@ end
         p[t] = 0
     end
     @test_throws ModelBaseEcon.ModelNotInitError ModelBaseEcon.getevaldata(m, :default)
-    @initialize m
+    @test_warn ("unused variables", "unused shocks", r"different numbers of equations .* and endogenous variables") @initialize m
 
     unused = get_unused_symbols(m)
     @test unused[:variables] == [:x, :y, :z, :k, :l, :m, :q, :r]
@@ -579,7 +579,8 @@ end
     @test MetaTest.params.b ≈ 13.0
     @test MetaTest.params.c ≈ 12.0
     @test MetaTest.params.d ≈ 12.0
-    Core.eval(MetaTest, :(custom(x) = 2x + one(x)))
+    # Core.eval(MetaTest, :(custom(x) = 2x + one(x)))
+    MetaTest.custom(x) = 2x + one(x)
     update_links!(MetaTest.params)
     @test MetaTest.params.a ≈ 25.0
     @test MetaTest.params.b ≈ 13.0
@@ -719,7 +720,7 @@ end
         ((x[t] + 0.3x[t+2]) + (x[t-1] + 0.3x[t+1]) + (x[t-2] + 0.3x[t])) / 3 = 0
         @movav(x[t] + 0.3x[t+2], 3) = 0
     end
-    @initialize mod
+    @test_warn "different numbers" @initialize mod
 
     compare_resids(e1, e2) = (
         e1.resid.head == e2.resid.head && (
