@@ -12,7 +12,7 @@ with chunk size `N`.
 function precompile_dual_funcs(N::Int)
     ccall(:jl_generating_output, Cint, ()) == 1 || return nothing
 
-    tag = ModelBaseEconTag
+    tag = DerivsFD.ModelBaseEconTag
     dual = ForwardDiff.Dual{tag,Float64,N}
     duals = Vector{dual}
     cfg = ForwardDiff.GradientConfig{tag,Float64,N,duals}
@@ -31,22 +31,24 @@ function precompile_dual_funcs(N::Int)
     end
 
     precompile(ForwardDiff.extract_gradient!, (Type{tag}, mdr, dual)) || error("precompile")
-    precompile(ForwardDiff.vector_mode_gradient!, (mdr, FunctionWrapper, Vector{Float64}, cfg)) || error("precompile")
-    precompile(ForwardDiff.gradient!, (DiffResults.MutableDiffResult{1, Float64, Tuple{Vector{Float64}}},
-                                       FunctionWrapper, Vector{Float64}, ForwardDiff.GradientConfig{ModelBaseEconTag, Float64, N, Vector{ForwardDiff.Dual{ModelBaseEconTag, Float64, N}}})) || error("precompile")
+    precompile(ForwardDiff.vector_mode_gradient!, (mdr, DerivsFD.FunctionWrapper, Vector{Float64}, cfg)) || error("precompile")
+    precompile(ForwardDiff.gradient!, (DiffResults.MutableDiffResult{1,Float64,Tuple{Vector{Float64}}},
+        DerivsFD.FunctionWrapper, Vector{Float64},
+        ForwardDiff.GradientConfig{DerivsFD.ModelBaseEconTag,Float64,N,
+            Vector{ForwardDiff.Dual{DerivsFD.ModelBaseEconTag,Float64,N}}})) || error("precompile")
 
     return nothing
 end
 
-for i in 1:MAX_CHUNK_SIZE
+for i in 1:DerivsFD.MAX_CHUNK_SIZE
     precompile_dual_funcs(i)
 end
 
 function precompile_other()
     ccall(:jl_generating_output, Cint, ()) == 1 || return nothing
-    precompile(Tuple{typeof(eval_RJ), Matrix{Float64}, Model}) || error("precompile")
-    precompile(Tuple{typeof(_update_eqn_params!), Function, Parameters{ModelParam}}) || error("precompile")
-    precompile(Tuple{typeof(eval_RJ), Matrix{Float64}, ModelEvaluationData{Equation, Vector{CartesianIndex{2}}, DynEqnEvalData0}}) || error("precompile")
+    precompile(Tuple{typeof(eval_RJ),Matrix{Float64},Model}) || error("precompile")
+    precompile(Tuple{typeof(_update_eqn_params!),Function,Parameters{ModelParam}}) || error("precompile")
+    precompile(Tuple{typeof(eval_RJ),Matrix{Float64},ModelEvaluationData{Equation,Vector{CartesianIndex{2}},DynEqnEvalData0}}) || error("precompile")
 end
 
 precompile_other()

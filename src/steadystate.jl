@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020-2024, Bank of Canada
+# Copyright (c) 2020-2025, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -503,7 +503,13 @@ addition to the equations generated automatically from the dynamic system.
     directly by users. Use [`@steadystate`](@ref) instead of calling this
     function.
 """
-function setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Module=moduleof(model), eqn_key=:_unnamed_equation_, var_to_idx=get_var_to_idx(model), _source_=LineNumberNode(0))
+function setss!(model::AbstractModel, expr::Expr; type::Symbol, 
+    modelmodule::Module=moduleof(model), 
+    eqn_key=:_unnamed_equation_, 
+    var_to_idx=get_var_to_idx(model), 
+    _source_=LineNumberNode(0), 
+    codegen=getoption(model, :codegen, :forwarddiff)
+)
     if eqn_key == :_unnamed_equation_
         eqn_key = get_next_equation_name(model.sstate.constraints, "_SSEQ")
     end
@@ -610,8 +616,12 @@ function setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Mod
     # create the resid and RJ functions for the new equation
     # To do this, we use `makefuncs` from evaluation.jl
     residual = Expr(:block, source[1], :($(lhs) - $(rhs)))
-    resid, RJ = makefuncs(eqn_key, residual, vsyms, [], unique(val_params), modelmodule)
-    _update_eqn_params!(resid, model.parameters)
+    if codegen == :forwarddiff
+        resid, RJ = DerivsFD.makefuncs(eqn_key, residual, vsyms, [], unique(val_params), modelmodule)
+        _update_eqn_params!(resid, model.parameters)
+    else
+        error("Invalid options `codegen` = $codegen.")
+    end
     # We have all the ingredients to create the instance of SteadyStateEquation
     for i = 1:2
         # remove blocks with line numbers from expr.args[i]

@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020-2024, Bank of Canada
+# Copyright (c) 2020-2025, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -14,6 +14,7 @@ const defaultoptions = Options(
     maxiter=20,
     verbose=false,
     variant=:default,
+    codegen=:forwarddiff,
     warn=Options(no_t=true)
 )
 
@@ -933,7 +934,9 @@ function process_equation(model::Model, expr::Expr;
     line=LineNumberNode(0),
     flags=EqnFlags(),
     doc="",
-    eqn_name=:_unnamed_equation_)
+    eqn_name=:_unnamed_equation_,
+    codegen=getoption(model, :codegen, :forwarddiff)
+)
 
     # a list of all known time series
     allvars = model.allvars
@@ -1165,10 +1168,15 @@ function process_equation(model::Model, expr::Expr;
     if eqn_name == :_unnamed_equation_
         throw(ArgumentError("No equation name specified"))
     end
-    resid, RJ, resid_param, chunk = makefuncs(eqn_name, residual, tssyms, sssyms, psyms, modelmodule)
-    _update_eqn_params!(resid, model.parameters)
-    thismodule = @__MODULE__
-    modelmodule.eval(:($(thismodule).precompilefuncs($resid, $RJ, $resid_param, $chunk)))
+
+    if codegen == :forwarddiff
+        resid, RJ, resid_param, chunk = DerivsFD.makefuncs(eqn_name, residual, tssyms, sssyms, psyms, modelmodule)
+        _update_eqn_params!(resid, model.parameters)
+        thismodule = @__MODULE__
+        modelmodule.eval(:($(thismodule).DerivsFD.precompilefuncs($resid, $RJ, $resid_param, $chunk)))
+    else
+        error("Invalid `codegen` value $codegen.")
+    end
     tsrefs′ = LittleDict{Tuple{ModelSymbol,Int},Symbol}()
     for ((modsym, i), sym) in tsrefs
         tsrefs′[(ModelSymbol(modsym), i)] = sym
@@ -1399,7 +1407,9 @@ function initialize!(model::Model, modelmodule::Module)
     if !isempty(model.evaldata)
         modelerror("Model already initialized.")
     end
-    initfuncs(modelmodule)
+    if model.options.codegen == :forwarddiff
+        DerivsFD.initfuncs(modelmodule)
+    end
     model._module_eval = modelmodule.eval
     samename = Symbol[intersect(model.allvars, keys(model.parameters))...]
     if !isempty(samename)

@@ -246,13 +246,13 @@ module E
 using ModelBaseEcon
 end
 @testset "Evaluations" begin
-    ModelBaseEcon.initfuncs(E)
+    ModelBaseEcon.DerivsFD.initfuncs(E)
     @test isdefined(E, :EquationEvaluator)
     @test isdefined(E, :EquationGradient)
-    resid, RJ = ModelBaseEcon.makefuncs(Symbol(1), :(x + 3 * y), [:x, :y], [], [], E)
+    resid, RJ = ModelBaseEcon.DerivsFD.makefuncs(Symbol(1), :(x + 3 * y), [:x, :y], [], [], E)
     @test resid isa E.EquationEvaluator
     @test RJ isa E.EquationGradient
-    @test RJ.fn1 isa ModelBaseEcon.FunctionWrapper
+    @test RJ.fn1 isa ModelBaseEcon.DerivsFD.FunctionWrapper
     @test RJ.fn1.f == resid
     @test parentmodule(resid) === E
     @test parentmodule(RJ) === E
@@ -260,7 +260,7 @@ end
     @test RJ([1.1, 2.3]) == (8.0, [1.0, 3.0])
     # make sure the EquationEvaluator and EquationGradient are reused for identical expressions and arguments
     nnames = length(names(E, all=true))
-    resid1, RJ1 = ModelBaseEcon.makefuncs(Symbol(1), :(x + 3 * y), [:x, :y], [], [], E)
+    resid1, RJ1 = ModelBaseEcon.DerivsFD.makefuncs(Symbol(1), :(x + 3 * y), [:x, :y], [], [], E)
     @test nnames == length(names(E, all=true))
     @test resid === resid1
     @test RJ === RJ1
