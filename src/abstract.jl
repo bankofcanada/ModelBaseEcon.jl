@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020-2023, Bank of Canada
+# Copyright (c) 2020-2025, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -97,14 +97,23 @@ export sstate
 Return the module in which the given equation or model was initialized.
 """
 function moduleof end
-moduleof(e::AbstractEquation) = parentmodule(eval_resid(e))
+@static if VERSION >= v"1.9"
+    function moduleof(f::Function) 
+        mods = unique!(map(parentmodule, methods(f)))
+        length(mods) == 1 && return mods[1]
+        error("Function $(nameof(f)) does not have a unique module")
+    end
+    moduleof(e::AbstractEquation) = parentmodule(methods(eval_resid(e))[1])
+else
+    moduleof(f::Function) = parentmodule(f)
+    moduleof(e::AbstractEquation) = parentmodule(eval_resid(e))
+end
 function moduleof(m::M) where {M<:AbstractModel}
-    if hasfield(M, :_module_eval) 
-        mod_eval = m._module_eval
-        isnothing(mod_eval) || return parentmodule(mod_eval(:(EquationEvaluator)))
+    if hasfield(M, :_module) && !isnothing(m._module)
+        return m._module()
     end
     # for (_, eqn) in equations(m)
-    #     mod = parentmodule(eval_resid(eqn))
+    #     mod = moduleof(eqn)
     #     (mod === @__MODULE__) || return mod
     # end
     error("Unable to determine the module containing the given model. Try adding equations to it and calling `@initialize`.")

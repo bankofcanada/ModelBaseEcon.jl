@@ -420,11 +420,11 @@ dynamic equation using information from the given [`SSEqnData`](@ref).
 """
 function sseqn_resid_RJ(s::SSEqnData)
     function _resid(pt::Vector{<:Real})
-        _update_eqn_params!(s.eqn.eval_resid, s.model[].parameters)
+        _update_eqn_params!(s.eqn, s.model[].parameters)
         return s.eqn.eval_resid(__to_dyn_pt(pt, s))
     end
     function _RJ(pt::Vector{<:Real})
-        _update_eqn_params!(s.eqn.eval_resid, s.model[].parameters)
+        _update_eqn_params!(s.eqn, s.model[].parameters)
         R, jj = s.eqn.eval_RJ(__to_dyn_pt(pt, s))
         return R, __to_ssgrad(pt, jj, s)
     end
@@ -619,6 +619,7 @@ function setss!(model::AbstractModel, expr::Expr; type::Symbol,
     if codegen == :forwarddiff
         resid, RJ = DerivsFD.makefuncs(eqn_key, residual, vsyms, [], unique(val_params), modelmodule)
         _update_eqn_params!(resid, model.parameters)
+        _update_eqn_params!(RJ, model.parameters)
     else
         error("Invalid options `codegen` = $codegen.")
     end

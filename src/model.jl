@@ -56,7 +56,7 @@ mutable struct Model <: AbstractModel
     Should not be directly manipulated."
     _state::Symbol
     "the module in which all model equations will be compiled"
-    _module_eval::Union{Nothing,Function}
+    _module::Union{Nothing,Function}
     "Options are various hyper-parameters for tuning the algorithms"
     options::Options
     "Flags contain meta information about the type of model"
@@ -1172,6 +1172,8 @@ function process_equation(model::Model, expr::Expr;
     if codegen == :forwarddiff
         resid, RJ, resid_param, chunk = DerivsFD.makefuncs(eqn_name, residual, tssyms, sssyms, psyms, modelmodule)
         _update_eqn_params!(resid, model.parameters)
+        _update_eqn_params!(RJ, model.parameters)
+        _update_eqn_params!(resid_param, model.parameters)
         thismodule = @__MODULE__
         modelmodule.eval(:($(thismodule).DerivsFD.precompilefuncs($resid, $RJ, $resid_param, $chunk)))
     else
@@ -1410,7 +1412,7 @@ function initialize!(model::Model, modelmodule::Module)
     if model.options.codegen == :forwarddiff
         DerivsFD.initfuncs(modelmodule)
     end
-    model._module_eval = modelmodule.eval
+    model._module = isdefined(modelmodule, :thismodule) ? modelmodule.thismodule : modelmodule.eval(:(thismodule() = @__MODULE__))
     samename = Symbol[intersect(model.allvars, keys(model.parameters))...]
     if !isempty(samename)
         modelerror("Found $(length(samename)) names that are both variables and parameters: $(join(samename, ", "))")

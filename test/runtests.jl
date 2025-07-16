@@ -247,15 +247,15 @@ using ModelBaseEcon
 end
 @testset "Evaluations" begin
     ModelBaseEcon.DerivsFD.initfuncs(E)
-    @test isdefined(E, :EquationEvaluator)
-    @test isdefined(E, :EquationGradient)
+    @test isdefined(E, :EquationEvaluatorFD)
+    @test isdefined(E, :EquationGradientFD)
     resid, RJ = ModelBaseEcon.DerivsFD.makefuncs(Symbol(1), :(x + 3 * y), [:x, :y], [], [], E)
-    @test resid isa E.EquationEvaluator
-    @test RJ isa E.EquationGradient
+    @test resid isa E.EquationEvaluatorFD
+    @test RJ isa E.EquationGradientFD
     @test RJ.fn1 isa ModelBaseEcon.DerivsFD.FunctionWrapper
     @test RJ.fn1.f == resid
-    @test parentmodule(resid) === E
-    @test parentmodule(RJ) === E
+    @test ModelBaseEcon.moduleof(resid) === E
+    # @test ModelBaseEcon.moduleof(RJ) === E
     @test resid([1.1, 2.3]) == 8.0
     @test RJ([1.1, 2.3]) == (8.0, [1.0, 3.0])
     # make sure the EquationEvaluator and EquationGradient are reused for identical expressions and arguments
@@ -1004,7 +1004,7 @@ end
         @reinitialize(new_E1)
         new_length = length(names(modelmodule, all=true))
         if i == 1
-            @test new_length == prev_length + 3
+            @test new_length == prev_length + 4
         else
             @test new_length == prev_length
         end

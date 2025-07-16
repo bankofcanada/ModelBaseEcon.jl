@@ -8,9 +8,27 @@
 ###########################################################
 # Part 1: Code generation for residuals and its derivatives
 
+
+abstract type EquationEvaluator <: Function end
+
+_update_eqn_params!(ee, params) = error()
+_update_eqn_params!(ee::Nothing, params) = nothing
+_update_eqn_params!(ee::Function, params) = nothing
+function _update_eqn_params!(ee::EquationEvaluator, params)
+    @nospecialize(ee)
+    ee.rev[] == params.rev && return
+    for k in keys(ee.params)
+        ee.params[k] = getproperty(params, k)
+    end
+    ee.rev[] = params.rev[]
+end
+function _update_eqn_params!(eqn::AbstractEquation, params)
+    _update_eqn_params!(eqn.eval_resid, params)
+    _update_eqn_params!(eqn.eval_RJ, params)
+end
+
 include("cg/forwarddiff.jl")
-
-
+include("cg/symbolics.jl")
 
 ###########################################################
 # Part 2: Evaluation data for models and equations
@@ -139,15 +157,6 @@ struct ModelEvaluationData{E<:AbstractEquation,I,D<:DynEqnEvalData} <: AbstractM
     rowinds::Vector{Vector{Int64}}
 end
 
-@inline function _update_eqn_params!(ee, params)
-    if ee.rev[] !== params.rev[]
-        for k in keys(ee.params)
-            ee.params[k] = getproperty(params, k)
-        end
-        ee.rev[] = params.rev[]
-    end
-end
-
 function _make_var_to_idx(allvars)
     # Precompute index lookup for variables
     return LittleDictVec{Symbol,Int}(allvars, 1:length(allvars))
@@ -186,7 +195,7 @@ end
 
 function eval_R!(res::AbstractVector{Float64}, point::AbstractMatrix{Float64}, med::ModelEvaluationData)
     for (i, eqn, inds, ed) in zip(1:length(med.alleqns), med.alleqns, med.allinds, med.eedata)
-        _update_eqn_params!(eqn.eval_resid, med.params[])
+        _update_eqn_params!(eqn, med.params[])
         res[i] = eval_resid(eqn, point[inds], ed)
     end
     return nothing
@@ -197,7 +206,7 @@ function eval_RJ(point::Matrix{Float64}, med::ModelEvaluationData)
     res = similar(med.R)
     jac = med.J
     for (i, eqn, inds, ri, ed) in zip(1:neqns, med.alleqns, med.allinds, med.rowinds, med.eedata)
-        _update_eqn_params!(eqn.eval_resid, med.params[])
+        _update_eqn_params!(eqn, med.params[])
         res[i], jac.nzval[ri] = eval_RJ(eqn, point[inds], ed)
     end
     return res, jac
@@ -255,7 +264,7 @@ function SelectiveLinearizationMED(model::AbstractModel)
     eedata = Vector{AbstractEqnEvalData}(undef, length(med.alleqns))
     num_lin = 0
     for (i, (eqn, inds)) in enumerate(zip(med.alleqns, med.allinds))
-        _update_eqn_params!(eqn.eval_resid, model.parameters)
+        _update_eqn_params!(eqn, model.parameters)
         ed = DynEqnEvalData(eqn, model)
         if islin(eqn)
             num_lin += 1
@@ -278,7 +287,7 @@ end
 function eval_R!(res::AbstractVector{Float64}, point::AbstractMatrix{Float64}, slmed::SelectiveLinearizationMED)
     med = slmed.med
     for (i, eqn, inds, eed) in zip(1:length(med.alleqns), med.alleqns, med.allinds, slmed.eedata)
-        islin(eqn) || _update_eqn_params!(eqn.eval_resid, med.params[])
+        islin(eqn) || _update_eqn_params!(eqn, med.params[])
         res[i] = eval_resid(eqn, point[inds], eed)
     end
     return nothing
@@ -290,7 +299,7 @@ function eval_RJ(point::Matrix{Float64}, slmed::SelectiveLinearizationMED)
     res = similar(med.R)
     jac = med.J
     for (i, eqn, inds, ri, eed) in zip(1:neqns, med.alleqns, med.allinds, med.rowinds, slmed.eedata)
-        islin(eqn) || _update_eqn_params!(eqn.eval_resid, med.params[])
+        islin(eqn) || _update_eqn_params!(eqn, med.params[])
         res[i], jac.nzval[ri] = eval_RJ(eqn, point[inds], eed)
     end
     return res, jac

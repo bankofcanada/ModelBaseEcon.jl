@@ -86,6 +86,7 @@ end
 function funcsyms(mod, eqn_name::Symbol, expr::Expr, tssyms, sssyms, psyms)
     eqn_data = (expr, collect(tssyms), collect(sssyms), collect(psyms))
     myhash = @static UInt == UInt64 ? 0x2270e9673a0822b5 : 0x2ce87a13
+    myhash = Base.hash(mod, myhash)
     myhash = Base.hash(eqn_data, myhash)
     he = mod._hashed_expressions
     hits = get!(he, myhash, valtype(he)())
@@ -102,6 +103,7 @@ end
 
 const MAX_CHUNK_SIZE = 4
 
+#------------------------------------------------------------------------------
 # Used to avoid specializing the ForwardDiff functions on
 # every equation.
 struct FunctionWrapper <: Function
@@ -109,8 +111,69 @@ struct FunctionWrapper <: Function
 end
 (f::FunctionWrapper)(x) = f.f(x)
 
+import ..EquationEvaluator
+# struct EquationEvaluatorFD{FN} <: AbstractEquationEvaluator
+#     rev::Ref{UInt}
+#     params::LittleDictVec{Symbol,Any}
+# end
+
+struct EquationGradientFD{DR<:DiffResults.DiffResult,CFG<:ForwardDiff.GradientConfig} <: Function
+    fn1::FunctionWrapper
+    dr::DR
+    cfg::CFG
+end
+
+function EquationGradientFD(fn1::Function, nargs::Int, ::Val{N}) where {N}
+    return EquationGradientFD(FunctionWrapper(fn1),
+        DiffResults.DiffResult(zero(Float64), zeros(Float64, nargs)),
+        ForwardDiff.GradientConfig(fn1, zeros(Float64, nargs), ForwardDiff.Chunk{N}(), ModelBaseEconTag()))
+end
+
+function (s::EquationGradientFD)(x::Vector{Float64})
+    ForwardDiff.gradient!(s.dr, s.fn1, x, s.cfg)
+    return s.dr.value, s.dr.derivs[1]
+end
+
+function (s::EquationGradientFD)(J::AbstractVector{Float64}, x::Vector{Float64})
+    ForwardDiff.gradient!(s.dr, s.fn1, x, s.cfg)
+    copyto!(J, s.dr.derivs)
+    return s.dr.value, s.dr.derivs[1]
+end
+
+import .._update_eqn_params!
+_update_eqn_params!(@nospecialize(ee::EquationGradientFD), params) = _update_eqn_params!(ee.fn1.f, params)
+
+#------------------------------------------------------------------------------
+
+function _unpack_args_expr(x, tssyms, sssyms)
+    ex = Expr(:block)
+    ind = 0
+    for sym in Iterators.flatten((tssyms,sssyms))
+        ind += 1
+        push!(ex.args, :($sym = $x[$ind]))
+    end
+    return :(@inbounds $ex)
+end
+
+function _unpack_pars_expr(ee, psyms)
+    isempty(psyms) && return :nothing
+    pv = gensym("pv")
+    ex = Expr(:block)
+    ind = 0
+    for sym in psyms
+        ind += 1
+        push!(ex.args, :($sym = $pv[$ind]))
+    end
+    return Expr(:block, 
+        :($pv = $ee.params.vals),
+        :(@inbounds $ex),
+    )
+end
+
+#------------------------------------------------------------------------------
+
 """
-    makefuncs(expr, tssyms, sssyms, psyms, mod)
+    makefuncs(eqn_name, expr, tssyms, sssyms, psyms, mod)
 
 Create two functions that evaluate the residual and its gradient for the given
 expression.
@@ -119,7 +182,7 @@ expression.
     Internal function. Do not call directly.
 
 ### Arguments
-- `expr`: the expression
+- `expr`: the residual expression
 - `tssyms`: list of time series variable symbols
 - `sssyms`: list of steady state symbols
 - `psyms`: list of parameter symbols
@@ -138,41 +201,23 @@ function makefuncs(eqn_name, expr, tssyms, sssyms, psyms, mod)
         return mod.eval(:(($fn1, $fn2, $fn3, $chunk)))
     end
     x = gensym("x")
-    has_psyms = !isempty(psyms)
-    # This is the expression that goes inside the body of the "outer" function.
     # If the equation has no parameters, then we just unpack x and evaluate the expressions
     # Otherwise, we unpack the parameters (which have unknown types) and pass it
     # to another function that acts like a function barrier where the types are known.
-    psym_expr = if has_psyms
-        quote
-            ($(psyms...),) = values(ee.params)
+    return mod.eval(quote
+        function (ee::EquationEvaluatorFD{$(QuoteNode(fn1))})($x::Vector{<:Real})
+            $(_unpack_args_expr(x, tssyms, sssyms))
+            $(_unpack_pars_expr(:ee, psyms))
             $fn3($x, $(psyms...))
         end
-    else
-        quote
-            ($(tssyms...), $(sssyms...),) = $x
+        const $fn1 = EquationEvaluatorFD{$(QuoteNode(fn1))}(UInt(0),
+            $(@__MODULE__).LittleDict(Symbol[$(QuoteNode.(psyms)...)],
+                fill!(Vector{Any}(undef, $(length(psyms))), nothing)))
+        const $fn2 = EquationGradientFD($fn1, $nargs, Val($chunk))
+        function $fn3($x, $(psyms...))
+            $(_unpack_args_expr(x, tssyms, sssyms))
             $expr
         end
-    end
-    # The expression for the function barrier
-    fn3_expr = if has_psyms
-        quote
-            function $fn3($x, $(psyms...))
-                ($(tssyms...), $(sssyms...),) = $x
-                $expr
-            end
-        end
-    else
-        :(const $fn3 = nothing)
-    end
-    return mod.eval(quote
-        function (ee::EquationEvaluator{$(QuoteNode(fn1))})($x::Vector{<:Real})
-            $psym_expr
-        end
-        const $fn1 = EquationEvaluator{$(QuoteNode(fn1))}(UInt(0),
-            $(@__MODULE__).LittleDict(Symbol[$(QuoteNode.(psyms)...)], fill!(Vector{Any}(undef, $(length(psyms))), nothing)))
-        const $fn2 = EquationGradient($FunctionWrapper($fn1), $nargs, Val($chunk))
-        $fn3_expr
         ($fn1, $fn2, $fn3, $chunk)
     end)
 end
@@ -196,27 +241,22 @@ together with a `DiffResult` and a `GradientConfig` used by `ForwardDiff`. Its
 call is defined here and computes the residual and the gradient.
 """
 function initfuncs(mod::Module)
-    if !isdefined(mod, :EquationEvaluator)
-        mod.eval(quote
+    expr = Expr(:block)
+    if !isdefined(mod, :EquationEvaluatorFD)
+        push!(expr.args, quote
             const _hashed_expressions = Dict{UInt,Vector{Tuple{Expr,Vector{Symbol},Vector{Symbol},Vector{Symbol}}}}()
-            struct EquationEvaluator{FN} <: Function
+            struct EquationEvaluatorFD{FN} <: ModelBaseEcon.EquationEvaluator
                 rev::Ref{UInt}
-                params::$(@__MODULE__).LittleDictVec{Symbol,Any}
-            end
-            struct EquationGradient{DR,CFG} <: Function
-                fn1::Function
-                dr::DR
-                cfg::CFG
-            end
-            EquationGradient(fn1::Function, nargs::Int, ::Val{N}) where {N} = EquationGradient(fn1,
-                $(@__MODULE__).DiffResults.DiffResult(zero(Float64), zeros(Float64, nargs)),
-                $(@__MODULE__).ForwardDiff.GradientConfig(fn1, zeros(Float64, nargs), $(@__MODULE__).ForwardDiff.Chunk{N}(), $ModelBaseEconTag()))
-            function (s::EquationGradient)(x::Vector{Float64})
-                $(@__MODULE__).ForwardDiff.gradient!(s.dr, s.fn1, x, s.cfg)
-                return s.dr.value, s.dr.derivs[1]
+                params::ModelBaseEcon.LittleDictVec{Symbol,Any}
             end
         end)
     end
+    if !isdefined(mod, :EquationGradientFD)
+        push!(expr.args, quote
+            import ModelBaseEcon.$(nameof(@__MODULE__)).EquationGradientFD
+        end)
+    end
+    mod.eval(expr)
     return nothing
 end
 
