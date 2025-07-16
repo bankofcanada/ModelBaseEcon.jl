@@ -298,7 +298,15 @@ Base.getindex(ssd::SteadyStateData, sym::ModelSymbol) = getproperty(ssd, sym.nam
 Base.getindex(ssd::SteadyStateData, sym::Symbol) = getproperty(ssd, sym)
 Base.getindex(ssd::SteadyStateData, sym::AbstractString) = getproperty(ssd, Symbol(sym))
 
-@inline ss_symbol(ssd::SteadyStateData, vi::Int) = Symbol("#", ssd.vars[(1+vi)÷2].name.name, "#", (vi % 2 == 1) ? :lvl : :slp, "#")
+function ss_var_sym(var::ModelVariable, type::Symbol)
+    ty = (type === :level ? "ˡᵛˡ" : "ˢˡᵖ")
+    pref = islog(var) ? "log_" : isneglog(var) ? "logm_" : ""
+    return Symbol(pref, var.name, ty)
+end
+
+function ss_symbol(ssd::SteadyStateData, vi::Int) 
+    return ss_var_sym(ssd.vars[(1+vi)÷2].name, vi % 2 == 1 ? :level : :slope)
+end
 
 #########################
 # 
@@ -503,11 +511,11 @@ addition to the equations generated automatically from the dynamic system.
     directly by users. Use [`@steadystate`](@ref) instead of calling this
     function.
 """
-function setss!(model::AbstractModel, expr::Expr; type::Symbol, 
-    modelmodule::Module=moduleof(model), 
-    eqn_key=:_unnamed_equation_, 
-    var_to_idx=get_var_to_idx(model), 
-    _source_=LineNumberNode(0), 
+function setss!(model::AbstractModel, expr::Expr; type::Symbol,
+    modelmodule::Module=moduleof(model),
+    eqn_key=:_unnamed_equation_,
+    var_to_idx=get_var_to_idx(model),
+    _source_=LineNumberNode(0),
     codegen=getoption(model, :codegen, :forwarddiff)
 )
     if eqn_key == :_unnamed_equation_
@@ -523,13 +531,6 @@ function setss!(model::AbstractModel, expr::Expr; type::Symbol,
     local ss = sstate(model)
 
     local allvars = model.allvars
-
-    ss_var_sym(var) = begin
-        ty = (type === :level ? "lvl" : "slp")
-        islog(var) ? Symbol("#log#", var.name, "#", ty, "#") :
-        isneglog(var) ? Symbol("#logm#", var.name, "#", ty, "#") :
-        Symbol("#", var.name, "#", ty, "#")
-    end
 
     ###############################################
     #     ssprocess(val)
@@ -561,12 +562,12 @@ function setss!(model::AbstractModel, expr::Expr; type::Symbol,
             # it's a vriable of some sort: make a symbol and an index for the
             # corresponding steady state unknown
             var = allvars[vind]
-            vsym = ss_var_sym(var)
+            vsym = ss_var_sym(var, type)
             push!(vsyms, vsym)
             push!(vinds, type == :level ? 2vind - 1 : 2vind)
             if need_transform(var)
                 func = inverse_transformation(var)
-                return :($func($vsym))
+                return :($(nameof(func))($vsym))
             else
                 return vsym
             end
@@ -618,11 +619,13 @@ function setss!(model::AbstractModel, expr::Expr; type::Symbol,
     residual = Expr(:block, source[1], :($(lhs) - $(rhs)))
     if codegen == :forwarddiff
         resid, RJ = DerivsFD.makefuncs(eqn_key, residual, vsyms, [], unique(val_params), modelmodule)
-        _update_eqn_params!(resid, model.parameters)
-        _update_eqn_params!(RJ, model.parameters)
+    elseif codegen == :symbolics
+        resid, RJ = DerivsSym.makefuncs(eqn_key, residual, vsyms, [], unique(val_params), modelmodule)
     else
-        error("Invalid options `codegen` = $codegen.")
+        error("Invalid `codegen` value $(QuoteNode(codegen)).")
     end
+    _update_eqn_params!(resid, model.parameters)
+    _update_eqn_params!(RJ, model.parameters)
     # We have all the ingredients to create the instance of SteadyStateEquation
     for i = 1:2
         # remove blocks with line numbers from expr.args[i]
@@ -815,8 +818,8 @@ function updatessdata!(model::AbstractModel)
     # update vinds in the equations
     vinds_map = Dict{Symbol,Int}()
     for (i, var) in enumerate(model.allvars)
-        vinds_map[Symbol("#$(var.name)#lvl#")] = 2i - 1
-        vinds_map[Symbol("#$(var.name)#slp#")] = 2i
+        vinds_map[ss_var_sym(var, :level)] = 2i-1
+        vinds_map[ss_var_sym(var, :slope)] = 2i
     end
     for eqn in values(alleqns(ss))
         for j in 1:length(eqn.vinds)

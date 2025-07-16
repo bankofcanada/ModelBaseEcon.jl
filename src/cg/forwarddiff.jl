@@ -52,55 +52,6 @@ function precompilefuncs(resid, RJ, resid_param, N::Int)
     return nothing
 end
 
-# """
-#     funcsyms(mod::Module)
-
-# Create a pair of identifiers that does not conflict with existing identifiers in
-# the given module.
-
-#. !!! warning
-#     Internal function. Do not call directly.
-
-# ### Implementation (for developers)
-# We need two identifiers `resid_N` and `RJ_N` where "N" is some integer number.
-# The first is going to be the name of the function that evaluates the equation
-# and the second is going to be the name of the function that evaluates both the
-# equation and its gradient.
-# """
-# function funcsyms end
-
-# function funcsyms(mod::Module, eqn_name::Symbol, args...)
-#     iterator = 1
-#     fn1 = Symbol("resid_", eqn_name)
-#     fn2 = Symbol("RJ_", eqn_name)
-#     fn3 = Symbol("resid_param_", eqn_name)
-#     while isdefined(mod, fn1) || isdefined(Main, fn1)
-#         iterator += 1
-#         fn1 = Symbol("resid_", eqn_name, "_", iterator)
-#         fn2 = Symbol("RJ_", eqn_name, "_", iterator)
-#         fn3 = Symbol("resid_param_", eqn_name, "_", iterator)
-#     end
-#     return fn1, fn2, fn3
-# end
-
-function funcsyms(mod, eqn_name::Symbol, expr::Expr, tssyms, sssyms, psyms)
-    eqn_data = (expr, collect(tssyms), collect(sssyms), collect(psyms))
-    myhash = @static UInt == UInt64 ? 0x2270e9673a0822b5 : 0x2ce87a13
-    myhash = Base.hash(mod, myhash)
-    myhash = Base.hash(eqn_data, myhash)
-    he = mod._hashed_expressions
-    hits = get!(he, myhash, valtype(he)())
-    ind = indexin([eqn_data], hits)[1]
-    if isnothing(ind)
-        push!(hits, eqn_data)
-        ind = 1
-    end
-    fn1 = Symbol("resid_", eqn_name, "_", ind, "_", myhash)
-    fn2 = Symbol("RJ_", eqn_name, "_", ind, "_", myhash)
-    fn3 = Symbol("resid_param_", eqn_name, "_", ind, "_", myhash)
-    return fn1, fn2, fn3
-end
-
 const MAX_CHUNK_SIZE = 4
 
 #------------------------------------------------------------------------------
@@ -143,34 +94,12 @@ end
 import .._update_eqn_params!
 _update_eqn_params!(@nospecialize(ee::EquationGradientFD), params) = _update_eqn_params!(ee.fn1.f, params)
 
+import .._unpack_args_expr
+import .._unpack_pars_expr
+import ..funcsyms
 #------------------------------------------------------------------------------
 
-function _unpack_args_expr(x, tssyms, sssyms)
-    ex = Expr(:block)
-    ind = 0
-    for sym in Iterators.flatten((tssyms,sssyms))
-        ind += 1
-        push!(ex.args, :($sym = $x[$ind]))
-    end
-    return :(@inbounds $ex)
-end
-
-function _unpack_pars_expr(ee, psyms)
-    isempty(psyms) && return :nothing
-    pv = gensym("pv")
-    ex = Expr(:block)
-    ind = 0
-    for sym in psyms
-        ind += 1
-        push!(ex.args, :($sym = $pv[$ind]))
-    end
-    return Expr(:block, 
-        :($pv = $ee.params.vals),
-        :(@inbounds $ex),
-    )
-end
-
-#------------------------------------------------------------------------------
+const myhash = @static UInt == UInt64 ? 0x2270e9673a0822b5 : 0x2ce87a13
 
 """
     makefuncs(eqn_name, expr, tssyms, sssyms, psyms, mod)
@@ -196,7 +125,8 @@ the residual and its gradient (as a callable `EquationGradient` instance).
 function makefuncs(eqn_name, expr, tssyms, sssyms, psyms, mod)
     nargs = length(tssyms) + length(sssyms)
     chunk = min(nargs, MAX_CHUNK_SIZE)
-    fn1, fn2, fn3 = funcsyms(mod, eqn_name, expr, tssyms, sssyms, psyms)
+    fn1, fn2, fn3 = funcsyms(eqn_name, expr, tssyms, sssyms, psyms, mod, 
+        myhash, ("resid_", "RJ_", "resid_param_"))
     if isdefined(mod, fn1) && isdefined(mod, fn2) && isdefined(mod, fn3)
         return mod.eval(:(($fn1, $fn2, $fn3, $chunk)))
     end
@@ -214,7 +144,7 @@ function makefuncs(eqn_name, expr, tssyms, sssyms, psyms, mod)
             $(@__MODULE__).LittleDict(Symbol[$(QuoteNode.(psyms)...)],
                 fill!(Vector{Any}(undef, $(length(psyms))), nothing)))
         const $fn2 = EquationGradientFD($fn1, $nargs, Val($chunk))
-        function $fn3($x, $(psyms...))
+        function $fn3($x::Vector{<:Real}, $(psyms...))
             $(_unpack_args_expr(x, tssyms, sssyms))
             $expr
         end
@@ -242,9 +172,13 @@ call is defined here and computes the residual and the gradient.
 """
 function initfuncs(mod::Module)
     expr = Expr(:block)
-    if !isdefined(mod, :EquationEvaluatorFD)
+    if !isdefined(mod, :_hashed_expressions)
         push!(expr.args, quote
             const _hashed_expressions = Dict{UInt,Vector{Tuple{Expr,Vector{Symbol},Vector{Symbol},Vector{Symbol}}}}()
+        end)
+    end
+    if !isdefined(mod, :EquationEvaluatorFD)
+        push!(expr.args, quote
             struct EquationEvaluatorFD{FN} <: ModelBaseEcon.EquationEvaluator
                 rev::Ref{UInt}
                 params::ModelBaseEcon.LittleDictVec{Symbol,Any}

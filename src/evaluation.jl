@@ -8,7 +8,6 @@
 ###########################################################
 # Part 1: Code generation for residuals and its derivatives
 
-
 abstract type EquationEvaluator <: Function end
 
 _update_eqn_params!(ee, params) = error()
@@ -26,6 +25,73 @@ function _update_eqn_params!(eqn::AbstractEquation, params)
     _update_eqn_params!(eqn.eval_resid, params)
     _update_eqn_params!(eqn.eval_RJ, params)
 end
+
+#------------------------------------------------------------------------------
+
+function _unpack_args_expr(x, tssyms, sssyms)
+    ex = Expr(:block)
+    ind = 0
+    for sym in Iterators.flatten((tssyms, sssyms))
+        ind += 1
+        push!(ex.args, :($sym = $x[$ind]))
+    end
+    return :(@inbounds $ex)
+end
+
+function _unpack_pars_expr(ee, psyms)
+    isempty(psyms) && return :nothing
+    pv = gensym("pv")
+    ex = Expr(:block)
+    ind = 0
+    for sym in psyms
+        ind += 1
+        push!(ex.args, :($sym = $pv[$ind]))
+    end
+    return Expr(:block,
+        :($pv = $ee.params.vals),
+        :(@inbounds $ex),
+    )
+end
+
+#------------------------------------------------------------------------------
+
+
+"""
+    funcsyms(mod, eqn_name::Symbol, expr::Expr, tssyms, sssyms, psyms)
+
+Create a pair of identifiers that does not conflict with existing identifiers in
+the given module.
+
+!!! warning
+    Internal function. Do not call directly.
+
+### Implementation (for developers)
+We need two identifiers `resid_N` and `RJ_N` where "N" is some integer number.
+The first is going to be the name of the function that evaluates the equation
+and the second is going to be the name of the function that evaluates both the
+equation and its gradient.
+"""
+function funcsyms(eqn_name::Symbol, expr::Expr, tssyms, sssyms, psyms,
+    mod::Module, hash::UInt, prefs::Tuple
+)
+    eqn_data = (expr, collect(tssyms), collect(sssyms), collect(psyms))
+    # myhash = @static UInt == UInt64 ? 0x2270e9673a0822b5 : 0x2ce87a13
+    myhash = Base.hash(eqn_data, Base.hash(mod, hash))
+    he = mod._hashed_expressions
+    hits = get!(he, myhash, valtype(he)())
+    ind = indexin([eqn_data], hits)[1]
+    if isnothing(ind)
+        push!(hits, eqn_data)
+        ind = 1
+    end
+    return ((Symbol(join((p, eqn_name, ind, myhash), "_")) for p in prefs)...,)
+    # fn1 = Symbol("resid_", eqn_name, "_", ind, "_", myhash)
+    # fn2 = Symbol("RJ_", eqn_name, "_", ind, "_", myhash)
+    # fn3 = Symbol("resid_param_", eqn_name, "_", ind, "_", myhash)
+    # return fn1, fn2, fn3
+end
+
+#------------------------------------------------------------------------------
 
 include("cg/forwarddiff.jl")
 include("cg/symbolics.jl")
@@ -321,7 +387,7 @@ This function calculates the residuals of the provided equation `eqn` for each t
 # Returns
 - `res::Vector{Float64}`: A vector of residuals for each time point in the range `rng`. Entries for time points where residuals cannot be computed (due to insufficient lags or leads) are filled with `NaN`.
 """
-function eval_equation(model::AbstractModel, eqn::AbstractEquation, sim_data::AbstractMatrix{Float64}, rng::UnitRange{Int64} = 1:size(sim_data,1))
+function eval_equation(model::AbstractModel, eqn::AbstractEquation, sim_data::AbstractMatrix{Float64}, rng::UnitRange{Int64}=1:size(sim_data, 1))
     # Check bounds
     @assert rng[begin] >= 1 && rng[end] <= size(sim_data, 1) "Error: The range specified is out of bounds. Ensure that the range starts from 1 or higher and ends within the size of the data."
 
@@ -343,7 +409,7 @@ function eval_equation(model::AbstractModel, eqn::AbstractEquation, sim_data::Ab
     # Iterate over the specified time range
     for (idx, t) = enumerate(rng)
         # Define the range of data points required for evaluation, including lags and leads
-        rng_sub = t - model.maxlag : t + model.maxlead
+        rng_sub = t-model.maxlag:t+model.maxlead
 
         # Ensure the subrange is within bounds of the data
         if rng_sub[begin] >= 1 && rng_sub[end] <= size(sim_data, 1)

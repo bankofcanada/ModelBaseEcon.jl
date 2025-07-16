@@ -951,17 +951,25 @@ function process_equation(model::Model, expr::Expr;
     #  (helps with tracking the locations of errors)
     source = []
 
+    """spell a number using subscript digits e.g., 
+        `num2sub(0)` returns "₀" 
+        `num2sub(5)` returns "₊₅" 
+        `num2sub(-1)` returns "₋₁" 
+    """
+    num2sub(n::Integer) = n == 0 ? "₀" : n < 0 ? '₋' * n2s(-n) : '₊' * n2s(n)
+    n2s(n::Int) = n < 10 ? string('₀' + n) : n2s(n ÷ 10) * n2s(n % 10)
+
     add_tsref(var::ModelVariable, tind) = begin
-        newsym = islog(var) ? Symbol("#log#", var.name, "#", tind, "#") :
-                 isneglog(var) ? Symbol("#logm#", var.name, "#", tind, "#") :
-                 Symbol("#", var.name, "#", tind, "#")
+        newsym = islog(var) ? Symbol("log_", var.name, num2sub(tind)) :
+                 isneglog(var) ? Symbol("logm_", var.name, num2sub(tind)) :
+                 Symbol(var.name, num2sub(tind))
         push!(tsrefs, (var, tind) => newsym)
     end
 
     add_ssref(var::ModelVariable) = begin
-        newsym = islog(var) ? Symbol("#log#", var.name, "#ss#") :
-                 isneglog(var) ? Symbol("#logm#", var.name, "#ss#") :
-                 Symbol("#", var.name, "#ss#")
+        newsym = islog(var) ? Symbol("log_", var.name, "ˢˢ") :
+                 isneglog(var) ? Symbol("logm_", var.name, "ˢˢ") :
+                 Symbol(var.name, "ˢˢ")
         push!(ssrefs, var => newsym)
     end
 
@@ -1111,7 +1119,7 @@ function process_equation(model::Model, expr::Expr;
     #  + each mention of a time-reference is replaced with its symbol
     make_residual_expression(any) = any
     make_residual_expression(name::Symbol) = haskey(model.parameters, name) ? prefs[name] : name
-    make_residual_expression(var::ModelVariable, newsym::Symbol) = need_transform(var) ? :($(inverse_transformation(var))($newsym)) : newsym
+    make_residual_expression(var::ModelVariable, newsym::Symbol) = need_transform(var) ? :($(nameof(inverse_transformation(var)))($newsym)) : newsym
     function make_residual_expression(ex::Expr)
         if ex.head == :ref
             varname, tindex = ex.args
@@ -1171,14 +1179,14 @@ function process_equation(model::Model, expr::Expr;
 
     if codegen == :forwarddiff
         resid, RJ, resid_param, chunk = DerivsFD.makefuncs(eqn_name, residual, tssyms, sssyms, psyms, modelmodule)
-        _update_eqn_params!(resid, model.parameters)
-        _update_eqn_params!(RJ, model.parameters)
-        _update_eqn_params!(resid_param, model.parameters)
-        thismodule = @__MODULE__
-        modelmodule.eval(:($(thismodule).DerivsFD.precompilefuncs($resid, $RJ, $resid_param, $chunk)))
+        modelmodule.eval(:($(@__MODULE__).DerivsFD.precompilefuncs($resid, $RJ, $resid_param, $chunk)))
+    elseif codegen == :symbolics
+        resid, RJ = DerivsSym.makefuncs(eqn_name, residual, tssyms, sssyms, psyms, modelmodule)
     else
-        error("Invalid `codegen` value $codegen.")
+        error("Invalid `codegen` value $(QuoteNode(codegen)).")
     end
+    _update_eqn_params!(resid, model.parameters)
+    _update_eqn_params!(RJ, model.parameters)
     tsrefs′ = LittleDict{Tuple{ModelSymbol,Int},Symbol}()
     for ((modsym, i), sym) in tsrefs
         tsrefs′[(ModelSymbol(modsym), i)] = sym
@@ -1404,13 +1412,18 @@ is easier to call [`@initialize`](@ref), which automatically sets the
 some other module, then this can be done by calling this function instead of the
 macro.
 """
-function initialize!(model::Model, modelmodule::Module)
+function initialize!(model::Model, modelmodule::Module, codegen=getoption!(model, :codegen, :forwarddiff))
     # Note: we cannot use moduleof here, because the equations are not initialized yet.
     if !isempty(model.evaldata)
         modelerror("Model already initialized.")
     end
-    if model.options.codegen == :forwarddiff
+    if codegen == :forwarddiff
         DerivsFD.initfuncs(modelmodule)
+        error("ForwardDiff models not allowed")
+    elseif codegen == :symbolics
+        DerivsSym.initfuncs(modelmodule)
+    else
+        error("Invalid `codegen` value $(QuoteNode(codegen)).")
     end
     model._module = isdefined(modelmodule, :thismodule) ? modelmodule.thismodule : modelmodule.eval(:(thismodule() = @__MODULE__))
     samename = Symbol[intersect(model.allvars, keys(model.parameters))...]

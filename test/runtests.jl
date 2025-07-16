@@ -245,11 +245,11 @@ end
 module E
 using ModelBaseEcon
 end
-@testset "Evaluations" begin
+@testset "DerivsFD" begin
     ModelBaseEcon.DerivsFD.initfuncs(E)
     @test isdefined(E, :EquationEvaluatorFD)
     @test isdefined(E, :EquationGradientFD)
-    resid, RJ = ModelBaseEcon.DerivsFD.makefuncs(Symbol(1), :(x + 3 * y), [:x, :y], [], [], E)
+    resid, RJ = ModelBaseEcon.DerivsFD.makefuncs(:fd, :(x + 3 * y), [:x, :y], [], [], E)
     @test resid isa E.EquationEvaluatorFD
     @test RJ isa E.EquationGradientFD
     @test RJ.fn1 isa ModelBaseEcon.DerivsFD.FunctionWrapper
@@ -260,7 +260,26 @@ end
     @test RJ([1.1, 2.3]) == (8.0, [1.0, 3.0])
     # make sure the EquationEvaluator and EquationGradient are reused for identical expressions and arguments
     nnames = length(names(E, all=true))
-    resid1, RJ1 = ModelBaseEcon.DerivsFD.makefuncs(Symbol(1), :(x + 3 * y), [:x, :y], [], [], E)
+    resid1, RJ1 = ModelBaseEcon.DerivsFD.makefuncs(:fd, :(x + 3 * y), [:x, :y], [], [], E)
+    @test nnames == length(names(E, all=true))
+    @test resid === resid1
+    @test RJ === RJ1
+end
+
+@testset "DerivsSym" begin
+    ModelBaseEcon.DerivsSym.initfuncs(E)
+    @test isdefined(E, :EquationEvaluatorSym)
+    @test isdefined(E, :GradientEvaluatorSym)
+    resid, RJ = ModelBaseEcon.DerivsSym.makefuncs(:sym, :(x + 3 * y), [:x, :y], [], [], E)
+    @test resid isa E.EquationEvaluatorSym
+    @test RJ isa E.GradientEvaluatorSym
+    @test ModelBaseEcon.moduleof(resid) === E
+    @test ModelBaseEcon.moduleof(RJ) === E
+    @test resid([1.1, 2.3]) == 8.0
+    @test RJ([1.1, 2.3]) == (8.0, [1.0, 3.0])
+    # make sure the EquationEvaluator and EquationGradient are reused for identical expressions and arguments
+    nnames = length(names(E, all=true))
+    resid1, RJ1 = ModelBaseEcon.DerivsSym.makefuncs(:sym, :(x + 3 * y), [:x, :y], [], [], E)
     @test nnames == length(names(E, all=true))
     @test resid === resid1
     @test RJ === RJ1
@@ -462,7 +481,7 @@ end
         @variables m a
         eq = ModelBaseEcon.process_equation(m, quote
                 "this is equation 1"
-                :E1 => a[t] = 0
+                a[t] = 0
             end, modelmodule=@__MODULE__, eqn_name=:A)
         eq.doc == "this is equation 1"
     end
