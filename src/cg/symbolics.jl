@@ -41,6 +41,7 @@ function make_res_grad_expr(expr, tssyms, sssyms, psyms, mod)
         src, resid = :nothing, expr
     end        
     svars = map(Symbolics.variable, Iterators.flatten((tssyms, sssyms)))
+    # dump(resid)   # for debugging when Symbolics.jl complains
     sexpr = simplify(parse_expr_to_symbolic(resid, mod))
     sgrad = simplify.(Symbolics.gradient(sexpr, svars))
     sym_resid = Expr(:block, src, Symbolics.toexpr(sexpr))

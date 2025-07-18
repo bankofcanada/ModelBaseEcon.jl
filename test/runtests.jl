@@ -678,7 +678,7 @@ end
 
 @testset "ifelse_eval" begin
     # this addresses issue #70
-    @test let model = Model()
+    let model = Model()
         @variables model a
         @parameters model cond = true
         @equations model begin
@@ -686,9 +686,12 @@ end
         end
         @initialize model
         r, j = eval_RJ(zeros(1, 1), model)
-        r == [-1.0] && j == [1.0;;]
+        @test r == [-1.0] && j == [1.0;;]
+        model.parameters.cond = false
+        r, j = eval_RJ(zeros(1, 1), model)
+        @test r == [1.0] && j == [1.0;;]
     end
-    @test let model = Model()
+    let model = Model()
         @variables model b
         @parameters model p = 0.5
         @equations model begin
@@ -696,7 +699,10 @@ end
         end
         @initialize model
         r, j = eval_RJ(zeros(1, 1), model)
-        r == [-1.0] && j == [1.0;;]
+        @test r == [-1.0] && j == [1.0;;]
+        model.parameters.p = 1.1
+        r, j = eval_RJ(zeros(1, 1), model)
+        @test r == [0.0] && j == [1.0;;]
     end
 end
 
@@ -1013,6 +1019,9 @@ end
 
     modelmodule = E1_noparams
 
+    # number of new symbols created by makefuncs
+    n_new_syms = Dict(:symbolics => 6, :forwarddiff => 4)
+    
     for i = 1:5
         α = 0.132434
         new_E1 = E1_noparams.newmodel()
@@ -1023,7 +1032,7 @@ end
         @reinitialize(new_E1)
         new_length = length(names(modelmodule, all=true))
         if i == 1
-            @test new_length == prev_length + 4
+            @test new_length == prev_length + n_new_syms[getoption(new_E1, :codegen, nothing)]
         else
             @test new_length == prev_length
         end

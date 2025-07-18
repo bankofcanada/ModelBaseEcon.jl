@@ -1092,10 +1092,40 @@ function process_equation(model::Model, expr::Expr;
         filter!(!isnothing, args)
         if ex.head == :if
             if length(args) == 3
+                # return Expr(:if, args...)  # not the original ex - here args have been processed!
+                # N.B. if(a) b else c end is different from ifelse(a, b, c) in that 
+                #      if-statement evaluates either b or c but not both, while the 
+                #      ifelse-function evaluates all three each call regardless of a.
+                #   However, Symbolics.jl can handle ifelse() but not if-statement.
+                if codegen == :symbolics
+                    if args[1] isa Symbol
+                        args[1] = Expr(:call, :(==), args[1], true)
+                    end
+                    return Expr(:call, :ifelse, args...)
+                else
                 return Expr(:if, args...)
+                end
             else
                 error_process("Unable to process an `if` statement with a single branch. Use function `ifelse` instead.", expr, modelmodule)
             end
+        end
+        if ex.head ∈ (:(&&), :(||)) && codegen == :symbolics
+            # cf. https://docs.sciml.ai/ModelingToolkit/dev/basics/FAQ/#How-do-I-handle-if-statements-in-my-symbolic-forms?
+            return Expr(:call, ex.head == :(&&) ? :(&) : :(|), args...)
+        end
+        if ex.head == :comparison && codegen == :symbolics
+            # desugar chanined comparison (!!! this is quick and dirty - todo: check correctness and rewrite) 
+            local x = Expr(:call, :(&))
+            L = args[1]
+            for ii = 2:2:length(args)-1
+                op = args[ii]
+                R = args[ii+1]
+                @assert op ∈ Set((:(<), :(<=), :(==), :(!=), :(>=), :(>)))
+                push!(x.args, Expr(:call, op, L, R))
+                ii += 2
+                L = R
+            end
+            return x
         end
         if ex.head ∈ (:call, :comparison, :(&&), :(||))
             return Expr(ex.head, args...)
