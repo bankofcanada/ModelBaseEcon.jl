@@ -1103,7 +1103,7 @@ function process_equation(model::Model, expr::Expr;
                     end
                     return Expr(:call, :ifelse, args...)
                 else
-                return Expr(:if, args...)
+                    return Expr(:if, args...)
                 end
             else
                 error_process("Unable to process an `if` statement with a single branch. Use function `ifelse` instead.", expr, modelmodule)
@@ -1211,6 +1211,13 @@ function process_equation(model::Model, expr::Expr;
         resid, RJ, resid_param, chunk = DerivsFD.makefuncs(eqn_name, residual, tssyms, sssyms, psyms, modelmodule)
         modelmodule.eval(:($(@__MODULE__).DerivsFD.precompilefuncs($resid, $RJ, $resid_param, $chunk)))
     elseif codegen == :symbolics
+        symmodule = isdefined(modelmodule, :_Sym) ? modelmodule._Sym : modelmodule
+        for p in psyms
+            pp = getproperty(model.parameters, p)
+            if pp isa AbstractArray && !isdefined(symmodule, p)
+                Core.eval(symmodule, :(global $p = Symbolics.variables($(QuoteNode(p)), $(axes(pp)...))))
+            end
+        end
         resid, RJ = DerivsSym.makefuncs(eqn_name, residual, tssyms, sssyms, psyms, modelmodule)
     else
         error("Invalid `codegen` value $(QuoteNode(codegen)).")

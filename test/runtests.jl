@@ -1021,7 +1021,7 @@ end
 
     # number of new symbols created by makefuncs
     n_new_syms = Dict(:symbolics => 6, :forwarddiff => 4)
-    
+
     for i = 1:5
         α = 0.132434
         new_E1 = E1_noparams.newmodel()
@@ -1759,7 +1759,7 @@ end
         x = Float64[0, 0.375, 0.128, 0]
         x[1] = model.parameters.c[1] * x[2] + model.parameters.c[2] * x[3]
         eq = model.equations[:E1]
-        @test 0 == eq.eval_resid(x)
+        @test 0 ≈ eq.eval_resid(x) atol = 1e-15
     end
 end
 

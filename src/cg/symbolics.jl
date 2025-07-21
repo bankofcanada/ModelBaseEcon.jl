@@ -13,6 +13,7 @@ using Symbolics
 using SymbolicUtils
 
 
+import ..ModelBaseEcon
 import ..EquationEvaluator
 import .._update_eqn_params!
 import .._unpack_args_expr
@@ -22,7 +23,28 @@ import ..funcsyms
 #------------------------------------------------------------------------------
 
 const myhash = @static UInt == UInt64 ? 0xca19b034b699d744 : 0xd2f14686
-                       
+
+function _unpack_array_pars_expr(ee, psyms, mod::Module)
+    ex = Expr(:block)
+    isempty(psyms) && return ex
+    symmod = isdefined(mod, :_Sym) ? mod._Sym : mod
+    for sym in psyms
+        if isdefined(symmod, sym)
+            foo = getfield(symmod, sym)
+            if foo isa Array
+                push!(ex.args, :(@assert axes($sym) == $(axes(foo))))
+                for idx in Iterators.product(axes(foo)...)
+                    bar = Symbolics.tosymbol(foo[idx...])
+                    push!(ex.args, :($bar = $sym[$(idx...)]))
+                end
+            else
+                error("Can't handle params of type $(typeof(foo))")
+            end
+        end
+    end
+    return :(@inbounds $ex)
+end
+
 function _unpack_grad(J, grad)
     ex = Expr(:block)
     ind = 0
@@ -34,19 +56,80 @@ function _unpack_grad(J, grad)
 end
 
 function make_res_grad_expr(expr, tssyms, sssyms, psyms, mod)
+    symmod = isdefined(mod, :_Sym) ? mod._Sym : mod
     # the residual `expr` comes to us packaged in a block with a source line
     if Meta.isexpr(expr, :block) && (length(expr.args) == 2)
         src, resid = expr.args
     else
         src, resid = :nothing, expr
-    end        
+    end
     svars = map(Symbolics.variable, Iterators.flatten((tssyms, sssyms)))
     # dump(resid)   # for debugging when Symbolics.jl complains
-    sexpr = simplify(parse_expr_to_symbolic(resid, mod))
+    sexpr = simplify(parse_expr_to_symbolic(resid, symmod))
     sgrad = simplify.(Symbolics.gradient(sexpr, svars))
-    sym_resid = Expr(:block, src, Symbolics.toexpr(sexpr))
+    sym_resid = Symbolics.toexpr(sexpr)
+    if src !== :nothing
+        sym_resid = Expr(:block, src, sym_resid)
+    end
     sym_grad = Symbolics.toexpr.(sgrad)
     return sym_resid, sym_grad
+end
+
+function _makefuncs_expr(eqn_name, expr, tssyms, sssyms, psyms, mod::Module)
+    fn1, fn2, fn3, fn4 = funcsyms(eqn_name, expr, tssyms, sssyms, psyms, mod,
+        myhash, ("resid_", "RJ_", "resid_param_", "RJ_param_"))
+    if isdefined(mod, fn1) && isdefined(mod, fn2) && isdefined(mod, fn3)
+        return mod.eval(:(($fn1, $fn2, $fn3, $fn4)))
+    end
+    nvars = length(tssyms) + length(sssyms)
+    x = gensym("x")
+    G = gensym("G")
+    R = gensym("R")
+    ee = gensym("ee")
+    resid, grad = make_res_grad_expr(expr, tssyms, sssyms, psyms, mod)
+    # dump(resid)   # for debugging
+    # dump(grad)    # for debugging
+    # If the equation has no parameters, then we just unpack x and evaluate the expressions
+    # Otherwise, we unpack the parameters (which have unknown types) and pass it
+    # to another function that acts like a function barrier where the types are known.
+    return quote
+        function ($ee::EquationEvaluatorSym{$(QuoteNode(fn1))})($x::Vector{<:Real})
+            $(_unpack_args_expr(x, tssyms, sssyms))
+            $(_unpack_pars_expr(ee, psyms))
+            $fn3($x, $(psyms...))
+        end
+        const $fn1 = EquationEvaluatorSym{$(QuoteNode(fn1))}(UInt(0),
+            $(@__MODULE__).LittleDict(Symbol[$(QuoteNode.(psyms)...)],
+                fill!(Vector{Any}(undef, $(length(psyms))), nothing)),
+            $(Meta.quot(resid)))
+
+        function ($ee::GradientEvaluatorSym{$(QuoteNode(fn2))})($x::Vector{<:Real})
+            $(_unpack_args_expr(x, tssyms, sssyms))
+            $(_unpack_pars_expr(ee, psyms))
+            $R = $fn4($ee.G, $x, $(psyms...))
+            $R, $ee.G
+        end
+        const $fn2 = GradientEvaluatorSym{$(QuoteNode(fn2))}(UInt(0),
+            $(@__MODULE__).LittleDict(Symbol[$(QuoteNode.(psyms)...)],
+                fill!(Vector{Any}(undef, $(length(psyms))), nothing)),
+            $(Meta.quot(resid)), [$(Meta.quot.(grad)...)],
+            Vector{Float64}(undef, $nvars))
+
+        function $fn3($x::Vector{<:Real}, $(psyms...))
+            $(_unpack_array_pars_expr(ee, psyms, mod))
+            $(_unpack_args_expr(x, tssyms, sssyms))
+            $resid
+        end
+
+        function $fn4($G::Vector{<:Real}, $x::Vector{<:Real}, $(psyms...))
+            $(_unpack_array_pars_expr(ee, psyms, mod))
+            $(_unpack_args_expr(x, tssyms, sssyms))
+            $(_unpack_grad(G, grad))
+            $resid
+        end
+
+        ($fn1, $fn2, $fn3, $fn4)
+    end
 end
 
 """
@@ -71,60 +154,16 @@ callable `EquationEvaluator` instance) and a second function that evaluates both
 the residual and its gradient (as a callable `EquationGradient` instance).
 """
 function makefuncs(eqn_name, expr, tssyms, sssyms, psyms, mod::Module)
-    fn1, fn2, fn3, fn4 = funcsyms(eqn_name, expr, tssyms, sssyms, psyms, mod, 
-    myhash, ("resid_", "RJ_", "resid_param_", "RJ_param_"))
-    if isdefined(mod, fn1) && isdefined(mod, fn2) && isdefined(mod, fn3)
-        return mod.eval(:(($fn1, $fn2, $fn3, $fn4)))
-    end
-    nvars = length(tssyms) + length(sssyms)
-    x = gensym("x")
-    G = gensym("G")
-    R = gensym("R")
-    ee = gensym("ee")
-    resid, grad = make_res_grad_expr(expr, tssyms, sssyms, psyms, mod)
-    # If the equation has no parameters, then we just unpack x and evaluate the expressions
-    # Otherwise, we unpack the parameters (which have unknown types) and pass it
-    # to another function that acts like a function barrier where the types are known.
-    return mod.eval(quote
-        function ($ee::EquationEvaluatorSym{$(QuoteNode(fn1))})($x::Vector{<:Real})
-            $(_unpack_args_expr(x, tssyms, sssyms))
-            $(_unpack_pars_expr(ee, psyms))
-            $fn3($x, $(psyms...))
-        end
-        const $fn1 = EquationEvaluatorSym{$(QuoteNode(fn1))}(UInt(0),
-            $(@__MODULE__).LittleDict(Symbol[$(QuoteNode.(psyms)...)],
-                fill!(Vector{Any}(undef, $(length(psyms))), nothing)))
-
-        function ($ee::GradientEvaluatorSym{$(QuoteNode(fn2))})($x::Vector{<:Real})
-            $(_unpack_args_expr(x, tssyms, sssyms))
-            $(_unpack_pars_expr(ee, psyms))
-            $R = $fn4($ee.G, $x, $(psyms...))
-            $R, $ee.G
-        end
-        const $fn2 = GradientEvaluatorSym{$(QuoteNode(fn2))}(UInt(0),
-            $(@__MODULE__).LittleDict(Symbol[$(QuoteNode.(psyms)...)],
-                fill!(Vector{Any}(undef, $(length(psyms))), nothing)), 
-                Vector{Float64}(undef, $nvars))
-        
-        function $fn3($x::Vector{<:Real}, $(psyms...))
-            $(_unpack_args_expr(x, tssyms, sssyms))
-            $resid
-        end
-
-        function $fn4($G::Vector{T}, $x::Vector{T}, $(psyms...)) where {T <: Real}
-            $(_unpack_args_expr(x, tssyms, sssyms))
-            $(_unpack_grad(G, grad))
-            $resid
-        end
-
-        ($fn1, $fn2, $fn3, $fn4)
-    end)
-
-    error("Not ready")
+    return mod.eval(_makefuncs_expr(eqn_name, expr, tssyms, sssyms, psyms, mod))
 end
 
 function initfuncs(mod::Module)
     expr = Expr(:block)
+    if !isdefined(mod, :_Sym)
+        mod.eval(:(baremodule _Sym
+        import ModelBaseEcon.DerivsSym.Symbolics
+        end))
+    end
     if !isdefined(mod, :_hashed_expressions)
         push!(expr.args, quote
             const _hashed_expressions = Dict{UInt,Vector{Tuple{Expr,Vector{Symbol},Vector{Symbol},Vector{Symbol}}}}()
@@ -132,22 +171,27 @@ function initfuncs(mod::Module)
     end
     if !isdefined(mod, :EquationEvaluatorSym)
         push!(expr.args, quote
-            struct EquationEvaluatorSym{FN} <: ModelBaseEcon.EquationEvaluator
+            struct EquationEvaluatorSym{FN} <: $ModelBaseEcon.EquationEvaluator
                 rev::Ref{UInt}
-                params::ModelBaseEcon.LittleDictVec{Symbol,Any}
+                params::$ModelBaseEcon.LittleDictVec{Symbol,Any}
+                resid::Expr
             end
         end)
     end
     if !isdefined(mod, :GradientEvaluatorSym)
         push!(expr.args, quote
-            struct GradientEvaluatorSym{FN} <: ModelBaseEcon.EquationEvaluator
+            struct GradientEvaluatorSym{FN} <: $ModelBaseEcon.EquationEvaluator
                 rev::Ref{UInt}
-                params::ModelBaseEcon.LittleDictVec{Symbol,Any}
+                params::$ModelBaseEcon.LittleDictVec{Symbol,Any}
+                resid::Expr
+                grad::Vector
                 G::Vector{Float64}
             end
         end)
     end
-    mod.eval(expr)
+    if !isempty(expr.args)
+        mod.eval(expr)
+    end
     return nothing
 end
 
