@@ -152,33 +152,9 @@ function makefuncs(eqn_name, expr, tssyms, sssyms, psyms, mod)
     end)
 end
 
-"""
-    initfuncs(mod::Module)
-
-Initialize the given module before creating functions that evaluate residuals
-and thier gradients.
-
-!!! warning
-    Internal function. Do not call directly.
-
-### Implementation (for developers)
-Declare the necessary types in the module where the model is being defined.
-There are two such types. First is `EquationEvaluator`, which is callable and
-stores a collection of parameters. The call will be defined in
-[`makefuncs`](@ref) and will evaluate the residual. The other type is
-`EquationGradient`, which is also callable and stores the `EquationEvaluator`
-together with a `DiffResult` and a `GradientConfig` used by `ForwardDiff`. Its
-call is defined here and computes the residual and the gradient.
-"""
-function initfuncs(mod::Module)
-    expr = Expr(:block)
-    if !isdefined(mod, :_hashed_expressions)
-        push!(expr.args, quote
-            const _hashed_expressions = Dict{UInt,Vector{Tuple{Expr,Vector{Symbol},Vector{Symbol},Vector{Symbol}}}}()
-        end)
-    end
+function _initfuncs_exprs!(exprs::Vector{Expr}, mod::Module)
     if !isdefined(mod, :EquationEvaluatorFD)
-        push!(expr.args, quote
+        push!(exprs, quote
             struct EquationEvaluatorFD{FN} <: ModelBaseEcon.EquationEvaluator
                 rev::Ref{UInt}
                 params::ModelBaseEcon.LittleDictVec{Symbol,Any}
@@ -186,12 +162,11 @@ function initfuncs(mod::Module)
         end)
     end
     if !isdefined(mod, :EquationGradientFD)
-        push!(expr.args, quote
+        push!(exprs, quote
             import ModelBaseEcon.$(nameof(@__MODULE__)).EquationGradientFD
         end)
     end
-    mod.eval(expr)
-    return nothing
+    return exprs
 end
 
 end

@@ -246,7 +246,7 @@ module E
 using ModelBaseEcon
 end
 @testset "DerivsFD" begin
-    ModelBaseEcon.DerivsFD.initfuncs(E)
+    ModelBaseEcon.initfuncs(E, :forwarddiff)
     @test isdefined(E, :EquationEvaluatorFD)
     @test isdefined(E, :EquationGradientFD)
     resid, RJ = ModelBaseEcon.DerivsFD.makefuncs(:fd, :(x + 3 * y), [:x, :y], [], [], E)
@@ -267,7 +267,7 @@ end
 end
 
 @testset "DerivsSym" begin
-    ModelBaseEcon.DerivsSym.initfuncs(E)
+    ModelBaseEcon.initfuncs(E, :symbolics)
     @test isdefined(E, :EquationEvaluatorSym)
     @test isdefined(E, :GradientEvaluatorSym)
     resid, RJ = ModelBaseEcon.DerivsSym.makefuncs(:sym, :(x + 3 * y), [:x, :y], [], [], E)

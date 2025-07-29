@@ -39,9 +39,9 @@ function _unpack_args_expr(x, tssyms, sssyms)
 end
 
 function _unpack_pars_expr(ee, psyms)
-    isempty(psyms) && return :nothing
-    pv = gensym("pv")
     ex = Expr(:block)
+    isempty(psyms) && return ex
+    pv = Symbol("#p#")
     ind = 0
     for sym in psyms
         ind += 1
@@ -75,26 +75,57 @@ function funcsyms(eqn_name::Symbol, expr::Expr, tssyms, sssyms, psyms,
     mod::Module, hash::UInt, prefs::Tuple
 )
     eqn_data = (expr, collect(tssyms), collect(sssyms), collect(psyms))
+    eqn_hash = hash_eqn_data(eqn_data, mod, hash)
+    return ((Symbol(p, '_', eqn_name, '_', eqn_hash) for p in prefs)...,)
+end
+
+function hash_eqn_data(eqn_data, mod::Module, hash::UInt)
     # myhash = @static UInt == UInt64 ? 0x2270e9673a0822b5 : 0x2ce87a13
-    myhash = Base.hash(eqn_data, Base.hash(mod, hash))
-    he = mod._hashed_expressions
-    hits = get!(he, myhash, valtype(he)())
+    eqn_hash = Base.hash(eqn_data, Base.hash(mod, hash))
+    he = mod._hashed_eqn_data
+    hits = get!(he, eqn_hash, valtype(he)())
     ind = indexin([eqn_data], hits)[1]
     if isnothing(ind)
         push!(hits, eqn_data)
-        ind = 1
+        ind = length(hits)
     end
-    return ((Symbol(join((p, eqn_name, ind, myhash), "_")) for p in prefs)...,)
-    # fn1 = Symbol("resid_", eqn_name, "_", ind, "_", myhash)
-    # fn2 = Symbol("RJ_", eqn_name, "_", ind, "_", myhash)
-    # fn3 = Symbol("resid_param_", eqn_name, "_", ind, "_", myhash)
-    # return fn1, fn2, fn3
+    return string(repr(eqn_hash), '_', ind)
 end
 
 #------------------------------------------------------------------------------
 
 include("cg/forwarddiff.jl")
 include("cg/symbolics.jl")
+
+function _initfuncs_exprs!(exprs, mod::Module, codegen::Symbol)
+    if codegen == :forwarddiff
+        derivsmod = DerivsFD
+    elseif codegen == :symbolics
+        derivsmod = DerivsSym
+    else
+        error("Invalid `codegen` value $(QuoteNode(codegen)).")
+    end
+    if !isdefined(mod, :_hashed_eqn_data)
+        push!(exprs, :(
+            const _hashed_eqn_data = Dict{UInt,Vector{Tuple{Expr,Vector{Symbol},Vector{Symbol},Vector{Symbol}}}}()
+        ))
+    end
+    return derivsmod._initfuncs_exprs!(exprs, mod)
+end
+
+"""
+    initfuncs(mod::Module, codegen::Symbol)
+
+Initialize the given module before creating functions that evaluate residuals
+and their derivatives.
+
+!!! warning
+    Internal function. Do not call directly.
+
+"""
+function initfuncs(mod::Module, codegen::Symbol)
+    foreach(mod.eval, _initfuncs_exprs!(Expr[], mod, codegen))
+end
 
 ###########################################################
 # Part 2: Evaluation data for models and equations

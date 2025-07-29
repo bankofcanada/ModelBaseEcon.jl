@@ -13,6 +13,7 @@ using Symbolics
 using SymbolicUtils
 
 
+import ..MacroTools
 import ..ModelBaseEcon
 import ..EquationEvaluator
 import .._update_eqn_params!
@@ -26,7 +27,6 @@ const myhash = @static UInt == UInt64 ? 0xca19b034b699d744 : 0xd2f14686
 
 function _unpack_array_pars_expr(ee, psyms, mod::Module)
     ex = Expr(:block)
-    isempty(psyms) && return ex
     symmod = isdefined(mod, :_Sym) ? mod._Sym : mod
     for sym in psyms
         if isdefined(symmod, sym)
@@ -42,7 +42,7 @@ function _unpack_array_pars_expr(ee, psyms, mod::Module)
             end
         end
     end
-    return :(@inbounds $ex)
+    return isempty(ex.args) ? [] : [:(@inbounds $ex)]
 end
 
 function _unpack_grad(J, grad)
@@ -82,10 +82,10 @@ function _makefuncs_expr(eqn_name, expr, tssyms, sssyms, psyms, mod::Module)
         return mod.eval(:(($fn1, $fn2, $fn3, $fn4)))
     end
     nvars = length(tssyms) + length(sssyms)
-    x = gensym("x")
-    G = gensym("G")
-    R = gensym("R")
-    ee = gensym("ee")
+    x = Symbol("#x#")
+    G = Symbol("#G#")
+    R = Symbol("#R#")
+    ee = Symbol("#e#")
     resid, grad = make_res_grad_expr(expr, tssyms, sssyms, psyms, mod)
     # dump(resid)   # for debugging
     # dump(grad)    # for debugging
@@ -94,38 +94,39 @@ function _makefuncs_expr(eqn_name, expr, tssyms, sssyms, psyms, mod::Module)
     # to another function that acts like a function barrier where the types are known.
     return quote
         function ($ee::EquationEvaluatorSym{$(QuoteNode(fn1))})($x::Vector{<:Real})
-            $(_unpack_args_expr(x, tssyms, sssyms))
-            $(_unpack_pars_expr(ee, psyms))
-            $fn3($x, $(psyms...))
+            # $(_unpack_args_expr(x, tssyms, sssyms))
+            $(_unpack_pars_expr(ee, psyms).args...)
+            return $fn3($x, $(psyms...))
         end
         const $fn1 = EquationEvaluatorSym{$(QuoteNode(fn1))}(UInt(0),
-            $(@__MODULE__).LittleDict(Symbol[$(QuoteNode.(psyms)...)],
+            ModelBaseEcon.LittleDict(Symbol[$(QuoteNode.(psyms)...)],
                 fill!(Vector{Any}(undef, $(length(psyms))), nothing)),
-            $(Meta.quot(resid)))
+                # $(Meta.quot(resid)),
+            )
 
         function ($ee::GradientEvaluatorSym{$(QuoteNode(fn2))})($x::Vector{<:Real})
-            $(_unpack_args_expr(x, tssyms, sssyms))
-            $(_unpack_pars_expr(ee, psyms))
+            # $(_unpack_args_expr(x, tssyms, sssyms))
+            $(_unpack_pars_expr(ee, psyms).args...)
             $R = $fn4($ee.G, $x, $(psyms...))
             $R, $ee.G
         end
         const $fn2 = GradientEvaluatorSym{$(QuoteNode(fn2))}(UInt(0),
-            $(@__MODULE__).LittleDict(Symbol[$(QuoteNode.(psyms)...)],
+            ModelBaseEcon.LittleDict(Symbol[$(QuoteNode.(psyms)...)],
                 fill!(Vector{Any}(undef, $(length(psyms))), nothing)),
-            $(Meta.quot(resid)), [$(Meta.quot.(grad)...)],
+            # $(Meta.quot(resid)), [$(Meta.quot.(grad)...)],
             Vector{Float64}(undef, $nvars))
 
         function $fn3($x::Vector{<:Real}, $(psyms...))
-            $(_unpack_array_pars_expr(ee, psyms, mod))
+            $(_unpack_array_pars_expr(ee, psyms, mod)...)
             $(_unpack_args_expr(x, tssyms, sssyms))
-            $resid
+            return $resid
         end
 
         function $fn4($G::Vector{<:Real}, $x::Vector{<:Real}, $(psyms...))
-            $(_unpack_array_pars_expr(ee, psyms, mod))
+            $(_unpack_array_pars_expr(ee, psyms, mod)...)
             $(_unpack_args_expr(x, tssyms, sssyms))
             $(_unpack_grad(G, grad))
-            $resid
+            return $resid
         end
 
         ($fn1, $fn2, $fn3, $fn4)
@@ -157,42 +158,35 @@ function makefuncs(eqn_name, expr, tssyms, sssyms, psyms, mod::Module)
     return mod.eval(_makefuncs_expr(eqn_name, expr, tssyms, sssyms, psyms, mod))
 end
 
-function initfuncs(mod::Module)
-    expr = Expr(:block)
+function _initfuncs_exprs!(exprs::Vector{Expr}, mod::Module)
     if !isdefined(mod, :_Sym)
-        mod.eval(:(baremodule _Sym
+        push!(exprs, :(baremodule _Sym
+        import Base
+        import ModelBaseEcon
         import ModelBaseEcon.DerivsSym.Symbolics
         end))
     end
-    if !isdefined(mod, :_hashed_expressions)
-        push!(expr.args, quote
-            const _hashed_expressions = Dict{UInt,Vector{Tuple{Expr,Vector{Symbol},Vector{Symbol},Vector{Symbol}}}}()
-        end)
-    end
     if !isdefined(mod, :EquationEvaluatorSym)
-        push!(expr.args, quote
-            struct EquationEvaluatorSym{FN} <: $ModelBaseEcon.EquationEvaluator
+        push!(exprs, quote
+            struct EquationEvaluatorSym{FN} <: ModelBaseEcon.EquationEvaluator
                 rev::Ref{UInt}
-                params::$ModelBaseEcon.LittleDictVec{Symbol,Any}
-                resid::Expr
+                params::ModelBaseEcon.LittleDictVec{Symbol,Any}
+                # resid::Expr
             end
         end)
     end
     if !isdefined(mod, :GradientEvaluatorSym)
-        push!(expr.args, quote
-            struct GradientEvaluatorSym{FN} <: $ModelBaseEcon.EquationEvaluator
+        push!(exprs, quote
+            struct GradientEvaluatorSym{FN} <: ModelBaseEcon.EquationEvaluator
                 rev::Ref{UInt}
-                params::$ModelBaseEcon.LittleDictVec{Symbol,Any}
-                resid::Expr
-                grad::Vector
+                params::ModelBaseEcon.LittleDictVec{Symbol,Any}
+                # resid::Expr
+                # grad::Vector
                 G::Vector{Float64}
             end
         end)
     end
-    if !isempty(expr.args)
-        mod.eval(expr)
-    end
-    return nothing
+    return exprs
 end
 
 end

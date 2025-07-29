@@ -1454,14 +1454,7 @@ function initialize!(model::Model, modelmodule::Module, codegen=getoption!(model
     if !isempty(model.evaldata)
         modelerror("Model already initialized.")
     end
-    if codegen == :forwarddiff
-        DerivsFD.initfuncs(modelmodule)
-        error("ForwardDiff models not allowed")
-    elseif codegen == :symbolics
-        DerivsSym.initfuncs(modelmodule)
-    else
-        error("Invalid `codegen` value $(QuoteNode(codegen)).")
-    end
+    initfuncs(modelmodule, codegen)
     model._module = isdefined(modelmodule, :thismodule) ? modelmodule.thismodule : modelmodule.eval(:(thismodule() = @__MODULE__))
     samename = Symbol[intersect(model.allvars, keys(model.parameters))...]
     if !isempty(samename)
