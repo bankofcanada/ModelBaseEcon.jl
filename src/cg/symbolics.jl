@@ -79,7 +79,7 @@ function _makefuncs_expr(eqn_name, expr, tssyms, sssyms, psyms, mod::Module)
     fn1, fn2, fn3, fn4 = funcsyms(eqn_name, expr, tssyms, sssyms, psyms, mod,
         myhash, ("resid_", "RJ_", "resid_param_", "RJ_param_"))
     if isdefined(mod, fn1) && isdefined(mod, fn2) && isdefined(mod, fn3)
-        return mod.eval(:(($fn1, $fn2, $fn3, $fn4)))
+        return :(($fn1, $fn2, $fn3, $fn4))
     end
     nvars = length(tssyms) + length(sssyms)
     x = Symbol("#x#")
@@ -101,8 +101,8 @@ function _makefuncs_expr(eqn_name, expr, tssyms, sssyms, psyms, mod::Module)
         const $fn1 = EquationEvaluatorSym{$(QuoteNode(fn1))}(UInt(0),
             ModelBaseEcon.LittleDict(Symbol[$(QuoteNode.(psyms)...)],
                 fill!(Vector{Any}(undef, $(length(psyms))), nothing)),
-                # $(Meta.quot(resid)),
-            )
+            # $(Meta.quot(resid)),
+        )
 
         function ($ee::GradientEvaluatorSym{$(QuoteNode(fn2))})($x::Vector{<:Real})
             # $(_unpack_args_expr(x, tssyms, sssyms))

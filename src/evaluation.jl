@@ -6,7 +6,7 @@
 ##################################################################################
 
 ###########################################################
-# Part 1: Code generation for residuals and its derivatives
+# Part 1: Code generation for residuals and their derivatives
 
 abstract type EquationEvaluator <: Function end
 
@@ -20,6 +20,7 @@ function _update_eqn_params!(ee::EquationEvaluator, params)
         ee.params[k] = getproperty(params, k)
     end
     ee.rev[] = params.rev[]
+    return
 end
 function _update_eqn_params!(eqn::AbstractEquation, params)
     _update_eqn_params!(eqn.eval_resid, params)

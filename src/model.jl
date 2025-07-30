@@ -15,6 +15,7 @@ const defaultoptions = Options(
     verbose=false,
     variant=:default,
     codegen=:forwarddiff,
+    # codegen=:symbolics,
     warn=Options(no_t=true)
 )
 
@@ -926,12 +927,10 @@ Equation() instance for it.
 function process_equation end
 # export process_equation
 process_equation(model::Model, expr::String; kwargs...) = process_equation(model, Meta.parse(expr); kwargs...)
-# process_equation(model::Model, val::Number; kwargs...) = process_equation(model, Expr(:block, val); kwargs...)
-# process_equation(model::Model, val::Symbol; kwargs...) = process_equation(model, Expr(:block, val); kwargs...)
 function process_equation(model::Model, expr::Expr;
     var_to_idx=get_var_to_idx(model),
     modelmodule::Module=moduleof(model),
-    line=LineNumberNode(0),
+    line::LineNumberNode=LineNumberNode(0),
     flags=EqnFlags(),
     doc="",
     eqn_name=:_unnamed_equation_,
@@ -1120,9 +1119,13 @@ function process_equation(model::Model, expr::Expr;
             for ii = 2:2:length(args)-1
                 op = args[ii]
                 R = args[ii+1]
-                @assert op ∈ Set((:(<), :(<=), :(==), :(!=), :(>=), :(>)))
+                # @assert op ∈ Set((:(<), :(<=), :(==), :(!=), :(>=), :(>)))
+                # N.B. No point checking correctness here, plus the full list of
+                # possible binary infix operators is too long anyway
+                # cf., https://discourse.julialang.org/t/list-of-binary-infix-operators/32282
+                # If there is a problem with the user's expression, it'll 
+                # show up during execution 
                 push!(x.args, Expr(:call, op, L, R))
-                ii += 2
                 L = R
             end
             return x
@@ -1191,13 +1194,10 @@ function process_equation(model::Model, expr::Expr;
     # call process() to gather information
     new_expr = process(expr)
     MacroTools.isexpr(new_expr, :(=)) || error_process("Expected equation.", expr, modelmodule)
-    # if source information missing, set from argument
-    filter!(l -> l !== nothing, source)
-    push!(source, line)
     # make a residual expressoin for the eval function
     residual = make_residual_expression(new_expr)
-    # add the source information to residual expression
-    residual = Expr(:block, source[1], residual)
+    # add the source information to residual expression (if missing take it from argument `line`)
+    residual = Expr(:block, something(source..., line), residual)
     tssyms = values(tsrefs)
     sssyms = values(ssrefs)
     psyms = values(prefs)

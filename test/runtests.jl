@@ -266,23 +266,27 @@ end
     @test RJ === RJ1
 end
 
-@testset "DerivsSym" begin
-    ModelBaseEcon.initfuncs(E, :symbolics)
-    @test isdefined(E, :EquationEvaluatorSym)
-    @test isdefined(E, :GradientEvaluatorSym)
-    resid, RJ = ModelBaseEcon.DerivsSym.makefuncs(:sym, :(x + 3 * y), [:x, :y], [], [], E)
-    @test resid isa E.EquationEvaluatorSym
-    @test RJ isa E.GradientEvaluatorSym
-    @test ModelBaseEcon.moduleof(resid) === E
-    @test ModelBaseEcon.moduleof(RJ) === E
-    @test resid([1.1, 2.3]) == 8.0
-    @test RJ([1.1, 2.3]) == (8.0, [1.0, 3.0])
-    # make sure the EquationEvaluator and EquationGradient are reused for identical expressions and arguments
-    nnames = length(names(E, all=true))
-    resid1, RJ1 = ModelBaseEcon.DerivsSym.makefuncs(:sym, :(x + 3 * y), [:x, :y], [], [], E)
-    @test nnames == length(names(E, all=true))
-    @test resid === resid1
-    @test RJ === RJ1
+@static if VERSION >= v"1.10"
+    @testset "DerivsSym" begin
+        ModelBaseEcon.initfuncs(E, :symbolics)
+        @test isdefined(E, :EquationEvaluatorSym)
+        @test isdefined(E, :GradientEvaluatorSym)
+        resid, RJ = ModelBaseEcon.DerivsSym.makefuncs(:sym, :(x + 3 * y), [:x, :y], [], [], E)
+        @test resid isa E.EquationEvaluatorSym
+        @test RJ isa E.GradientEvaluatorSym
+        @test ModelBaseEcon.moduleof(resid) === E
+        @test ModelBaseEcon.moduleof(RJ) === E
+        @test resid([1.1, 2.3]) == 8.0
+        @test RJ([1.1, 2.3]) == (8.0, [1.0, 3.0])
+        # make sure the EquationEvaluator and EquationGradient are reused for identical expressions and arguments
+        nnames = length(names(E, all=true))
+        resid1, RJ1 = ModelBaseEcon.DerivsSym.makefuncs(:sym, :(x + 3 * y), [:x, :y], [], [], E)
+        @test nnames == length(names(E, all=true))
+        @test resid === resid1
+        @test RJ === RJ1
+    end
+else
+    @warn "Skip DerivSym on Julia 1.9"
 end
 
 @testset "Misc" begin

@@ -97,16 +97,20 @@ export sstate
 Return the module in which the given equation or model was initialized.
 """
 function moduleof end
-@static if VERSION >= v"1.9"
-    function moduleof(f::Function) 
+@static if VERSION >= v"1.10"
+    function moduleof(f::Function)
         mods = unique!(map(parentmodule, methods(f)))
-        length(mods) == 1 && return mods[1]
+        length(mods) == 1 && return first(mods)
         error("Function $(nameof(f)) does not have a unique module")
     end
     moduleof(e::AbstractEquation) = parentmodule(methods(eval_resid(e))[1])
 else
-    moduleof(f::Function) = parentmodule(f)
-    moduleof(e::AbstractEquation) = parentmodule(eval_resid(e))
+    function moduleof(f::Function)
+        mods = unique!(map(m -> m.module, methods(f)))
+        length(mods) == 1 && return first(mods)
+        error("Function $(nameof(f)) does not have a unique module")
+    end
+    moduleof(e::AbstractEquation) = first(methods(eval_resid(e))).module
 end
 function moduleof(m::M) where {M<:AbstractModel}
     if hasfield(M, :_module) && !isnothing(m._module)
