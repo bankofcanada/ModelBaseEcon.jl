@@ -98,20 +98,19 @@ end
 include("cg/forwarddiff.jl")
 include("cg/symbolics.jl")
 
-function _initfuncs_exprs!(exprs, mod::Module, codegen::Symbol)
-    if codegen == :forwarddiff
-        derivsmod = DerivsFD
-    elseif codegen == :symbolics
-        derivsmod = DerivsSym
-    else
-        error("Invalid `codegen` value $(QuoteNode(codegen)).")
-    end
+@generated function _derivs_mod(::Val{codegen}) where codegen
+    return codegen == :forwarddiff ? :(DerivsFD) :
+           codegen == :symbolics ? :(DerivsSym) :
+           :(error("Invalid `codegen` value $(QuoteNode(codegen))"))
+end
+
+function _initfuncs_exprs!(exprs, mod::Module, codegen::Val)
     if !isdefined(mod, :_hashed_eqn_data)
         push!(exprs, :(
             const _hashed_eqn_data = Dict{UInt,Vector{Tuple{Expr,Vector{Symbol},Vector{Symbol},Vector{Symbol}}}}()
         ))
     end
-    return derivsmod._initfuncs_exprs!(exprs, mod)
+    return _derivs_mod(codegen)._initfuncs_exprs!(exprs, mod)
 end
 
 """
@@ -124,9 +123,85 @@ and their derivatives.
     Internal function. Do not call directly.
 
 """
-function initfuncs(mod::Module, codegen::Symbol)
-    foreach(mod.eval, _initfuncs_exprs!(Expr[], mod, codegen))
+function initfuncs(CC::CodeCache)
+    _cc_comment(CC, "Initialize ")
+    E = Expr(:block)
+    _initfuncs_exprs!(E.args, CC.cmod, CC.codegen)
+    runandcache_expr(CC, E; striplines=true, unblock=true)
+    _cc_newline(CC)
 end
+
+function makeequation(doc, eqn_name, flags, expr, residual, tsrefs, ssrefs, prefs, CC)
+    if CC.codegen == Val(:forwarddiff)
+        resid, RJ = DerivsFD.makefuncs(eqn_name, residual, values(tsrefs), values(ssrefs), values(prefs), CC.cmod)
+        tsrefs′ = LittleDict{Tuple{ModelVariable,Int},Symbol}()
+        for ((s1, i), s2) in tsrefs
+            push!(tsrefs′, (ModelVariable(s1), i) => s2)
+        end
+        ssrefs′ = LittleDict{ModelVariable,Symbol}()
+        for (s1, s2) in ssrefs
+            push!(ssrefs′, (ModelVariable(s1) => s2))
+        end
+        return Equation(doc, eqn_name, flags, expr, residual, tsrefs′, ssrefs′, prefs, resid, RJ)
+    else
+
+        E = Expr(:block)
+        # get the definitions from the relevant DerivsXYZ module
+        derivsmod = _derivs_mod(CC.codegen)
+        derivsmod._makefuncs_exprs!(E.args, eqn_name, residual, values(tsrefs), values(ssrefs), values(prefs), CC.cmod)
+        # extract the names of eval_resid and eval_RJ functions from the last expression pushed by _makefuncs_exprs
+        resid_nm, RJ_nm = pop!(E.args).args
+
+        _cc_comment(CC, " Equation $eqn_name ")
+        runandcache_expr(CC, E; striplines=true, unblock=true)
+
+        # if we're writing to a file, we must write the code that hashes the equation data
+        if !isnothing(CC.cf)
+            runandcache_expr(CC, :(ModelBaseEcon.hash_eqn_data(
+                    ($(Meta.quot(residual)),
+                        [$((Meta.quot(s) for s in values(tsrefs))...)],
+                        [$((Meta.quot(s) for s in values(ssrefs))...)],
+                        [$((Meta.quot(s) for s in values(prefs))...)],
+                    ), $(nameof(CC.cmod)), ModelBaseEcon.$(nameof(derivsmod)).myhash)
+                ); striplines=false, unblock=true)
+        end
+        # create the equation instance.
+        tsrefs_keys = []
+        tsrefs_vals = []
+        for ((var, tt), sym) in tsrefs
+            if !isdefined(CC.cmod._Sym, var)
+                push!(E.args, :(@eval _Sym const $var = ModelVariable($var)))
+            end
+            push!(tsrefs_keys, :((_Sym.$var, $tt)))
+            push!(tsrefs_vals, QuoteNode(sym))
+        end
+        ssrefs_keys = []
+        ssrefs_vals = []
+        for (var, sym) in ssrefs
+            if !isdefined(CC.cmod._Sym, var)
+                push!(E.args, :(@eval _Sym const $var = ModelVariable($var)))
+            end
+            push!(ssrefs_keys, :(_Sym.$var))
+            push!(ssrefs_vals, QuoteNode(sym))
+        end
+        runandcache_expr(CC, Expr(:block,
+                :($eqn_name = Equation(
+                    $(doc), $(Meta.quot(eqn_name)), $(flags),
+                    $(Meta.quot(expr)),
+                    $(Meta.quot(residual)),
+                    LittleDict{Tuple{ModelVariable,Int},Symbol}(Tuple{ModelVariable,Int}[$(tsrefs_keys...)], Symbol[$(tsrefs_vals...)]),
+                    LittleDict{ModelVariable,Symbol}(ModelVariable[$(ssrefs_keys...)], Symbol[$(ssrefs_vals...)]),
+                    LittleDict{Symbol,Symbol}(Symbol[$(Iterators.map(QuoteNode, keys(prefs))...)], Symbol[$(Iterators.map(QuoteNode, values(prefs))...)]),
+                    $resid_nm, $RJ_nm)),
+                :(export $resid_nm, $RJ_nm, $eqn_name),
+            ); striplines=false, unblock=true)
+
+        _cc_newline(CC)
+        return getfield(CC.cmod, eqn_name)
+    end
+end
+
+
 
 ###########################################################
 # Part 2: Evaluation data for models and equations

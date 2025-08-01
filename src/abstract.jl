@@ -45,7 +45,7 @@ function Base.show(io::IO, eqn::AbstractEquation)
     if !isempty(doc(eqn)) && !get(io, :compact, false)
         docstr = "\"$(doc(eqn))\"\n"
     end
-    print(io, docstr, keystr, flagstr, expr(eqn))
+    print(io, docstr, keystr, flagstr, MacroTools.striplines(MacroTools.unblock(expr(eqn))))
 end
 
 Base.:(==)(e1::AbstractEquation, e2::AbstractEquation) = flags(e1) == flags(e2) && expr(e1) == expr(e2)
@@ -113,7 +113,7 @@ else
     moduleof(e::AbstractEquation) = first(methods(eval_resid(e))).module
 end
 function moduleof(m::M) where {M<:AbstractModel}
-    if hasfield(M, :_module) && !isnothing(m._module)
+    if hasfield(M, :_module) && m._module isa Function
         return m._module()
     end
     # for (_, eqn) in equations(m)

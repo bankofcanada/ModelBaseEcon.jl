@@ -75,7 +75,7 @@ function make_res_grad_expr(expr, tssyms, sssyms, psyms, mod)
     return sym_resid, sym_grad
 end
 
-function _makefuncs_expr(eqn_name, expr, tssyms, sssyms, psyms, mod::Module)
+function _makefuncs_exprs!(exprs::Vector, eqn_name, expr, tssyms, sssyms, psyms, mod::Module)
     fn1, fn2, fn3, fn4 = funcsyms(eqn_name, expr, tssyms, sssyms, psyms, mod,
         myhash, ("resid_", "RJ_", "resid_param_", "RJ_param_"))
     if isdefined(mod, fn1) && isdefined(mod, fn2) && isdefined(mod, fn3)
@@ -92,73 +92,84 @@ function _makefuncs_expr(eqn_name, expr, tssyms, sssyms, psyms, mod::Module)
     # If the equation has no parameters, then we just unpack x and evaluate the expressions
     # Otherwise, we unpack the parameters (which have unknown types) and pass it
     # to another function that acts like a function barrier where the types are known.
-    return quote
+    push!(exprs, :(
         function ($ee::EquationEvaluatorSym{$(QuoteNode(fn1))})($x::Vector{<:Real})
             # $(_unpack_args_expr(x, tssyms, sssyms))
             $(_unpack_pars_expr(ee, psyms).args...)
             return $fn3($x, $(psyms...))
         end
+    ))
+    push!(exprs, :(
         const $fn1 = EquationEvaluatorSym{$(QuoteNode(fn1))}(UInt(0),
             ModelBaseEcon.LittleDict(Symbol[$(QuoteNode.(psyms)...)],
                 fill!(Vector{Any}(undef, $(length(psyms))), nothing)),
             # $(Meta.quot(resid)),
         )
-
+    ))
+    push!(exprs, :(
         function ($ee::GradientEvaluatorSym{$(QuoteNode(fn2))})($x::Vector{<:Real})
             # $(_unpack_args_expr(x, tssyms, sssyms))
             $(_unpack_pars_expr(ee, psyms).args...)
             $R = $fn4($ee.G, $x, $(psyms...))
             $R, $ee.G
         end
+    ))
+    push!(exprs, :(
         const $fn2 = GradientEvaluatorSym{$(QuoteNode(fn2))}(UInt(0),
             ModelBaseEcon.LittleDict(Symbol[$(QuoteNode.(psyms)...)],
                 fill!(Vector{Any}(undef, $(length(psyms))), nothing)),
             # $(Meta.quot(resid)), [$(Meta.quot.(grad)...)],
             Vector{Float64}(undef, $nvars))
-
+    ))
+    push!(exprs, :(
         function $fn3($x::Vector{<:Real}, $(psyms...))
             $(_unpack_array_pars_expr(ee, psyms, mod)...)
             $(_unpack_args_expr(x, tssyms, sssyms))
             return $resid
         end
-
+    ))
+    push!(exprs, :(
         function $fn4($G::Vector{<:Real}, $x::Vector{<:Real}, $(psyms...))
             $(_unpack_array_pars_expr(ee, psyms, mod)...)
             $(_unpack_args_expr(x, tssyms, sssyms))
             $(_unpack_grad(G, grad))
             return $resid
         end
-
+    ))
+    push!(exprs, :(
         ($fn1, $fn2, $fn3, $fn4)
-    end
+    ))
+    return exprs
 end
 
-"""
-    makefuncs(eqn_name, expr, tssyms, sssyms, psyms, mod)
+# """
+#     makefuncs(eqn_name, expr, tssyms, sssyms, psyms, mod)
 
-Create two functions that evaluate the residual and its gradient for the given
-expression.
+# Create two functions that evaluate the residual and its gradient for the given
+# expression.
 
-!!! warning
-    Internal function. Do not call directly.
+# !!! warning
+#     Internal function. Do not call directly.
 
-### Arguments
-- `expr`: the residual expression
-- `tssyms`: list of time series variable symbols
-- `sssyms`: list of steady state symbols
-- `psyms`: list of parameter symbols
+# ### Arguments
+# - `expr`: the residual expression
+# - `tssyms`: list of time series variable symbols
+# - `sssyms`: list of steady state symbols
+# - `psyms`: list of parameter symbols
 
-### Return value
-Return a quote block to be evaluated in the module where the model is being
-defined. The quote block contains definitions of the residual function (as a
-callable `EquationEvaluator` instance) and a second function that evaluates both
-the residual and its gradient (as a callable `EquationGradient` instance).
-"""
-function makefuncs(eqn_name, expr, tssyms, sssyms, psyms, mod::Module)
-    return mod.eval(_makefuncs_expr(eqn_name, expr, tssyms, sssyms, psyms, mod))
-end
+# ### Return value
+# Return a quote block to be evaluated in the module where the model is being
+# defined. The quote block contains definitions of the residual function (as a
+# callable `EquationEvaluator` instance) and a second function that evaluates both
+# the residual and its gradient (as a callable `EquationGradient` instance).
+# """
+# function makefuncs(eqn_name, expr, tssyms, sssyms, psyms, mod::Module)
+#     E = Expr(:block)
+#     _makefuncs_expr(E.args, eqn_name, expr, tssyms, sssyms, psyms, mod)
+#     return Core.eval(mod, E) 
+# end
 
-function _initfuncs_exprs!(exprs::Vector{Expr}, mod::Module)
+function _initfuncs_exprs!(exprs::Vector, mod::Module)
     if !isdefined(mod, :_Sym)
         push!(exprs, :(baremodule _Sym
         import Base

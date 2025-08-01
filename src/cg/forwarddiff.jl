@@ -152,7 +152,7 @@ function makefuncs(eqn_name, expr, tssyms, sssyms, psyms, mod)
     end)
 end
 
-function _initfuncs_exprs!(exprs::Vector{Expr}, mod::Module)
+function _initfuncs_exprs!(exprs::Vector, mod::Module)
     if !isdefined(mod, :EquationEvaluatorFD)
         push!(exprs, quote
             struct EquationEvaluatorFD{FN} <: ModelBaseEcon.EquationEvaluator

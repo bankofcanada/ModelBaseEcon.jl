@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020-2024, Bank of Canada
+# Copyright (c) 2020-2025, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -10,6 +10,18 @@ has_t(any) = false
 has_t(first, many...) = has_t(first) || has_t(many...)
 has_t(sym::Symbol) = sym == :t
 has_t(expr::Expr) = has_t(expr.args...)
+
+# return `true` if the expression contains a t-reference to a model variable
+function has_tsrefs(expr::Expr, var_to_idx)
+    yes = false
+    MacroTools.postwalk(expr) do x
+        if !yes && (x isa Expr) && (x.head == :ref) && (length(x.args) == 2) && haskey(var_to_idx, x.args[1]) && has_t(x.args[2])
+            yes = true
+        end
+        return x
+    end
+    return yes
+end
 
 # normalized :ref expression
 # normal_ref(var, lag) = Expr(:ref, var, lag == 0 ? :t : lag > 0 ? :(t + $lag) : :(t - $(-lag)))

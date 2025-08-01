@@ -38,6 +38,8 @@ include("Options.jl")
 # The "misc" - various types and functions
 include("misc.jl")
 
+include("codecache.jl")
+
 # NOTE: The order of inclusions matters.
 include("abstract.jl")
 include("parameters.jl")
