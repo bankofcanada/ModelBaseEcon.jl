@@ -126,7 +126,7 @@ function makefuncs(eqn_name, expr, tssyms, sssyms, psyms, mod)
     nargs = length(tssyms) + length(sssyms)
     chunk = min(nargs, MAX_CHUNK_SIZE)
     fn1, fn2, fn3 = funcsyms(eqn_name, expr, tssyms, sssyms, psyms, mod, 
-        myhash, ("resid_", "RJ_", "resid_param_"))
+        myhash, ("resid", "RJ", "resid_param"))
     if isdefined(mod, fn1) && isdefined(mod, fn2) && isdefined(mod, fn3)
         return mod.eval(:(($fn1, $fn2, $fn3, $chunk)))
     end

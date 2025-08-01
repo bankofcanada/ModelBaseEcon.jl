@@ -77,9 +77,10 @@ end
 
 function _makefuncs_exprs!(exprs::Vector, eqn_name, expr, tssyms, sssyms, psyms, mod::Module)
     fn1, fn2, fn3, fn4 = funcsyms(eqn_name, expr, tssyms, sssyms, psyms, mod,
-        myhash, ("resid_", "RJ_", "resid_param_", "RJ_param_"))
+        myhash, ("resid", "RJ", "resid_param", "RJ_param"))
     if isdefined(mod, fn1) && isdefined(mod, fn2) && isdefined(mod, fn3)
-        return :(($fn1, $fn2, $fn3, $fn4))
+        push!(exprs, :(($fn1, $fn2, $fn3, $fn4)))
+        return exprs
     end
     nvars = length(tssyms) + length(sssyms)
     x = Symbol("#x#")
@@ -136,38 +137,16 @@ function _makefuncs_exprs!(exprs::Vector, eqn_name, expr, tssyms, sssyms, psyms,
             return $resid
         end
     ))
-    push!(exprs, :(
-        ($fn1, $fn2, $fn3, $fn4)
-    ))
+    push!(exprs, :(($fn1, $fn2, $fn3, $fn4)))
     return exprs
 end
 
-# """
-#     makefuncs(eqn_name, expr, tssyms, sssyms, psyms, mod)
 
-# Create two functions that evaluate the residual and its gradient for the given
-# expression.
-
-# !!! warning
-#     Internal function. Do not call directly.
-
-# ### Arguments
-# - `expr`: the residual expression
-# - `tssyms`: list of time series variable symbols
-# - `sssyms`: list of steady state symbols
-# - `psyms`: list of parameter symbols
-
-# ### Return value
-# Return a quote block to be evaluated in the module where the model is being
-# defined. The quote block contains definitions of the residual function (as a
-# callable `EquationEvaluator` instance) and a second function that evaluates both
-# the residual and its gradient (as a callable `EquationGradient` instance).
-# """
-# function makefuncs(eqn_name, expr, tssyms, sssyms, psyms, mod::Module)
-#     E = Expr(:block)
-#     _makefuncs_expr(E.args, eqn_name, expr, tssyms, sssyms, psyms, mod)
-#     return Core.eval(mod, E) 
-# end
+function makefuncs(eqn_name, expr, tssyms, sssyms, psyms, mod::Module)
+    E = Expr(:block)
+    _makefuncs_exprs!(E.args, eqn_name, expr, tssyms, sssyms, psyms, mod)
+    return Core.eval(mod, E)
+end
 
 function _initfuncs_exprs!(exprs::Vector, mod::Module)
     if !isdefined(mod, :_Sym)

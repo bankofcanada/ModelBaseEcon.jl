@@ -114,9 +114,9 @@ function _initfuncs_exprs!(exprs, mod::Module, codegen::Val)
 end
 
 """
-    initfuncs(mod::Module, codegen::Symbol)
+    initfuncs(CC::CodeCache)
 
-Initialize the given module before creating functions that evaluate residuals
+Initialize the code generation engine for creating functions that evaluate residuals
 and their derivatives.
 
 !!! warning
@@ -130,6 +130,7 @@ function initfuncs(CC::CodeCache)
     runandcache_expr(CC, E; striplines=true, unblock=true)
     _cc_newline(CC)
 end
+initfuncs(mod::Module, codegen::Symbol) = initfuncs(initcc!(CodeCache(), mod, codegen))
 
 function makeequation(doc, eqn_name, flags, expr, residual, tsrefs, ssrefs, prefs, CC)
     if CC.codegen == Val(:forwarddiff)

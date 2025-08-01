@@ -13,15 +13,30 @@ iscacheuptodate(cachefile::AbstractString, modelfile::AbstractString) = isfile(m
 mutable struct CodeCache{F<:Union{Nothing,IOStream}}
     const cf::F           # the cache file stream, or `nothing`
     cfn::String     # filename of the code file
-    sfn::Symbol     # filename of the source where the currently processed equation was written
+    sfn::Union{Nothing,Symbol}     # filename of the source where the currently processed equation was written
     cmod::Module    # the code cache module
     mmod::Module    # the model Module
     codegen::Val
-    CodeCache(::Nothing) = new{Nothing}(nothing, "", Symbol())
+    CodeCache(::Nothing=nothing) = new{Nothing}(nothing, "", nothing)
     function CodeCache(f::AbstractString)
         cf = open(f, "w")
-        return new{typeof(cf)}(cf, string(f), Symbol())
+        return new{typeof(cf)}(cf, string(f), nothing)
     end
+end
+
+CodeCache(model::AbstractModel, mmod::Union{Nothing,Module}=nothing) = CodeCache(nothing, model, mmod)
+function CodeCache(fn::Union{Nothing,AbstractString}, model::AbstractModel, mmod::Union{Nothing,Module}=nothing)
+    CC = CodeCache(fn)
+    if model._module isa Function
+        CC.cmod = model._module(:code)
+        CC.mmod = model._module(:model)
+        CC.codegen = Val(model.options.codegen)
+    else
+        isnothing(mmod) && error("Module of model must be supplied.")
+        initcc!(CC, mmod, model.options.codegen)
+        model._module = CC.mmod._module
+    end
+    return CC
 end
 
 function initcc!(CC::CodeCache, mmod::Module, codegen::Symbol)
@@ -45,21 +60,27 @@ function initcc!(CC::CodeCache, mmod::Module, codegen::Symbol)
     if CC.codegen == Val(:symbolics)
         runandcache_expr(CC, _striplines(CC, quote
             using ModelBaseEcon
-            using StateSpaceEcon
+            # using StateSpaceEcon
             import ModelBaseEcon.LittleDict
             import Symbolics
-            function thismodule()
-                return @__MODULE__
-            end
         end))
+        if !isnothing(CC.cf) || !isdefined(CC.cmod, :_module)
+            runandcache_expr(CC, _striplines(CC, quote
+                _module(s::Symbol) = _module(Val(s))
+                _module(::Val{:model}=Val(:model)) = $(CC.mmod)
+                _module(::Val{:code}) = $(CC.cmod)
+            end))
+        end
     else
         # throw(NotImplementedError("Code caching with codegen=$(QuoteNode(codegen))"))
     end
     # initialize the model module
-    if !isdefined(CC.mmod, :thismodule)
-        Core.eval(CC.mmod, :(function thismodule()
-            return @__MODULE__
-        end))
+    if !isdefined(CC.mmod, :_module)
+        Core.eval(CC.mmod, Expr(:block,
+            :(_module(s::Symbol) = _module(Val(s))),
+            :(_module(::Val{:model}=Val(:model)) = $(CC.mmod)),
+            :(_module(::Val{:code}) = $(CC.cmod)),
+        ))
     end
     return CC
 end

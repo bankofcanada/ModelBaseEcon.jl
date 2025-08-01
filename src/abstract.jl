@@ -25,6 +25,8 @@ flags(eqn::AbstractEquation) = hasfield(typeof(eqn), :flags) ? getfield(eqn, :fl
 flag(eqn::AbstractEquation, f::Symbol) = (flgs = flags(eqn); hasfield(typeof(flgs), f) ? getfield(flgs, f) : false)
 doc(eqn::AbstractEquation) = :doc in fieldnames(typeof(eqn)) ? getfield(eqn, :doc) : ""
 
+stripexpr(eqn::AbstractEquation) = MacroTools.unblock(MacroTools.striplines(expr(eqn)))
+
 #
 function Base.show(io::IO, eqn::AbstractEquation)
     keystr = ""
@@ -45,11 +47,11 @@ function Base.show(io::IO, eqn::AbstractEquation)
     if !isempty(doc(eqn)) && !get(io, :compact, false)
         docstr = "\"$(doc(eqn))\"\n"
     end
-    print(io, docstr, keystr, flagstr, MacroTools.striplines(MacroTools.unblock(expr(eqn))))
+    print(io, docstr, keystr, flagstr, stripexpr(eqn))
 end
 
-Base.:(==)(e1::AbstractEquation, e2::AbstractEquation) = flags(e1) == flags(e2) && expr(e1) == expr(e2)
-Base.hash(e::AbstractEquation, h::UInt) = hash((flags(e), expr(e)), h)
+Base.:(==)(e1::AbstractEquation, e2::AbstractEquation) = flags(e1) == flags(e2) && stripexpr(e1) == stripexpr(e2)
+Base.hash(e::AbstractEquation, h::UInt) = hash((flags(e), stripexpr(e)), h)
 
 """
     abstract type AbstractModel end

@@ -501,7 +501,7 @@ end
 
 
 """
-    setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Module, eqn_key=:_unnamed_equation_, var_to_idx=get_var_to_idx(model))
+    setss!(model::AbstractModel, expr::Expr; type::Symbol, eqn_key=:_unnamed_equation_, var_to_idx=get_var_to_idx(model))
 
 Add a steady state equation to the model. Equations added by `setss!` are in
 addition to the equations generated automatically from the dynamic system.
@@ -512,10 +512,9 @@ addition to the equations generated automatically from the dynamic system.
     function.
 """
 function setss!(model::AbstractModel, expr::Expr; type::Symbol,
-    modelmodule::Module=moduleof(model),
     eqn_key=:_unnamed_equation_,
     var_to_idx=get_var_to_idx(model),
-    _source_=LineNumberNode(0),
+    _source_,
     codegen=getoption(model, :codegen, :forwarddiff)
 )
     if eqn_key == :_unnamed_equation_
@@ -617,27 +616,22 @@ function setss!(model::AbstractModel, expr::Expr; type::Symbol,
     # create the resid and RJ functions for the new equation
     # To do this, we use `makefuncs` from evaluation.jl
     residual = Expr(:block, source[1], :($(lhs) - $(rhs)))
-    if codegen == :forwarddiff
-        resid, RJ = DerivsFD.makefuncs(eqn_key, residual, vsyms, [], unique(val_params), modelmodule)
-    elseif codegen == :symbolics
-        resid, RJ = DerivsSym.makefuncs(eqn_key, residual, vsyms, [], unique(val_params), modelmodule)
-    else
-        error("Invalid `codegen` value $(QuoteNode(codegen)).")
-    end
+    cmod = model._module(Val(:code))
+    resid, RJ = _derivs_mod(Val(codegen)).makefuncs(eqn_key, residual, vsyms, [], unique(val_params), cmod)
     _update_eqn_params!(resid, model.parameters)
     _update_eqn_params!(RJ, model.parameters)
-    # We have all the ingredients to create the instance of SteadyStateEquation
-    for i = 1:2
-        # remove blocks with line numbers from expr.args[i]
-        a = expr.args[i]
-        if Meta.isexpr(a, :block)
-            args = filter(x -> !isa(x, LineNumberNode), a.args)
-            if length(a.args) == 1
-                expr.args[i] = args[1]
-            end
-        end
-    end
-    sscon = SteadyStateEquation(type, eqn_key, vinds, vsyms, expr, resid, RJ)
+    # # We have all the ingredients to create the instance of SteadyStateEquation
+    # for i = 1:2
+    #     # remove blocks with line numbers from expr.args[i]
+    #     a = expr.args[i]
+    #     if Meta.isexpr(a, :block)
+    #         args = filter(x -> !isa(x, LineNumberNode), a.args)
+    #         if length(a.args) == 1
+    #             expr.args[i] = args[1]
+    #         end
+    #     end
+    # end
+    sscon = SteadyStateEquation(type, eqn_key, vinds, vsyms, Expr(:block, source[1], expr), resid, RJ)
     if nargs == 1
         # The equation involves only one variable. See if there's already an equation
         # with just that variable and, if so, remove it.
@@ -684,9 +678,8 @@ to help the steady state solver find the one you want to use.
 
 """
 macro steadystate(model, type::Symbol, equation::Expr)
-    thismodule = @__MODULE__
     _source_ = QuoteNode(__source__)
-    return esc(:($(thismodule).setss!($(model), $(Meta.quot(equation)); type=$(QuoteNode(type)), _source_=$(_source_))))
+    return esc(:($(@__MODULE__).setss!($(model), $(Meta.quot(equation)); type=$(QuoteNode(type)), _source_=$(_source_))))
 end
 
 macro steadystate(model, block::Expr)
@@ -695,7 +688,6 @@ macro steadystate(model, block::Expr)
 end
 
 function macro_steadystate_impl(__source__::LineNumberNode, model, block::Expr)
-    thismodule = @__MODULE__
     source_line = __source__
     todo = Expr[]
     if !Meta.isexpr(block, :block)
@@ -708,7 +700,7 @@ function macro_steadystate_impl(__source__::LineNumberNode, model, block::Expr)
         end
         if @capture(expr, @delete tags__)
             tags = collect(Symbol, tags)
-            push!(todo, :($thismodule.delete_sstate_equations!($model, $tags)))
+            push!(todo, :($(@__MODULE__).delete_sstate_equations!($model, $tags)))
             continue
         end
         type = :(:level)
@@ -740,10 +732,10 @@ function macro_steadystate_impl(__source__::LineNumberNode, model, block::Expr)
         end
         eqn_expr = Meta.quot(eqn)
         _source_ = Meta.quot(source_line)
-        push!(todo, :($thismodule.setss!($model, $eqn_expr; type=$type, _source_=$_source_, eqn_key=$tag)))
+        push!(todo, :($(@__MODULE__).setss!($model, $eqn_expr; type=$type, _source_=$_source_, eqn_key=$tag)))
     end
     return quote
-        $thismodule.update_model_state!($model)
+        $(@__MODULE__).update_model_state!($model)
         $(todo...)
     end
 end

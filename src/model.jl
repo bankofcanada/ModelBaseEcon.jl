@@ -343,7 +343,7 @@ function fullprint(io::IO, model::Model)
     end
     function print_aux_eq(aux_key)
         v = model.auxeqns[aux_key]
-        println(io, "  ", " "^longest_key, " |-> ", MacroTools.striplines(MacroTools.unblock(expr(v))))
+        println(io, "  ", " "^longest_key, " |-> ",stripexpr(v))
     end
     for (key, eq) in model.equations
         seq = sprint(show, eq; context=io, sizehint=0)
@@ -857,13 +857,13 @@ function process_new_equations!(model::Model)
     if model._state == :new
         return
     end
-    modelmodule = moduleof(model)
     var_to_idx = _make_var_to_idx(model.allvars)
+    CC = CodeCache(model)
     for (key, e) in alleqns(model)
         if e.eval_resid == eqnnotready
             delete_sstate_equations!(model, key)
             delete_aux_equations!(model, key)
-            add_equation!(model, key, e.expr; modelmodule, var_to_idx)
+            add_equation!(model, key, e.expr, CC; var_to_idx)
         end
     end
 end
@@ -927,7 +927,17 @@ Equation() instance for it.
 """
 function process_equation end
 # export process_equation
-process_equation(model::Model, expr::String; kwargs...) = process_equation(model, Meta.parse(expr); kwargs...)
+
+#! method for backwards compatibility from before CodeCache. Will deprecate eventually
+function process_equation(model::Model, expr::Union{Expr,String}; modelmodule::Union{Module,Nothing}=nothing, kw...)
+    if isnothing(modelmodule) 
+        (model._module isa Function) ||  error("Model must be initialized or a `modelmodule` must be given.")
+        modelmodlue = model._module( )
+    end
+    process_equation(model, expr, CodeCache(model, modelmodule); kw...)
+end
+
+process_equation(model::Model, expr::String, CC::CodeCache; kw...) = process_equation(model, Meta.parse(expr), CC; kw...)
 function process_equation(model::Model, expr::Expr, CC::CodeCache;
     var_to_idx=get_var_to_idx(model),
     line::LineNumberNode=LineNumberNode(0),
@@ -1038,7 +1048,7 @@ function process_equation(model::Model, expr::Expr, CC::CodeCache;
                 vind = get(var_to_idx, ex.args[3], nothing)
                 vind === nothing && error_process("Argument of @(ex.args[1]) must be a variable", expr, CC.mmod)
                 add_ssref(allvars[vind])
-                return ex
+                return Expr(ex.head, ex.args[1], nothing, ex.args[3])
             end
             # check if we have a corresponding meta function
             metafuncname = Symbol("at_", macroname) # replace @ with at_
@@ -1206,40 +1216,11 @@ function process_equation(model::Model, expr::Expr, CC::CodeCache;
     line = something(source..., line)
     residual = Expr(:block, line, residual)
     expr = Expr(:block, line, expr)   # same source as residual
+
     CC.sfn = line.file
-
-    # tssyms = values(tsrefs)
-    # sssyms = values(ssrefs)
-    # psyms = values(prefs)
-    # if codegen == :forwarddiff
-    #     resid, RJ, resid_param, chunk = DerivsFD.makefuncs(eqn_name, residual, tssyms, sssyms, psyms, modelmodule)
-    #     modelmodule.eval(:($(@__MODULE__).DerivsFD.precompilefuncs($resid, $RJ, $resid_param, $chunk)))
-    # elseif codegen == :symbolics
-    #     symmodule = isdefined(modelmodule, :_Sym) ? modelmodule._Sym : modelmodule
-    #     for p in psyms
-    #         pp = getproperty(model.parameters, p)
-    #         if pp isa AbstractArray && !isdefined(symmodule, p)
-    #             Core.eval(symmodule, :(global $p = Symbolics.variables($(QuoteNode(p)), $(axes(pp)...))))
-    #         end
-    #     end
-    #     resid, RJ = DerivsSym.makefuncs(eqn_name, residual, tssyms, sssyms, psyms, modelmodule)
-    # else
-    #     error("Invalid `codegen` value $(QuoteNode(codegen)).")
-    # end
-    # _update_eqn_params!(resid, model.parameters)
-    # _update_eqn_params!(RJ, model.parameters)
-    # tsrefs′ = LittleDict{Tuple{ModelSymbol,Int},Symbol}()
-    # for ((modsym, i), sym) in tsrefs
-    #     tsrefs′[(ModelSymbol(modsym), i)] = sym
-    # end
-    # ssrefs′ = LittleDict{ModelSymbol,Symbol}()
-    # for (modsym, sym) in ssrefs
-    #     ssrefs′[ModelSymbol(modsym)] = sym
-    # end
-    # return Equation(doc, eqn_name, flags, expr, residual, tsrefs′, ssrefs′, prefs, resid, RJ)
-
     E = makeequation(doc, eqn_name, flags, expr, residual, tsrefs, ssrefs, prefs, CC)
     CC.sfn = Symbol()
+
     _update_eqn_params!(E, model.parameters)
     return E
 end
@@ -1388,9 +1369,6 @@ function add_equation!(model::Model, eqn_key::Symbol, expr::Expr, CC::CodeCache;
                 push!(auxeqns, aux_name => Expr(:(=), Expr(:call, :exp, Expr(:ref, auxs, :t)), arg))
                 # update variables to indexes map
                 push!(var_to_idx, auxs => length(var_to_idx) + 1)
-
-                println(aux_name, "  |  ", auxeqns[aux_name], "  |  ", model.auxvars)
-
                 return Expr(:ref, auxs, :t)
                 @label skip_substitution
                 nothing
@@ -1399,13 +1377,8 @@ function add_equation!(model::Model, eqn_key::Symbol, expr::Expr, CC::CodeCache;
         return ret
     end
 
-    println("="^20)
-
     new_expr = preprocess(expr)
     new_expr = split_nargs(new_expr)
-
-    println(eqn_key, ": ", expr, " --> ", new_expr)
-    println(model.allvars)
 
     line = something(source..., LineNumberNode(0))
     add_equation_quick!(model, eqn_key, new_expr, CC, false; var_to_idx, line, flags, doc)
@@ -1520,12 +1493,10 @@ function initialize!(model::Model, modelmodule::Module;
         cachefile = nothing
     end
 
-    CC = CodeCache(cachefile)
-    initcc!(CC, modelmodule, codegen)
+    CC = CodeCache(cachefile, model, modelmodule)
     initfuncs(CC)
 
-    model._module = modelmodule.thismodule
-    model.parameters.mod[] = modelmodule
+    model.parameters.mod[] = CC.mmod
     varshks = model.varshks
     model.variables = varshks[.!isshock.(varshks)]
     model.shocks = varshks[isshock.(varshks)]
@@ -1534,7 +1505,7 @@ function initialize!(model::Model, modelmodule::Module;
         empty!(model.auxvars)
         empty!(model.auxeqns)
     end
-    
+
     if codegen === :symbolics
         # Symbolics needs to know about array-valued parameters, if any
         if any(pv.value isa AbstractArray for (p, pv) in model.parameters)
@@ -1612,7 +1583,10 @@ is easier to call [`@reinitialize`](@ref), which automatically sets the
 some other module, then this can be done by calling this function instead of the
 macro.
 """
-function reinitialize!(model::Model, modelmodule::Module=moduleof(model))
+function reinitialize!(model::Model)
+    if model._state == :new
+        modelerror()
+    end
     samename = Symbol[intersect(model.allvars, keys(model.parameters))...]
     if !isempty(samename)
         modelerror("Found $(length(samename)) names that are both variables and parameters: $(join(samename, ", "))")
@@ -1621,8 +1595,7 @@ function reinitialize!(model::Model, modelmodule::Module=moduleof(model))
     model.maxlag = 0
     model.maxlead = 0
     var_to_idx = _make_var_to_idx(model.allvars)
-    CC = CodeCache(nothing)
-    initcc!(CC, modelmodule, codegen)
+    CC = CodeCache(model)
     for (key, e) in alleqns(model)
         if e.eval_resid == eqnnotready
             delete_sstate_equations!(model, key)
@@ -1674,11 +1647,10 @@ equations, autoexogenize lists, and removed steadystate equations have been decl
 Additional/new steadystate constraints can be added after the call to `@reinitialize`.
 """
 macro reinitialize(model)
-    thismodule = @__MODULE__
     # @__MODULE__ is this module (ModelBaseEcon)
     # __module__ is the module where this macro is called (the module where the model exists)
     return quote
-        $(thismodule).reinitialize!($(model))
+        $(@__MODULE__).reinitialize!($model)
     end |> esc
 end
 

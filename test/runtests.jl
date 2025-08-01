@@ -494,7 +494,7 @@ end
     @test_throws ArgumentError begin
         local m = Model()
         @variables m a
-        ModelBaseEcon.add_equation!(m, :A, Meta.parse("a[t] = "); modelmodule=@__MODULE__)
+        ModelBaseEcon.add_equation!(m, :A, Meta.parse("a[t] = "), ModelBaseEcon.CodeCache(m, @__MODULE__))
     end
 
 end
@@ -535,7 +535,7 @@ end
 module MetaTest
 using ModelBaseEcon
 params = @parameters
-custom(x) = x + one(x)
+custom = (x) -> x + one(x)
 val = 12.0
 pair = :hello => "world"
 params.b = custom(val)
@@ -603,7 +603,7 @@ end
     @test MetaTest.params.c ≈ 12.0
     @test MetaTest.params.d ≈ 12.0
     # Core.eval(MetaTest, :(custom(x) = 2x + one(x)))
-    MetaTest.custom(x) = 2x + one(x)
+    MetaTest.custom = (x) -> 2x + one(x)
     update_links!(MetaTest.params)
     @test MetaTest.params.a ≈ 25.0
     @test MetaTest.params.b ≈ 13.0
@@ -762,18 +762,19 @@ end
         @test compare_resids(mod.equations[collect(keys(mod.equations))[i-1]], mod.equations[collect(keys(mod.equations))[i]])
     end
     # test errors and warnings
+    CC = ModelBaseEcon.CodeCache(mod)
     mod.warn.no_t = false
-    @test add_equation!(mod, :EQ1, :(x = sx[t])) isa Model
-    @test add_equation!(mod, :EQ2, :(x[t] = sx)) isa Model
-    @test add_equation!(mod, :EQ3, :(x[t] = sx[t])) isa Model
+    @test add_equation!(mod, :EQ1, :(x = sx[t]), CC) isa Model
+    @test add_equation!(mod, :EQ2, :(x[t] = sx), CC) isa Model
+    @test add_equation!(mod, :EQ3, :(x[t] = sx[t]), CC) isa Model
     @test compare_resids(mod.equations[:EQ3], mod.equations[:EQ2])
     @test compare_resids(mod.equations[:EQ3], mod.equations[:EQ1])
-    @test_throws ArgumentError add_equation!(mod, :EQ4, :(@notametafunction(x[t]) = 7))
-    @test_throws ArgumentError add_equation!(mod, :EQ5, :(x[t] = unknownsymbol))
-    @test_throws ArgumentError add_equation!(mod, :EQ6, :(x[t] = unknownseries[t]))
+    @test_throws ArgumentError add_equation!(mod, :EQ4, :(@notametafunction(x[t]) = 7), CC)
+    @test_throws ArgumentError add_equation!(mod, :EQ5, :(x[t] = unknownsymbol), CC)
+    @test_throws ArgumentError add_equation!(mod, :EQ6, :(x[t] = unknownseries[t]), CC)
     @test_throws ArgumentError add_equation!(mod, :EQ7, :(x[t] = let c = 5
         sx[t+c]
-    end))
+    end), CC)
     @test ModelBaseEcon.update_auxvars(ones(2, 2), mod) == ones(2, 2)
 end
 
