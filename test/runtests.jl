@@ -680,28 +680,38 @@ end
         end), eqn_name=:_EQ2) isa Equation
 end
 
+module IfElseTest
+using ModelBaseEcon
+end
+
 @testset "ifelse_eval" begin
     # this addresses issue #70
-    let model = Model()
+    @eval IfElseTest begin
+        model = Model()
         @variables model a
         @parameters model cond = true
         @equations model begin
             :A => a[t] = cond ? 1.0 : -1.0
         end
         @initialize model
+    end
+    let model = IfElseTest.model
         r, j = eval_RJ(zeros(1, 1), model)
         @test r == [-1.0] && j == [1.0;;]
         model.parameters.cond = false
         r, j = eval_RJ(zeros(1, 1), model)
         @test r == [1.0] && j == [1.0;;]
     end
-    let model = Model()
+    @eval IfElseTest begin
+        model = Model()
         @variables model b
         @parameters model p = 0.5
         @equations model begin
             :B => b[t] = (0.0 <= p <= 1.0)
         end
         @initialize model
+    end
+    let model = IfElseTest.model
         r, j = eval_RJ(zeros(1, 1), model)
         @test r == [-1.0] && j == [1.0;;]
         model.parameters.p = 1.1
@@ -773,8 +783,8 @@ end
     @test_throws ArgumentError add_equation!(mod, :EQ5, :(x[t] = unknownsymbol), CC)
     @test_throws ArgumentError add_equation!(mod, :EQ6, :(x[t] = unknownseries[t]), CC)
     @test_throws ArgumentError add_equation!(mod, :EQ7, :(x[t] = let c = 5
-        sx[t+c]
-    end), CC)
+            sx[t+c]
+        end), CC)
     @test ModelBaseEcon.update_auxvars(ones(2, 2), mod) == ones(2, 2)
 end
 

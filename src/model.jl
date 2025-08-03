@@ -1512,7 +1512,7 @@ function initialize!(model::Model, modelmodule::Module;
             _cc_comment(CC, "Define symbols for array-valued parameters ")
             for (p, pv) in model.parameters
                 if pv.value isa AbstractArray
-                    expr = :(@eval _Sym const $p = Symbolics.variables($(QuoteNode(p)), $(axes(pv.value)...)))
+                    expr = :(@eval _Sym $p = Symbolics.variables($(QuoteNode(p)), $(axes(pv.value)...)))
                     runandcache_expr(CC, expr)
                 end
             end
@@ -1522,7 +1522,7 @@ function initialize!(model::Model, modelmodule::Module;
         local E = Expr(:block)
         for vars in (model.variables, model.shocks, model.auxvars)
             for v in vars
-                push!(E.args, :(@eval _Sym const $(v.name) =
+                push!(E.args, :(@eval _Sym $(v.name) =
                     ModelBaseEcon.ModelVariable($(v.doc), $(QuoteNode(v.name)),
                         $(QuoteNode(v.vr_type)), $(QuoteNode(v.tr_type)),
                         $(QuoteNode(v.ss_type)))))
