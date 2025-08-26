@@ -1,7 +1,7 @@
 name = "ModelBaseEcon"
 uuid = "1d16192e-b65e-11ea-11ed-0789cee22d2f"
 authors = ["Boyan Bejanov <bbejanov@bankofcanada.ca>", "Nicholas Labelle St-Pierre <labs@bankofcanada.ca>", "Jason Jensen <jjensen@bankofcanada.ca>"]
-version = "0.7.1"
+version = "0.7.2"
 
 [deps]
 ComponentArrays = "b0b7db55-cfe3-40fc-9ded-d10e2dbeff66"
