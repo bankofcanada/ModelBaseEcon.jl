@@ -154,7 +154,7 @@ function makeequation(doc, eqn_name, flags, expr, residual, tsrefs, ssrefs, pref
         resid_nm, RJ_nm = pop!(E.args).args
 
         _cc_comment(CC, " Equation $eqn_name ")
-        runandcache_expr(CC, E; striplines=true, unblock=true)
+        runandcache_expr(CC, E)
 
         # if we're writing to a file, we must write the code that hashes the equation data
         if !isnothing(CC.cf)
@@ -164,14 +164,14 @@ function makeequation(doc, eqn_name, flags, expr, residual, tsrefs, ssrefs, pref
                         [$((Meta.quot(s) for s in values(ssrefs))...)],
                         [$((Meta.quot(s) for s in values(prefs))...)],
                     ), $(nameof(CC.cmod)), ModelBaseEcon.$(nameof(derivsmod)).myhash)
-                ); striplines=false, unblock=true)
+                ); striplines=false)
         end
         # create the equation instance.
         tsrefs_keys = []
         tsrefs_vals = []
         for ((var, tt), sym) in tsrefs
             if !isdefined(CC.cmod._Sym, var)
-                push!(E.args, :(@eval _Sym const $var = ModelVariable($var)))
+                runandcache_expr(CC, :(@eval _Sym const $var = ModelBaseEcon.ModelVariable($(QuoteNode(var)))))
             end
             push!(tsrefs_keys, :((_Sym.$var, $tt)))
             push!(tsrefs_vals, QuoteNode(sym))
@@ -180,22 +180,23 @@ function makeequation(doc, eqn_name, flags, expr, residual, tsrefs, ssrefs, pref
         ssrefs_vals = []
         for (var, sym) in ssrefs
             if !isdefined(CC.cmod._Sym, var)
-                push!(E.args, :(@eval _Sym const $var = ModelVariable($var)))
+                runandcache_expr(CC, :(@eval _Sym const $var = ModelBaseEcon.ModelVariable($(QuoteNode(var)))))
             end
             push!(ssrefs_keys, :(_Sym.$var))
             push!(ssrefs_vals, QuoteNode(sym))
         end
-        runandcache_expr(CC, Expr(:block,
-                :($eqn_name = Equation(
-                    $(doc), $(Meta.quot(eqn_name)), $(flags),
-                    $(Meta.quot(expr)),
-                    $(Meta.quot(residual)),
-                    LittleDict{Tuple{ModelVariable,Int},Symbol}(Tuple{ModelVariable,Int}[$(tsrefs_keys...)], Symbol[$(tsrefs_vals...)]),
-                    LittleDict{ModelVariable,Symbol}(ModelVariable[$(ssrefs_keys...)], Symbol[$(ssrefs_vals...)]),
-                    LittleDict{Symbol,Symbol}(Symbol[$(Iterators.map(QuoteNode, keys(prefs))...)], Symbol[$(Iterators.map(QuoteNode, values(prefs))...)]),
-                    $resid_nm, $RJ_nm)),
-                :(export $resid_nm, $RJ_nm, $eqn_name),
-            ); striplines=false, unblock=true)
+        E = Expr(:block,
+            :($eqn_name = Equation(
+                $(doc), $(Meta.quot(eqn_name)), $(flags),
+                $(Meta.quot(expr)),
+                $(Meta.quot(residual)),
+                LittleDict{Tuple{ModelVariable,Int},Symbol}(Tuple{ModelVariable,Int}[$(tsrefs_keys...)], Symbol[$(tsrefs_vals...)]),
+                LittleDict{ModelVariable,Symbol}(ModelVariable[$(ssrefs_keys...)], Symbol[$(ssrefs_vals...)]),
+                LittleDict{Symbol,Symbol}(Symbol[$(Iterators.map(QuoteNode, keys(prefs))...)], Symbol[$(Iterators.map(QuoteNode, values(prefs))...)]),
+                $resid_nm, $RJ_nm)),
+            :(export $resid_nm, $RJ_nm, $eqn_name)
+        )
+        runandcache_expr(CC, E; striplines=false)
 
         _cc_newline(CC)
         return getfield(CC.cmod, eqn_name)
