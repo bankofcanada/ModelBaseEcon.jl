@@ -1,12 +1,9 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020-2023, Bank of Canada
+# Copyright (c) 2020-2025, Bank of Canada
 # All rights reserved.
 ##################################################################################
-
-export AbstractVar
-abstract type AbstractVar{NAME} end
 
 export ModelVariable, ModelSymbol
 
@@ -60,9 +57,9 @@ Shock variables are always `:const` while regular variables are assumed
 `:growth`. They can be declared `:const` using `@steady`.
  
 """
-struct ModelVariable{name} <: AbstractVar{name}
+struct ModelVariable
     doc::String
-    # name::Symbol
+    name::Symbol
     vr_type::Symbol   # one of :var, :shock, :exog
     tr_type::Symbol    # transformation, one of :none, :log, :neglog
     ss_type::Symbol    # behaviour as t → ∞, one of :const, :growth
@@ -72,39 +69,35 @@ struct ModelVariable{name} <: AbstractVar{name}
         vt ∈ variable_types || error("Unknown variable type $vt. Expected one of $variable_types")
         tt ∈ transformation_types || error("Unknown transformation type $tt. Expected one of $transformation_types")
         st ∈ steadystate_types || error("Unknown steady state type $st. Expected one of $steadystate_types")
-        new{n}(d, vt, tt, st)
+        new(string(d), n, vt, tt, st)
     end
 end
 
-function Base.getproperty(v::ModelVariable{name}, s::Symbol) where {name}
-    if s === :name
-        return name
-    elseif s === :var_type
-        vt = getfield(v, :vr_type)
-        if vt === :shock || vt === :exog
-            return vt
-        end
-        tt = getfield(v, :tr_type)
-        if tt !== :none 
-            return tt
-        end
-        if getfield(v, :ss_type) === :const
-            return :steady
-        end
-        return :lin
+function Base.getproperty(v::ModelVariable, s::Symbol)
+    s === :var_type || return Base.getfield(v, s)
+    vt = getfield(v, :vr_type)
+    if vt === :shock || vt === :exog
+        return vt
     end
-    return getfield(v, s)
+    tt = getfield(v, :tr_type)
+    if tt !== :none
+        return tt
+    end
+    if getfield(v, :ss_type) === :const
+        return :steady
+    end
+    return :lin
 end
 
 function ModelVariable(d, s, t)
     if t ∈ (:log, :neglog)
-        return ModelVariable(d, s, :var, t, :growth, )
+        return ModelVariable(d, s, :var, t, :growth,)
     elseif t === :steady
-        return ModelVariable(d, s, :var, :none, :const, )
+        return ModelVariable(d, s, :var, :none, :const,)
     elseif t == :lin
-        return ModelVariable(d, s, :var, :none, :growth, )
+        return ModelVariable(d, s, :var, :none, :growth,)
     elseif t ∈ (:shock, :exog)
-        return ModelVariable(d, s, t, :none, :growth, )
+        return ModelVariable(d, s, t, :none, :growth,)
     end
     # T = ifelse(t == :log, LogTransform, ifelse(t == :neglog, NegLogTransform, NoTransform))
 end
@@ -122,9 +115,10 @@ _trans2sym(::Type{NegLogTransform}) = :neglog
 const ModelSymbol = ModelVariable
 
 # !!! must not update v.name.
-function update(v::ModelVariable; doc = v.doc,
-    vr_type::Symbol = v.vr_type, tr_type::Symbol = v.tr_type, ss_type::Symbol = v.ss_type,
-    transformation = nothing)
+function update(v::ModelVariable; doc=v.doc,
+    vr_type::Symbol=v.vr_type, tr_type::Symbol=v.tr_type, ss_type::Symbol=v.ss_type,
+    transformation=nothing)
+    @nospecialize(v)
     if transformation !== nothing
         @warn "Deprecation: do not specify transformation directly, specify `tr_type` instead."
         trsym = _trans2sym(transformation)
@@ -139,7 +133,7 @@ function update(v::ModelVariable; doc = v.doc,
             throw(ArgumentError("The given `transformation` $transformation is incompatible with the given `tr_type` :$tr_type."))
         end
     end
-    ModelVariable(string(doc), v.name, vr_type, tr_type, ss_type, )
+    ModelVariable(string(doc), v.name, vr_type, tr_type, ss_type,)
 end
 
 ModelVariable(s::Symbol) = ModelVariable("", s, :var, :none, :growth,)
@@ -170,89 +164,88 @@ end
 
 Make a shock `ModelVariable` from `v`.
 """
-to_shock(v) = update(convert(ModelVariable, v); vr_type = :shock)
+to_shock(v) = update(convert(ModelVariable, v); vr_type=:shock)
 """
     to_exog(v)
 
 Make an exogenous `ModelVariable` from `v`.
 """
-to_exog(v) = update(convert(ModelVariable, v); vr_type = :exog)
+to_exog(v) = update(convert(ModelVariable, v); vr_type=:exog)
 """
     to_steady(v)
 
 Make a zero-slope `ModelVariable` from `v`.
 """
-to_steady(v) = update(convert(ModelVariable, v); ss_type = :const)
+to_steady(v) = update(convert(ModelVariable, v); ss_type=:const)
 """
     to_lin(v)
 
 Make a no-transformation `ModelVariable` from `v`.
 """
-to_lin(v) = update(convert(ModelVariable, v); tr_type = :none)
+to_lin(v) = update(convert(ModelVariable, v); tr_type=:none)
 """
     to_log(v)
 
 Make a log-transformation `ModelVariable` from `v`.
 """
-to_log(v) = update(convert(ModelVariable, v); tr_type = :log)
+to_log(v) = update(convert(ModelVariable, v); tr_type=:log)
 """
     to_neglog(v)
 
 Make a negative-log-transformation `ModelVariable` from `v`.
 """
-to_neglog(v) = update(convert(ModelVariable, v); tr_type = :neglog)
+to_neglog(v) = update(convert(ModelVariable, v); tr_type=:neglog)
 """
     isshock(v)
 
 Return `true` if the given `ModelVariable` is a shock, otherwise return `false`.
 """
-isshock(v::ModelVariable) = v.vr_type == :shock
+isshock(v::ModelVariable) = (@nospecialize(v); v.vr_type == :shock)
 """
     isexog(v)
 
 Return `true` if the given `ModelVariable` is exogenous, otherwise return
 `false`.
 """
-isexog(v::ModelVariable) = v.vr_type == :exog
+isexog(v::ModelVariable) = (@nospecialize(v); v.vr_type == :exog)
 """
     issteady(v)
 
 Return `true` if the given `ModelVariable` is zero-slope, otherwise return
 `false`.
 """
-issteady(v::ModelVariable) = v.ss_type == :const
+issteady(v::ModelVariable) = (@nospecialize(v); v.ss_type == :const)
 """
     islin(v)
 
 Return `true` if the given `ModelVariable` is a no-transformation variable,
 otherwise return `false`.
 """
-islin(v::ModelVariable) = v.tr_type == :none
+islin(v::ModelVariable) = (@nospecialize(v); v.tr_type == :none)
 """
     islog(v)
 
 Return `true` if the given `ModelVariable` is a log-transformation variable,
 otherwise return `false`.
 """
-islog(v::ModelVariable) = v.tr_type == :log
+islog(v::ModelVariable) = (@nospecialize(v); v.tr_type == :log)
 """
     isneglog(v)
 
 Return `true` if the given `ModelVariable` is a negative-log-transformation
 variable, otherwise return `false`.
 """
-isneglog(v::ModelVariable) = v.tr_type == :neglog
+isneglog(v::ModelVariable) = (@nospecialize(v); v.tr_type == :neglog)
 export to_shock, to_exog, to_steady, to_lin, to_log, to_neglog
 export isshock, isexog, issteady, islin, islog, isneglog
 
-Core.Symbol(v::ModelVariable{NAME}) where {NAME} = NAME
-Base.convert(::Type{Symbol}, v::ModelVariable{NAME}) where {NAME} = NAME
+Core.Symbol(v::ModelVariable) = (@nospecialize(v); v.name)
+Base.convert(::Type{Symbol}, v::ModelVariable) = (@nospecialize(v); v.name)
 Base.convert(::Type{ModelVariable}, v::Symbol) = ModelVariable(v)
 Base.convert(::Type{ModelVariable}, v::Expr) = ModelVariable(v)
-Base.:(==)(::ModelVariable{NAME}, ::ModelVariable{NAME}) where {NAME} = true
-Base.:(==)(::ModelVariable, ::ModelVariable) = false
-Base.:(==)(::ModelVariable{NAME}, b::Symbol) where {NAME} = NAME == b
-Base.:(==)(a::Symbol, ::ModelVariable{NAME}) where {NAME} = a == NAME
+Base.:(==)(a::ModelVariable, b::ModelVariable) = (@nospecialize; a.name == b.name)
+Base.:(==)(a::ModelVariable, b::Symbol) = (@nospecialize; a.name == b)
+Base.:(==)(a::Symbol, b::ModelVariable) = (@nospecialize; a == b.name)
 
 # The hash must be the same as the hash of the symbol, so that we can use
 # ModelVariable as index in a Dict with Symbol keys
@@ -260,6 +253,7 @@ Base.hash(v::ModelVariable, h::UInt) = (@nospecialize; hash(v.name, h))
 Base.hash(v::ModelVariable) = (@nospecialize; hash(v.name))
 
 function Base.show(io::IO, v::ModelVariable)
+    @nospecialize(v)
     if get(io, :compact, false)
         print(io, v.name)
     else
@@ -292,12 +286,12 @@ See also [`inverse_transformation`](@ref)
 function inverse_transform end
 export inverse_transform
 
-transformation(v::ModelVariable) = transformation(_sym2trans(v.tr_type))
-inverse_transformation(v::ModelVariable) = inverse_transformation(_sym2trans(v.tr_type))
+transformation(v::ModelVariable) = (@nospecialize(v); transformation(_sym2trans(v.tr_type)))
+inverse_transformation(v::ModelVariable) = (@nospecialize(v); inverse_transformation(_sym2trans(v.tr_type)))
 
 # redirect to the stored transform
-transform(x, var::ModelVariable) = broadcast(transformation(var), x)
-inverse_transform(x, var::ModelVariable) = broadcast(inverse_transformation(var), x)
+transform(x, v::ModelVariable) = (@nospecialize(v); broadcast(transformation(v), x))
+inverse_transform(x, v::ModelVariable) = (@nospecialize(v); broadcast(inverse_transformation(v), x))
 
 """
     need_transform(v)
@@ -309,4 +303,4 @@ function need_transform end
 export need_transform
 
 need_transform(a) = need_transform(convert(ModelVariable, a))
-need_transform(v::ModelVariable) = _sym2trans(v.tr_type) != NoTransform
+need_transform(v::ModelVariable) = (@nospecialize(v); _sym2trans(v.tr_type) != NoTransform)
