@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020-2023, Bank of Canada
+# Copyright (c) 2020-2025, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -38,10 +38,12 @@ include("Options.jl")
 # The "misc" - various types and functions
 include("misc.jl")
 
+
 # NOTE: The order of inclusions matters.
 include("abstract.jl")
+include("codecache.jl")
 include("parameters.jl")
-include("evaluation.jl")
+include("evaluation.jl")    # Code generation for residuals, gradients and higher order derivatives
 include("transformations.jl")
 include("variables.jl")
 include("equation.jl")
@@ -67,13 +69,7 @@ macro using_example(name)
         $(name)
     end |> esc
 end
-
-" Deprecated. Use `@using_example` instead."
-macro load_example(name)
-    Base.depwarn("Use `@using_example` instead.", Symbol("@load_example"))
-    return esc(:(@using_example $name))
-end
-export @using_example, @load_example
+export @using_example
 
 ######################################################################
 

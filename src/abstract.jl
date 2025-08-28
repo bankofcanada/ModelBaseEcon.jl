@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020-2023, Bank of Canada
+# Copyright (c) 2020-2025, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -25,6 +25,8 @@ flags(eqn::AbstractEquation) = hasfield(typeof(eqn), :flags) ? getfield(eqn, :fl
 flag(eqn::AbstractEquation, f::Symbol) = (flgs = flags(eqn); hasfield(typeof(flgs), f) ? getfield(flgs, f) : false)
 doc(eqn::AbstractEquation) = :doc in fieldnames(typeof(eqn)) ? getfield(eqn, :doc) : ""
 
+stripexpr(eqn::AbstractEquation) = MacroTools.unblock(MacroTools.striplines(expr(eqn)))
+
 #
 function Base.show(io::IO, eqn::AbstractEquation)
     keystr = ""
@@ -45,11 +47,11 @@ function Base.show(io::IO, eqn::AbstractEquation)
     if !isempty(doc(eqn)) && !get(io, :compact, false)
         docstr = "\"$(doc(eqn))\"\n"
     end
-    print(io, docstr, keystr, flagstr, expr(eqn))
+    print(io, docstr, keystr, flagstr, stripexpr(eqn))
 end
 
-Base.:(==)(e1::AbstractEquation, e2::AbstractEquation) = flags(e1) == flags(e2) && expr(e1) == expr(e2)
-Base.hash(e::AbstractEquation, h::UInt) = hash((flags(e), expr(e)), h)
+Base.:(==)(e1::AbstractEquation, e2::AbstractEquation) = flags(e1) == flags(e2) && stripexpr(e1) == stripexpr(e2)
+Base.hash(e::AbstractEquation, h::UInt) = hash((flags(e), stripexpr(e)), h)
 
 """
     abstract type AbstractModel end
@@ -97,14 +99,27 @@ export sstate
 Return the module in which the given equation or model was initialized.
 """
 function moduleof end
-moduleof(e::AbstractEquation) = parentmodule(eval_resid(e))
+@static if VERSION >= v"1.10"
+    function moduleof(f::Function)
+        mods = unique!(map(parentmodule, methods(f)))
+        length(mods) == 1 && return first(mods)
+        error("Function $(nameof(f)) does not have a unique module")
+    end
+    moduleof(e::AbstractEquation) = parentmodule(methods(eval_resid(e))[1])
+else
+    function moduleof(f::Function)
+        mods = unique!(map(m -> m.module, methods(f)))
+        length(mods) == 1 && return first(mods)
+        error("Function $(nameof(f)) does not have a unique module")
+    end
+    moduleof(e::AbstractEquation) = first(methods(eval_resid(e))).module
+end
 function moduleof(m::M) where {M<:AbstractModel}
-    if hasfield(M, :_module_eval) 
-        mod_eval = m._module_eval
-        isnothing(mod_eval) || return parentmodule(mod_eval(:(EquationEvaluator)))
+    if hasfield(M, :_module) && m._module isa Function
+        return m._module()
     end
     # for (_, eqn) in equations(m)
-    #     mod = parentmodule(eval_resid(eqn))
+    #     mod = moduleof(eqn)
     #     (mod === @__MODULE__) || return mod
     # end
     error("Unable to determine the module containing the given model. Try adding equations to it and calling `@initialize`.")
