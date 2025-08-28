@@ -39,8 +39,8 @@ function precompilefuncs(resid, RJ, resid_param, N::Int)
     precompile(resid, (duals,)) || error("precompile")
     precompile(RJ, (Vector{Float64},)) || error("precompile")
 
-    # We precompile a version of the "function barrier" for the inital types
-    # of the parameters. This is a good apprixmimation of what will be evaluated
+    # We precompile a version of the "function barrier" for the initial types
+    # of the parameters. This is a good approximation of what will be evaluated
     # in practice. If a user updates the parameter to a different type, a new version
     # of the function barrier will have to be compiled but this should be fairly rare in
     # practice.
@@ -134,7 +134,7 @@ function makefuncs(eqn_name, expr, tssyms, sssyms, psyms, mod)
     # If the equation has no parameters, then we just unpack x and evaluate the expressions
     # Otherwise, we unpack the parameters (which have unknown types) and pass it
     # to another function that acts like a function barrier where the types are known.
-    return mod.eval(quote
+    return Core.eval(mod, quote
         function (ee::EquationEvaluatorFD{$(QuoteNode(fn1))})($x::Vector{<:Real})
             $(_unpack_args_expr(x, tssyms, sssyms))
             $(_unpack_pars_expr(:ee, psyms))

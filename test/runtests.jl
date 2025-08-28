@@ -62,8 +62,8 @@ end
     @test :abstol ∈ o
     @test setoption!(o, reltol=1e-3, linear=false) isa Options
     @test all(["reltol", :linear] .∈ Ref(o))
-    @test getoption!(o, tol=nothing, linear=true, name="Zoro") == (1e-7, false, "Zoro")
-    @test "name" ∈ o && o.name == "Zoro"
+    @test getoption!(o, tol=nothing, linear=true, name="Zorro") == (1e-7, false, "Zorro")
+    @test "name" ∈ o && o.name == "Zorro"
     z = Options()
     @test merge(z, o) == Options(o...) == Options(o)
     @test merge!(z, o) == Options(Dict(string(k) => v for (k, v) in pairs(o))...)
@@ -71,7 +71,7 @@ end
     @test Dict(o...) == z
     @test o == Dict(z...)
     z.name = "Oro"
-    @test o.name == "Zoro"
+    @test o.name == "Zorro"
     @test setoption!(z, "linear", true) isa Options
     @test getoption!(z, "linear", false) == true
     @test getoption!(z, :name, "") == "Oro"
@@ -289,8 +289,15 @@ else
     @warn "Skip DerivSym on Julia 1.9"
 end
 
+module MiscTests
+using ModelBaseEcon
+end
+
 @testset "Misc" begin
-    m = Model(Options(verbose=true))
+    @eval MiscTests begin
+        m = Model(Options(verbose=true))
+    end
+    m = MiscTests.m
     out = let io = IOBuffer()
         print(io, m.flags)
         readlines(seek(io, 0))
@@ -311,10 +318,12 @@ end
     @test contains(
         sprint(showerror, ModelBaseEcon.NotImplementedError("foobar")),
         r"feature not implemented: foobar"i)
-    @variables m x y z
-    @logvariables m k l m
-    @steadyvariables m p q r
-    @shocks m a b c
+    @eval MiscTests begin
+        @variables m x y z
+        @logvariables m k l m
+        @steadyvariables m p q r
+        @shocks m a b c
+    end
     for s in (:a, :b, :c)
         @test m.:($s) isa ModelSymbol && isshock(m.:($s))
     end
@@ -333,11 +342,13 @@ end
 
     @test_throws ModelBaseEcon.ModelError @macroexpand @equations m p[t] = 0
 
-    @equations m begin
-        p[t] = 0
+    @eval MiscTests begin
+        @equations m begin
+            p[t] = 0
+        end
     end
     @test_throws ModelBaseEcon.ModelNotInitError ModelBaseEcon.getevaldata(m, :default)
-    @test_warn ("unused variables", "unused shocks", r"different numbers of equations .* and endogenous variables") @initialize m
+    @test_warn ("unused variables", "unused shocks", r"different numbers of equations .* and endogenous variables") @eval MiscTests @initialize m
 
     unused = get_unused_symbols(m)
     @test unused[:variables] == [:x, :y, :z, :k, :l, :m, :q, :r]
@@ -345,7 +356,7 @@ end
     @test unused[:parameters] == Vector{Symbol}()
 
     @test ModelBaseEcon.hasevaldata(m, :default)
-    @test_throws ModelBaseEcon.ModelError @initialize m
+    @test_throws ModelBaseEcon.ModelError @eval MiscTests @initialize m
     @test_throws ModelBaseEcon.EvalDataNotFound ModelBaseEcon.getevaldata(m, :nosuchevaldata)
 
     @test_logs (:error, r"Evaluation data for .* not found\..*"i) begin
@@ -470,7 +481,11 @@ end
         @test show(IOBuffer(), MIME"text/plain"(), m.flags) === nothing
     end
 
-    @test_throws ModelBaseEcon.ModelError let m = Model()
+    mod = Module()
+    @eval mod using ModelBaseEcon
+    ModelBaseEcon.initfuncs(mod, ModelBaseEcon.defaultoptions.codegen)
+    @test_throws ModelBaseEcon.ModelError @eval mod begin
+        m = Model()
         @parameters m a = 5
         @variables m a
         @equations m begin
@@ -478,10 +493,9 @@ end
         end
         @initialize m
     end
-
     # test docstring
-    @test begin
-        local m = Model()
+    @test @eval mod begin
+        m = Model()
         @variables m a
         eq = ModelBaseEcon.process_equation(m, quote
                 "this is equation 1"
@@ -491,8 +505,8 @@ end
     end
 
     # test incomplete
-    @test_throws ArgumentError begin
-        local m = Model()
+    @test_throws ArgumentError @eval mod begin
+        m = Model()
         @variables m a
         ModelBaseEcon.add_equation!(m, :A, Meta.parse("a[t] = "), ModelBaseEcon.CodeCache(m, @__MODULE__))
     end
@@ -532,7 +546,7 @@ end
     @test @dlog(v[t-1, z, t+2], 1) == :(log(v[t-1, z, t+2]) - log(v[t-2, z, t+1]))
 end
 
-module MetaTest
+module ParamsTests
 using ModelBaseEcon
 params = @parameters
 custom = (x) -> x + one(x)
@@ -598,30 +612,30 @@ end
     @test_throws ArgumentError @alias a + 5
     @test_throws ArgumentError @link 28
 
-    @test MetaTest.params.a ≈ 13.0
-    @test MetaTest.params.b ≈ 13.0
-    @test MetaTest.params.c ≈ 12.0
-    @test MetaTest.params.d ≈ 12.0
-    # Core.eval(MetaTest, :(custom(x) = 2x + one(x)))
-    MetaTest.custom = (x) -> 2x + one(x)
-    update_links!(MetaTest.params)
-    @test MetaTest.params.a ≈ 25.0
-    @test MetaTest.params.b ≈ 13.0
-    @test MetaTest.params.c ≈ 12.0
-    @test MetaTest.params.d ≈ 12.0
-    Core.eval(MetaTest, :(val = 22))
-    update_links!(MetaTest.params)
-    @test MetaTest.params.a == 45
-    @test MetaTest.params.b ≈ 13.0
-    @test MetaTest.params.c ≈ 12.0
-    @test MetaTest.params.d == 22
+    @test ParamsTests.params.a ≈ 13.0
+    @test ParamsTests.params.b ≈ 13.0
+    @test ParamsTests.params.c ≈ 12.0
+    @test ParamsTests.params.d ≈ 12.0
+    # Core.eval(ParamsTests, :(custom(x) = 2x + one(x)))
+    ParamsTests.custom = (x) -> 2x + one(x)
+    update_links!(ParamsTests.params)
+    @test ParamsTests.params.a ≈ 25.0
+    @test ParamsTests.params.b ≈ 13.0
+    @test ParamsTests.params.c ≈ 12.0
+    @test ParamsTests.params.d ≈ 12.0
+    Core.eval(ParamsTests, :(val = 22))
+    update_links!(ParamsTests.params)
+    @test ParamsTests.params.a == 45
+    @test ParamsTests.params.b ≈ 13.0
+    @test ParamsTests.params.c ≈ 12.0
+    @test ParamsTests.params.d == 22
 
-    @test MetaTest.params.e == :hello
-    @test MetaTest.params.f == "world"
-    Core.eval(MetaTest, :(pair = 27 => π))
-    update_links!(MetaTest.params)
-    @test MetaTest.params.e == 27
-    @test MetaTest.params.f == π
+    @test ParamsTests.params.e == :hello
+    @test ParamsTests.params.f == "world"
+    Core.eval(ParamsTests, :(pair = 27 => π))
+    update_links!(ParamsTests.params)
+    @test ParamsTests.params.e == 27
+    @test ParamsTests.params.f == π
 
     @test @alias(c) == ModelParam(Set(), :c, nothing)
     @test @link(c) == ModelParam(Set(), :c, nothing)
@@ -647,12 +661,17 @@ end
 end
 
 @testset "ifelse" begin
-    m = Model()
-    @variables m x
-    @equations m begin
-        x[t] = 0
+    mod = Module()
+    @eval mod using ModelBaseEcon
+    @eval mod begin
+        model = Model()
+        @variables model x
+        @equations model begin
+            x[t] = 0
+        end
+        @initialize model
     end
-    @initialize m
+    m = mod.model
     @test_throws ArgumentError ModelBaseEcon.process_equation(m, :(y[t] = 0), eqn_name=:_EQ2)
     @warn "disabled test with unknown parameter in equation"
     # @test_throws ArgumentError ModelBaseEcon.process_equation(m, :(x[t] = p), eqn_name=:_EQ2) #no exception thrown!
@@ -680,13 +699,13 @@ end
         end), eqn_name=:_EQ2) isa Equation
 end
 
-module IfElseTest
-using ModelBaseEcon
-end
 
 @testset "ifelse_eval" begin
     # this addresses issue #70
-    @eval IfElseTest begin
+    mod = Module()
+    @eval mod using ModelBaseEcon
+    ###############################
+    @eval mod begin
         model = Model()
         @variables model a
         @parameters model cond = true
@@ -695,14 +714,15 @@ end
         end
         @initialize model
     end
-    let model = IfElseTest.model
+    let model = mod.model
         r, j = eval_RJ(zeros(1, 1), model)
         @test r == [-1.0] && j == [1.0;;]
         model.parameters.cond = false
         r, j = eval_RJ(zeros(1, 1), model)
         @test r == [1.0] && j == [1.0;;]
     end
-    @eval IfElseTest begin
+    ###############################
+    @eval mod begin
         model = Model()
         @variables model b
         @parameters model p = 0.5
@@ -711,7 +731,7 @@ end
         end
         @initialize model
     end
-    let model = IfElseTest.model
+    let model = mod.model
         r, j = eval_RJ(zeros(1, 1), model)
         @test r == [-1.0] && j == [1.0;;]
         model.parameters.p = 1.1
@@ -721,46 +741,53 @@ end
 end
 
 @testset "Meta" begin
-    mod = Model()
-    @parameters mod a = 0.1 b = @link(1.0 - a)
-    @variables mod x
-    @shocks mod sx
-    @equations mod begin
-        x[t-1] = sx[t+1]
-        @lag(x[t]) = @lag(sx[t+2])
-        #
-        x[t-1] + a = sx[t+1] + 3
-        @lag(x[t] + a) = @lag(sx[t+2] + 3)
-        #
-        x[t-2] = sx[t]
-        @lag(x[t], 2) = @lead(sx[t-2], 2)
-        #
-        x[t] - x[t-1] = x[t+1] - x[t] + sx[t]
-        @d(x[t]) = @d(x[t+1]) + sx[t]
-        #
-        (x[t] - x[t+1]) - (x[t-1] - x[t]) = sx[t]
-        @d(x[t] - x[t+1]) = sx[t]
-        #
-        x[t] - x[t-2] = sx[t]
-        @d(x[t], 0, 2) = sx[t]
-        #
-        x[t] - 2x[t-1] + x[t-2] = sx[t]
-        @d(x[t], 2) = sx[t]
-        #
-        x[t] - x[t-1] - x[t-2] + x[t-3] = sx[t]
-        @d(x[t], 1, 2) = sx[t]
-        #
-        log(x[t] - x[t-2]) - log(x[t-1] - x[t-3]) = sx[t]
-        @dlog(@d(x[t], 0, 2)) = sx[t]
-        #
-        (x[t] + 0.3x[t+2]) + (x[t-1] + 0.3x[t+1]) + (x[t-2] + 0.3x[t]) = 0
-        @movsum(x[t] + 0.3x[t+2], 3) = 0
-        #
-        ((x[t] + 0.3x[t+2]) + (x[t-1] + 0.3x[t+1]) + (x[t-2] + 0.3x[t])) / 3 = 0
-        @movav(x[t] + 0.3x[t+2], 3) = 0
+    mod = Module()
+    @eval mod using ModelBaseEcon
+    @eval mod begin
+        model = Model()
+        @parameters model a = 0.1 b = @link(1.0 - a)
+        @variables model x
+        @shocks model sx
+        @equations model begin
+            x[t-1] = sx[t+1]
+            @lag(x[t]) = @lag(sx[t+2])
+            #
+            x[t-1] + a = sx[t+1] + 3
+            @lag(x[t] + a) = @lag(sx[t+2] + 3)
+            #
+            x[t-2] = sx[t]
+            @lag(x[t], 2) = @lead(sx[t-2], 2)
+            #
+            x[t] - x[t-1] = x[t+1] - x[t] + sx[t]
+            @d(x[t]) = @d(x[t+1]) + sx[t]
+            #
+            (x[t] - x[t+1]) - (x[t-1] - x[t]) = sx[t]
+            @d(x[t] - x[t+1]) = sx[t]
+            #
+            x[t] - x[t-2] = sx[t]
+            @d(x[t], 0, 2) = sx[t]
+            #
+            x[t] - 2x[t-1] + x[t-2] = sx[t]
+            @d(x[t], 2) = sx[t]
+            #
+            x[t] - x[t-1] - x[t-2] + x[t-3] = sx[t]
+            @d(x[t], 1, 2) = sx[t]
+            #
+            log(x[t] - x[t-2]) - log(x[t-1] - x[t-3]) = sx[t]
+            @dlog(@d(x[t], 0, 2)) = sx[t]
+            #
+            (x[t] + 0.3x[t+2]) + (x[t-1] + 0.3x[t+1]) + (x[t-2] + 0.3x[t]) = 0
+            @movsum(x[t] + 0.3x[t+2], 3) = 0
+            #
+            ((x[t] + 0.3x[t+2]) + (x[t-1] + 0.3x[t+1]) + (x[t-2] + 0.3x[t])) / 3 = 0
+            @movav(x[t] + 0.3x[t+2], 3) = 0
+        end
     end
-    @test_warn "different numbers" @initialize mod
+    @test_warn "different numbers" begin
+        @eval mod @initialize model
+    end
 
+    model = mod.model
     compare_resids(e1, e2) = (
         e1.resid.head == e2.resid.head && (
             (length(e1.resid.args) == length(e2.resid.args) == 2 && e1.resid.args[2] == e2.resid.args[2]) ||
@@ -768,30 +795,33 @@ end
         )
     )
 
-    for i = 2:2:length(mod.equations)
-        @test compare_resids(mod.equations[collect(keys(mod.equations))[i-1]], mod.equations[collect(keys(mod.equations))[i]])
+    for i = 2:2:length(model.equations)
+        @test compare_resids(model.equations[collect(keys(model.equations))[i-1]], model.equations[collect(keys(model.equations))[i]])
     end
     # test errors and warnings
-    CC = ModelBaseEcon.CodeCache(mod)
-    mod.warn.no_t = false
-    @test add_equation!(mod, :EQ1, :(x = sx[t]), CC) isa Model
-    @test add_equation!(mod, :EQ2, :(x[t] = sx), CC) isa Model
-    @test add_equation!(mod, :EQ3, :(x[t] = sx[t]), CC) isa Model
-    @test compare_resids(mod.equations[:EQ3], mod.equations[:EQ2])
-    @test compare_resids(mod.equations[:EQ3], mod.equations[:EQ1])
-    @test_throws ArgumentError add_equation!(mod, :EQ4, :(@notametafunction(x[t]) = 7), CC)
-    @test_throws ArgumentError add_equation!(mod, :EQ5, :(x[t] = unknownsymbol), CC)
-    @test_throws ArgumentError add_equation!(mod, :EQ6, :(x[t] = unknownseries[t]), CC)
-    @test_throws ArgumentError add_equation!(mod, :EQ7, :(x[t] = let c = 5
+    CC = ModelBaseEcon.CodeCache(model)
+    model.warn.no_t = false
+    @test add_equation!(model, :EQ1, :(x = sx[t]), CC) isa Model
+    @test add_equation!(model, :EQ2, :(x[t] = sx), CC) isa Model
+    @test add_equation!(model, :EQ3, :(x[t] = sx[t]), CC) isa Model
+    @test compare_resids(model.equations[:EQ3], model.equations[:EQ2])
+    @test compare_resids(model.equations[:EQ3], model.equations[:EQ1])
+    @test_throws ArgumentError add_equation!(model, :EQ4, :(@notametafunction(x[t]) = 7), CC)
+    @test_throws ArgumentError add_equation!(model, :EQ5, :(x[t] = unknownsymbol), CC)
+    @test_throws ArgumentError add_equation!(model, :EQ6, :(x[t] = unknownseries[t]), CC)
+    @test_throws ArgumentError add_equation!(model, :EQ7, :(x[t] = let c = 5
             sx[t+c]
         end), CC)
-    @test ModelBaseEcon.update_auxvars(ones(2, 2), mod) == ones(2, 2)
+    @test ModelBaseEcon.update_auxvars(ones(2, 2), model) == ones(2, 2)
 end
 
 ############################################################################
 
 @testset "export" begin
-    let m = Model()
+    mod = Module()
+    @eval mod using ModelBaseEcon
+    @eval mod begin
+        m = Model()
         m.warn.no_t = false
         @parameters m begin
             a = 0.3
@@ -811,7 +841,8 @@ end
         end
         @initialize m
         @steadystate m x = a + 1
-
+    end
+    let m = mod.m
         export_model(m, "TestModel", "../examples/")
 
         @test isfile("../examples/TestModel.jl")
@@ -858,7 +889,10 @@ end
 end
 
 @testset "@log eqn" begin
-    let m = Model()
+    mod = Module()
+    @eval mod using ModelBaseEcon
+    @eval mod begin
+        m = Model()
         @parameters m rho = 0.1
         @variables m X
         @shocks m EX
@@ -866,10 +900,10 @@ end
             @log X[t] = rho * X[t-1] + EX[t]
         end
         @initialize m
-        eq = m.equations[:_EQ1]
-        @test length(m.equations) == 1 && islog(eq)
-        @test contains(sprint(show, eq), "=> @log X[t]")
     end
+    eq = mod.m.equations[:_EQ1]
+    @test length(mod.m.equations) == 1 && islog(eq)
+    @test contains(sprint(show, eq), "=> @log X[t]")
 end
 
 ############################################################################
@@ -1187,9 +1221,11 @@ end
 
 
 @testset "VarTypesSS" begin
-    let m = Model()
+    mod = Module()
+    @eval mod using ModelBaseEcon
+    @eval mod begin
+        m = Model()
         m.verbose = !true
-
         @variables m begin
             p
             @log q
@@ -1199,7 +1235,9 @@ end
             q[t] = p[t] + 1
         end
         @initialize m
+    end
 
+    let m = mod.m
         # clear_sstate!(m)
         # ret = sssolve!(m)
         # @test ret ≈ [0.1, 0.0, log(1.1), 0.0]
@@ -1230,7 +1268,10 @@ end
 
     end
 
-    let m = Model()
+    mod = Module()
+    @eval mod using ModelBaseEcon
+    @eval mod begin
+        m = Model()
         @variables m begin
             lx
             @log x
@@ -1243,7 +1284,9 @@ end
             log(x[t]) = lx[t] + s2[t+1]
         end
         @initialize m
-        #
+    end
+    #
+    let m = mod.m
         @test nvariables(m) == 2
         @test nshocks(m) == 2
         @test nequations(m) == 2
@@ -1308,7 +1351,9 @@ end
 end
 
 @testset "bug #28" begin
-    let
+    mod = Module()
+    @eval mod using ModelBaseEcon
+    @eval mod begin
         m = Model()
         @variables m (@log(a); la)
         @equations m begin
@@ -1316,6 +1361,8 @@ end
             la[t] = 20
         end
         @initialize m
+    end
+    let m = mod.m
         assign_sstate!(m, a=20, la=log(20))
         @test m.sstate.a.level ≈ 20 atol = 1e-14
         @test m.sstate.a.slope == 1.0
@@ -1330,12 +1377,17 @@ end
 end
 
 @testset "lin" begin
-    let m = Model()
+    mod = Module()
+    @eval mod using ModelBaseEcon
+    @eval mod begin
+        m = Model()
         @variables m a
         @equations m begin
             a[t] = 0
         end
         @initialize m
+    end
+    let m = mod.m
         # steady state not solved
         fill!(m.sstate.mask, false)
         @test_throws ModelBaseEcon.LinearizationError linearize!(m)
@@ -1356,7 +1408,9 @@ end
 end
 
 @testset "sel_lin" begin
-    let
+    mod = Module()
+    @eval mod using ModelBaseEcon
+    @eval mod begin
         m = Model()
         @variables m (la; @log a)
         @equations m begin
@@ -1364,6 +1418,8 @@ end
             @lin la[t] = 2
         end
         @initialize m
+    end
+    let m = mod.m
         assign_sstate!(m; a=exp(2), la=2)
         @test_nowarn (selective_linearize!(m); true)
     end
@@ -1597,41 +1653,41 @@ end
 end
 
 @using_example E2sat
-m2_for_sattelite_tests = E2sat.newmodel()
+m2_for_satellite_tests = E2sat.newmodel()
 @testset "satellite models" begin
     m1 = E2.newmodel()
 
-    m_sattelite = Model()
+    m_satellite = Model()
 
-    @parameters m_sattelite begin
+    @parameters m_satellite begin
         _parent = E2.model
         cx = @link _parent.cp
     end
     @test m1.cp == [0.5, 0.02]
-    @test m_sattelite.cx == [0.5, 0.02]
+    @test m_satellite.cx == [0.5, 0.02]
 
     m1.cp = [0.6, 0.03]
     @test m1.cp == [0.6, 0.03]
 
-    m_sattelite.parameters._parent = m1.parameters
-    update_links!(m_sattelite)
-    @test m_sattelite.cx == [0.6, 0.03]
+    m_satellite.parameters._parent = m1.parameters
+    update_links!(m_satellite)
+    @test m_satellite.cx == [0.6, 0.03]
 
-    # m2_for_sattelite_tests = E2sat.newmodel()
-    m2_sattelite = deepcopy(E2sat.satmodel)
+    # m2_for_satellite_tests = E2sat.newmodel()
+    m2_satellite = deepcopy(E2sat.satmodel)
 
-    m2_for_sattelite_tests.cp = [0.7, 0.05]
+    m2_for_satellite_tests.cp = [0.7, 0.05]
 
-    @test m2_for_sattelite_tests.cp == [0.7, 0.05]
-    @test m2_sattelite.cz == [0.5, 0.02]
-    @replaceparameterlinks m2_sattelite E2sat.model => m2_for_sattelite_tests
-    @test m2_sattelite.cz == [0.7, 0.05]
-    m2_for_sattelite_tests.cp = [0.3, 0.08]
-    update_links!(m2_sattelite.parameters)
-    @test m2_sattelite.cz == [0.3, 0.08]
+    @test m2_for_satellite_tests.cp == [0.7, 0.05]
+    @test m2_satellite.cz == [0.5, 0.02]
+    @replaceparameterlinks m2_satellite E2sat.model => m2_for_satellite_tests
+    @test m2_satellite.cz == [0.7, 0.05]
+    m2_for_satellite_tests.cp = [0.3, 0.08]
+    update_links!(m2_satellite.parameters)
+    @test m2_satellite.cz == [0.3, 0.08]
 
 end
-m2_for_sattelite_tests = nothing
+m2_for_satellite_tests = nothing
 
 @testset "Model find" begin
     m = E3.newmodel()
@@ -1732,28 +1788,33 @@ end
 end
 
 @testset "fix#63" begin
-    let model = Model()
+    mod = Module()
+    @eval mod using ModelBaseEcon
+    @eval mod begin
+        model = Model()
         @variables model y
         @shocks model y_shk
         @parameters model p = 0.2
         @equations model begin
             y[t] = p[t] * y[t-1] + y_shk[t]
         end
+    end
+    let model = mod.model
         # test the exception type
-        @test_throws ArgumentError @initialize model
+        @test_throws ArgumentError @eval mod @initialize model
         # test the error message
         if Base.VERSION >= v"1.8"
             # this version of @test_throws requires Julia 1.8
-            @test_throws r".*Indexing parameters on time not allowed: p[t]*"i @initialize model
+            @test_throws r".*Indexing parameters on time not allowed: p[t]*"i @eval mod @initialize model
         end
 
         # do not allow multiple indexing of variables
-        @equations model begin
+        @eval mod @equations model begin
             @delete :_EQ1
             y[t, 1] = p[t] * y[t-1] + y_shk[t]
         end
-        @test_throws ArgumentError @initialize model
-        Base.VERSION >= v"1.8" && @test_throws r".*Multiple indexing of variable or shock: y[t, 1]*"i @initialize model
+        @test_throws ArgumentError @eval mod @initialize model
+        Base.VERSION >= v"1.8" && @test_throws r".*Multiple indexing of variable or shock: y[t, 1]*"i @eval mod @initialize model
     end
 end
 
@@ -1761,7 +1822,10 @@ end
 @testset "issue68" begin
     # Parameters with more than one index are parsed incorrectly (fixed by PR#67)
     # This test fails in v0.6.2, fixed as of v0.6.3
-    let model = Model()
+    mod = Module()
+    @eval mod using ModelBaseEcon
+    @eval mod begin
+        model = Model()
         @variables model x
         @shocks model e
         @parameters model begin
@@ -1771,6 +1835,8 @@ end
             :E1 => x[t] = c[1, 1] * x[t-1] + c[1, 2] * x[t-2] + e[t]
         end
         @initialize model
+    end
+    let model = mod.model
         x = Float64[0, 0.375, 0.128, 0]
         x[1] = model.parameters.c[1] * x[2] + model.parameters.c[2] * x[3]
         eq = model.equations[:E1]
@@ -1779,7 +1845,10 @@ end
 end
 
 @testset "equation_parentheses" begin
-    @test_warn "Model contains different numbers of equations (3) and endogenous variables (1)." let model = Model()
+    mod = Module()
+    @eval mod using ModelBaseEcon
+    @test_warn "Model contains different numbers of equations (3) and endogenous variables (1)." @eval mod begin
+        model = Model()
         @variables model x
         @equations model begin
             :EQ_x1 => (x[t] = 0)
@@ -1793,15 +1862,20 @@ end
 end
 
 @testset "eval_equation" begin
-    model = Model()
-    @parameters model p = 0.1
-    @variables model x
-    @shocks model x_shk
-    @equations model begin
-        :EQ01 => x[t] = (1 - 0.50) * @sstate(x) + 0.25 * x[t-1] + 0.25 * x[t+1] + x_shk[t]
+    mod = Module()
+    @eval mod using ModelBaseEcon
+    @eval mod begin
+        model = Model()
+        @parameters model p = 0.1
+        @variables model x
+        @shocks model x_shk
+        @equations model begin
+            :EQ01 => x[t] = (1 - 0.50) * @sstate(x) + 0.25 * x[t-1] + 0.25 * x[t+1] + x_shk[t]
+        end
+        @initialize model
+        @steadystate model x = 2.0
     end
-    @initialize model
-    @steadystate model x = 2.0
+    model = mod.model
     model.sstate.x.level = 2.0
     sim_data = [0.5 0.0;
         1.5980861244019138 0.0;
@@ -1810,14 +1884,14 @@ end
         1.992822966507177 0.0;
         2.0 0.0]
 
-    eqtn = model.equations[:EQ01]
-    res = eval_equation(model, eqtn, sim_data)
+    eqn = model.equations[:EQ01]
+    res = eval_equation(model, eqn, sim_data)
     @test isnan(res[1]) && isapprox(res[2:5], [0.0, 0.0, 0.0, 0.0]; atol=1e-12) && isnan(res[6])
 
     sim_data[3, 1] += 1
-    @test eval_equation(model, eqtn, sim_data, 3:4) ≈ [1.0, -0.25]
+    @test eval_equation(model, eqn, sim_data, 3:4) ≈ [1.0, -0.25]
 
-    @test_throws AssertionError eval_equation(model, eqtn, sim_data, 1:7)
+    @test_throws AssertionError eval_equation(model, eqn, sim_data, 1:7)
 end
 
 include("dfmmodels.jl")
