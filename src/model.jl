@@ -53,7 +53,7 @@ end
 Data structure that represents a macroeconomic model.
 """
 mutable struct Model <: AbstractModel
-    "State determines whether the model is ready to be solved/run. One of :new, :ready, :dev. 
+    "State determines whether the model is ready to be solved/run. One of :new, :ready, :dev.
     Should not be directly manipulated."
     _state::Symbol
     "the module in which all model equations will be compiled"
@@ -71,7 +71,7 @@ mutable struct Model <: AbstractModel
     shocks::Vector{ModelVariable}
     # transition equations
     equations::OrderedDict{Symbol,Equation}
-    # parameters 
+    # parameters
     parameters::Parameters
     # auto-exogenize mapping of variables and shocks
     autoexogenize::Dict{Symbol,Symbol}
@@ -88,13 +88,11 @@ mutable struct Model <: AbstractModel
     solverdata::LittleDictVec{Symbol,Any}
     #
     # constructor of an empty model
-    Model(opts::Options) = new(:new, nothing, merge(defaultoptions, opts),
-        ModelFlags(), SteadyStateData(), false, [], [], OrderedDict{Symbol,Equation}(), Parameters(), Dict(), 0, 0, [], OrderedDict{Symbol,Equation}(),
-        LittleDict{Symbol,AbstractModelEvaluationData}(), LittleDict{Symbol,Any}())
-    Model() = new(:new, nothing, deepcopy(defaultoptions),
+    Model(opts::Options) = new(:new, nothing, deepcopy(merge(defaultoptions, opts)),
         ModelFlags(), SteadyStateData(), false, [], [], OrderedDict{Symbol,Equation}(), Parameters(), Dict(), 0, 0, [], OrderedDict{Symbol,Equation}(),
         LittleDict{Symbol,AbstractModelEvaluationData}(), LittleDict{Symbol,Any}())
 end
+Model(; kwargs...) = Model(Options(; kwargs...))
 
 auxvars(model::Model) = getfield(model, :auxvars)
 nauxvars(model::Model) = length(auxvars(model))
@@ -343,7 +341,7 @@ function fullprint(io::IO, model::Model)
     end
     function print_aux_eq(aux_key)
         v = model.auxeqns[aux_key]
-        println(io, "  ", " "^longest_key, " |-> ",stripexpr(v))
+        println(io, "  ", " "^longest_key, " |-> ", stripexpr(v))
     end
     for (key, eq) in model.equations
         seq = sprint(show, eq; context=io, sizehint=0)
@@ -930,9 +928,9 @@ function process_equation end
 
 #! method for backwards compatibility from before CodeCache. Will deprecate eventually
 function process_equation(model::Model, expr::Union{Expr,String}; modelmodule::Union{Module,Nothing}=nothing, kw...)
-    if isnothing(modelmodule) 
-        (model._module isa Function) ||  error("Model must be initialized or a `modelmodule` must be given.")
-        modelmodlue = model._module( )
+    if isnothing(modelmodule)
+        (model._module isa Function) || error("Model must be initialized or a `modelmodule` must be given.")
+        modelmodlue = model._module()
     end
     process_equation(model, expr, CodeCache(model, modelmodule); kw...)
 end
@@ -966,10 +964,10 @@ function process_equation(model::Model, expr::Expr, CC::CodeCache;
     #  (helps with tracking the locations of errors)
     source = []
 
-    """spell a number using subscript digits e.g., 
-        `num2sub(0)` returns "₀" 
-        `num2sub(5)` returns "₊₅" 
-        `num2sub(-1)` returns "₋₁" 
+    """spell a number using subscript digits e.g.,
+        `num2sub(0)` returns "₀"
+        `num2sub(5)` returns "₊₅"
+        `num2sub(-1)` returns "₋₁"
     """
     num2sub(n::Integer) = n == 0 ? "₀" : n < 0 ? '₋' * n2s(-n) : '₊' * n2s(n)
     n2s(n::Int) = n < 10 ? string('₀' + n) : n2s(n ÷ 10) * n2s(n % 10)
@@ -1108,8 +1106,8 @@ function process_equation(model::Model, expr::Expr, CC::CodeCache;
         if ex.head == :if
             if length(args) == 3
                 # return Expr(:if, args...)  # not the original ex - here args have been processed!
-                # N.B. if(a) b else c end is different from ifelse(a, b, c) in that 
-                #      if-statement evaluates either b or c but not both, while the 
+                # N.B. if(a) b else c end is different from ifelse(a, b, c) in that
+                #      if-statement evaluates either b or c but not both, while the
                 #      ifelse-function evaluates all three each call regardless of a.
                 #   However, Symbolics.jl can handle ifelse() but not if-statement.
                 if codegen == :symbolics
@@ -1129,7 +1127,7 @@ function process_equation(model::Model, expr::Expr, CC::CodeCache;
             return Expr(:call, ex.head == :(&&) ? :(&) : :(|), args...)
         end
         if ex.head == :comparison && codegen == :symbolics
-            # desugar chanined comparison (!!! this is quick and dirty - todo: check correctness and rewrite) 
+            # desugar chanined comparison (!!! this is quick and dirty - todo: check correctness and rewrite)
             local x = Expr(:call, :(&))
             L = args[1]
             for ii = 2:2:length(args)-1
@@ -1139,8 +1137,8 @@ function process_equation(model::Model, expr::Expr, CC::CodeCache;
                 # N.B. No point checking correctness here, plus the full list of
                 # possible binary infix operators is too long anyway
                 # cf., https://discourse.julialang.org/t/list-of-binary-infix-operators/32282
-                # If there is a problem with the user's expression, it'll 
-                # show up during execution 
+                # If there is a problem with the user's expression, it'll
+                # show up during execution
                 push!(x.args, Expr(:call, op, L, R))
                 L = R
             end
@@ -1471,7 +1469,7 @@ function initialize!(model::Model, modelmodule::Module;
     end
     begin # codegen
         if getoption!(model, :codegen, codegen) != codegen
-            # changing codegen - force a brand new initialize 
+            # changing codegen - force a brand new initialize
             model.options.codegen = codegen
             empty!(model.evaldata)
         end
@@ -1489,12 +1487,12 @@ function initialize!(model::Model, modelmodule::Module;
     end
 
     if (codegen != :symbolics) && !isnothing(cachefile)
-        @warn "Caching code is not available with `codegen=$codegen`"
+        @warn "Caching code is not available with `codegen=$(QuoteNode(codegen))`"
         cachefile = nothing
     end
 
     CC = CodeCache(cachefile, model, modelmodule)
-    initfuncs(CC)
+    initfuncs(CC)   # prepare model module for code generation
 
     model.parameters.mod[] = CC.mmod
     varshks = model.varshks
@@ -1504,31 +1502,6 @@ function initialize!(model::Model, modelmodule::Module;
     if model._state == :new
         empty!(model.auxvars)
         empty!(model.auxeqns)
-    end
-
-    if codegen === :symbolics
-        # Symbolics needs to know about array-valued parameters, if any
-        if any(pv.value isa AbstractArray for (p, pv) in model.parameters)
-            _cc_comment(CC, "Define symbols for array-valued parameters ")
-            for (p, pv) in model.parameters
-                if pv.value isa AbstractArray
-                    expr = :(@eval _Sym $p = Symbolics.variables($(QuoteNode(p)), $(axes(pv.value)...)))
-                    runandcache_expr(CC, expr)
-                end
-            end
-        end
-        # Symbolics needs to know about variables
-        _cc_comment(CC, "Define ModelVariable instances for model variables ")
-        local E = Expr(:block)
-        for vars in (model.variables, model.shocks, model.auxvars)
-            for v in vars
-                push!(E.args, :(@eval _Sym $(v.name) =
-                    ModelBaseEcon.ModelVariable($(v.doc), $(QuoteNode(v.name)),
-                        $(QuoteNode(v.vr_type)), $(QuoteNode(v.tr_type)),
-                        $(QuoteNode(v.ss_type)))))
-            end
-        end
-        runandcache_expr(CC, E)
     end
 
     model.dynss = false
@@ -1576,7 +1549,7 @@ end
     reinitialize!(model, modelmodule)
 
 In the model file, after all changes to flags, parameters, variables, shocks,
-autoexogenize pairs, equations, and steadystate equations are done, it is necessary to 
+autoexogenize pairs, equations, and steadystate equations are done, it is necessary to
 reinitialize the model instance. Usually it
 is easier to call [`@reinitialize`](@ref), which automatically sets the
 `modelmodule` value. When it is necessary to set the `modelmodule` argument to
@@ -1640,8 +1613,8 @@ end
 """
     @reinitialize model
 
-Process the changes made to a model and prepare the model instance for analysis. 
-Call this macro after all changes to parameters, variable names, shock names, 
+Process the changes made to a model and prepare the model instance for analysis.
+Call this macro after all changes to parameters, variable names, shock names,
 equations, autoexogenize lists, and removed steadystate equations have been declared and defined.
 
 Additional/new steadystate constraints can be added after the call to `@reinitialize`.
@@ -1810,7 +1783,7 @@ export find_main_equation
 
 """
     prettyprint_equation(m::Model, eq::Equation; target::Symbol, eq_symbols::Vector{Any}=[])
-    
+
 Print the provided equation with the variables colored according to their type.
 
 ### Keyword arguments
@@ -1871,7 +1844,7 @@ end
 #TODO: improve this
 """
     find_symbols!(dest::Vector, v::Vector{Any})
-    
+
 Take a vector of equation arguments and add the non-mathematical ones to the
 destination vector.
 """
@@ -1890,7 +1863,7 @@ symbol_length(sym::Symbol) = length(string(sym))
 
 """
     equation_symbols(e::Equation)
-    
+
 The a vector of symbols of the non-mathematical arguments in the provided
 equation.
 """
@@ -1904,9 +1877,9 @@ export findequations
 
 """
     equation_map(e::Model)
-    
-Returns a dictionary with the keys being the symbols used in the models equations 
-and the values being a vector of equation keys for equations which use these symbols. 
+
+Returns a dictionary with the keys being the symbols used in the models equations
+and the values being a vector of equation keys for equations which use these symbols.
 """
 function equation_map(m::Model)
     eqmap = Dict{Symbol,Any}()
@@ -1955,13 +1928,13 @@ end
 
 """
     @replaceparameterlinks model oldmodel => newmodel
-    
+
 
 This function is used when a model uses parameters which link to another model object.
 The function must be called with a pair of models as they appear in the Main module.
 
 This is useful when ones models are modularized and include satellite models. The function
-can then be used to link the parameters in modified copies of the satellite model to modified 
+can then be used to link the parameters in modified copies of the satellite model to modified
 copies of the main model. For example, if the FRBUS_VAR model has a main model and a satellite model
 the following workflow would make sense.
 

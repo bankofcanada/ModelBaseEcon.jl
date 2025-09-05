@@ -36,7 +36,7 @@ function _unpack_args_expr(x, tssyms, sssyms)
         ind += 1
         push!(ex.args, :($sym = $x[$ind]))
     end
-    return :(@inbounds $ex)
+    return :(@assert length($x) == $ind; @inbounds $ex)
 end
 
 function _unpack_pars_expr(ee, psyms)
@@ -50,6 +50,7 @@ function _unpack_pars_expr(ee, psyms)
     end
     return Expr(:block,
         :($pv = $ee.params.vals),
+        :(@assert length($pv) == $ind),
         :(@inbounds $ex),
     )
 end
@@ -130,9 +131,10 @@ function initfuncs(CC::CodeCache)
     runandcache_expr(CC, E; striplines=true, unblock=true)
     _cc_newline(CC)
 end
-initfuncs(mod::Module, codegen::Symbol) = initfuncs(initcc!(CodeCache(), mod, codegen))
+initfuncs(mod::Module, codegen::Symbol) = initfuncs(initcc!(CodeCache(), mod, Model(; codegen)))
 
 function makeequation(doc, eqn_name, flags, expr, residual, tsrefs, ssrefs, prefs, CC)
+
     if CC.codegen == Val(:forwarddiff)
         resid, RJ = DerivsFD.makefuncs(eqn_name, residual, values(tsrefs), values(ssrefs), values(prefs), CC.cmod)
         tsrefs′ = LittleDict{Tuple{ModelVariable,Int},Symbol}()
@@ -148,8 +150,8 @@ function makeequation(doc, eqn_name, flags, expr, residual, tsrefs, ssrefs, pref
 
         E = Expr(:block)
         # get the definitions from the relevant DerivsXYZ module
-        derivsmod = _derivs_mod(CC.codegen)
-        derivsmod._makefuncs_exprs!(E.args, eqn_name, residual, values(tsrefs), values(ssrefs), values(prefs), CC.cmod)
+        DMOD = _derivs_mod(CC.codegen)
+        DMOD._makefuncs_exprs!(E.args, eqn_name, residual, values(tsrefs), values(ssrefs), values(prefs), CC.cmod)
         # extract the names of eval_resid and eval_RJ functions from the last expression pushed by _makefuncs_exprs
         resid_nm, RJ_nm = pop!(E.args).args
 
@@ -163,26 +165,26 @@ function makeequation(doc, eqn_name, flags, expr, residual, tsrefs, ssrefs, pref
                         [$((Meta.quot(s) for s in values(tsrefs))...)],
                         [$((Meta.quot(s) for s in values(ssrefs))...)],
                         [$((Meta.quot(s) for s in values(prefs))...)],
-                    ), $(nameof(CC.cmod)), ModelBaseEcon.$(nameof(derivsmod)).myhash)
+                    ), $(nameof(CC.cmod)), ModelBaseEcon.$(nameof(DMOD)).myhash)
                 ); striplines=false)
         end
         # create the equation instance.
         tsrefs_keys = []
         tsrefs_vals = []
         for ((var, tt), sym) in tsrefs
-            if !isdefined(CC.cmod._Sym, var)
-                runandcache_expr(CC, :(@eval _Sym const $var = ModelBaseEcon.ModelVariable($(QuoteNode(var)))))
+            if !isdefined(CC.cmod, var)
+                runandcache_expr(CC, :(const $var = ModelBaseEcon.ModelVariable($(QuoteNode(var)))))
             end
-            push!(tsrefs_keys, :((_Sym.$var, $tt)))
+            push!(tsrefs_keys, :(($var, $tt)))
             push!(tsrefs_vals, QuoteNode(sym))
         end
         ssrefs_keys = []
         ssrefs_vals = []
         for (var, sym) in ssrefs
-            if !isdefined(CC.cmod._Sym, var)
-                runandcache_expr(CC, :(@eval _Sym const $var = ModelBaseEcon.ModelVariable($(QuoteNode(var)))))
+            if !isdefined(CC.cmod, var)
+                runandcache_expr(CC, :(const $var = ModelBaseEcon.ModelVariable($(QuoteNode(var)))))
             end
-            push!(ssrefs_keys, :(_Sym.$var))
+            push!(ssrefs_keys, :($var))
             push!(ssrefs_vals, QuoteNode(sym))
         end
         E = Expr(:block,
@@ -358,7 +360,7 @@ function ModelEvaluationData(model::AbstractModel)
     M.nzval .= 1:length(II)
     rowinds = [copy(M[i, LI[inds]].nzval) for (i, inds) in enumerate(JJ)]
     # this is the only place where we must pass var_to_idx to DynEqnEvalData explicitly
-    # this is because normally var_to_idx is taken from the ModelEvaluationData, but that's 
+    # this is because normally var_to_idx is taken from the ModelEvaluationData, but that's
     # what's being built here, so it doesn't yet exist in the `model`
     eedata = [DynEqnEvalData(eqn, model, var_to_idx) for eqn in alleqns]
     if model.dynss && !issssolved(model)

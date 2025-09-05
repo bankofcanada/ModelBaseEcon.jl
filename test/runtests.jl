@@ -247,14 +247,15 @@ using ModelBaseEcon
 end
 @testset "DerivsFD" begin
     ModelBaseEcon.initfuncs(E, :forwarddiff)
-    @test isdefined(E, :EquationEvaluatorFD)
-    @test isdefined(E, :EquationGradientFD)
+    @test isdefined(E, :_forwarddiff)
+    @test isdefined(E._forwarddiff, :EquationEvaluatorFD)
+    @test isdefined(E._forwarddiff, :EquationGradientFD)
     resid, RJ = ModelBaseEcon.DerivsFD.makefuncs(:fd, :(x + 3 * y), [:x, :y], [], [], E)
-    @test resid isa E.EquationEvaluatorFD
-    @test RJ isa E.EquationGradientFD
+    @test resid isa E._forwarddiff.EquationEvaluatorFD
+    @test RJ isa E._forwarddiff.EquationGradientFD
     @test RJ.fn1 isa ModelBaseEcon.DerivsFD.FunctionWrapper
     @test RJ.fn1.f == resid
-    @test ModelBaseEcon.moduleof(resid) === E
+    @test ModelBaseEcon.moduleof(resid) === E._forwarddiff
     # @test ModelBaseEcon.moduleof(RJ) === E
     @test resid([1.1, 2.3]) == 8.0
     @test RJ([1.1, 2.3]) == (8.0, [1.0, 3.0])
@@ -269,13 +270,14 @@ end
 @static if VERSION >= v"1.10"
     @testset "DerivsSym" begin
         ModelBaseEcon.initfuncs(E, :symbolics)
-        @test isdefined(E, :EquationEvaluatorSym)
-        @test isdefined(E, :GradientEvaluatorSym)
+        @test isdefined(E, :_symbolics)
+        @test isdefined(E._symbolics, :EquationEvaluatorSym)
+        @test isdefined(E._symbolics, :GradientEvaluatorSym)
         resid, RJ = ModelBaseEcon.DerivsSym.makefuncs(:sym, :(x + 3 * y), [:x, :y], [], [], E)
-        @test resid isa E.EquationEvaluatorSym
-        @test RJ isa E.GradientEvaluatorSym
-        @test ModelBaseEcon.moduleof(resid) === E
-        @test ModelBaseEcon.moduleof(RJ) === E
+        @test resid isa E._symbolics.EquationEvaluatorSym
+        @test RJ isa E._symbolics.GradientEvaluatorSym
+        @test ModelBaseEcon.moduleof(resid) === E._symbolics
+        @test ModelBaseEcon.moduleof(RJ) === E._symbolics
         @test resid([1.1, 2.3]) == 8.0
         @test RJ([1.1, 2.3]) == (8.0, [1.0, 3.0])
         # make sure the EquationEvaluator and EquationGradient are reused for identical expressions and arguments
@@ -1066,29 +1068,32 @@ end
 @testset "E1.equation change 4" begin
     # don't recompile existing functions
 
-    modelmodule = E1_noparams
-
     # number of new symbols created by makefuncs
     n_new_syms = Dict(:symbolics => 6, :forwarddiff => 4)
 
     for i = 1:5
         α = 0.132434
         new_E1 = E1_noparams.newmodel()
-        prev_length = length(names(modelmodule, all=true))
+        codegen = new_E1.options.codegen
+        codemod = new_E1._module(codegen)
+        prev_length = length(names(codemod, all=true))
         @equations new_E1 begin
             :maineq => y[t] = $α * y[t-1] + $(1 - α) * y[t+1] + y_shk[t]
         end
         @reinitialize(new_E1)
-        new_length = length(names(modelmodule, all=true))
+        new_length = length(names(codemod, all=true))
         if i == 1
-            @test new_length == prev_length + n_new_syms[getoption(new_E1, :codegen, nothing)]
+            @test new_length == prev_length + n_new_syms[codegen]
         else
             @test new_length == prev_length
         end
-        @test ModelBaseEcon.moduleof(new_E1.equations[:maineq]) === E1_noparams
-        # also make sure moduleof doesn't add any new symbols to modules
+        @test ModelBaseEcon.moduleof(new_E1.equations[:maineq]) === codemod
+        # also make sure moduleof didn't add any new symbols to modules
+        @test new_length == length(names(codemod, all=true))
+        # make sure moduleof(model) doesn't add any new symbols
+        prev_length = length(names(E1_noparams, all=true))
         @test ModelBaseEcon.moduleof(new_E1) === E1_noparams
-        @test new_length == length(names(modelmodule, all=true))
+        @test prev_length == length(names(E1_noparams, all=true))
     end
 end
 

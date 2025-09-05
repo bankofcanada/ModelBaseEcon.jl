@@ -12,9 +12,15 @@ using OrderedCollections
 using Symbolics
 using SymbolicUtils
 
-
 import ..MacroTools
 import ..ModelBaseEcon
+
+import ..AbstractModel
+import ..CodeCache
+import ..runandcache_expr
+import .._cc_comment
+# import .._cc_newline
+
 import ..EquationEvaluator
 import .._update_eqn_params!
 import .._unpack_args_expr
@@ -88,8 +94,6 @@ function _makefuncs_exprs!(exprs::Vector, eqn_name, expr, tssyms, sssyms, psyms,
     R = Symbol("#R#")
     ee = Symbol("#e#")
     resid, grad = make_res_grad_expr(expr, tssyms, sssyms, psyms, mod)
-    # dump(resid)   # for debugging
-    # dump(grad)    # for debugging
     # If the equation has no parameters, then we just unpack x and evaluate the expressions
     # Otherwise, we unpack the parameters (which have unknown types) and pass it
     # to another function that acts like a function barrier where the types are known.
@@ -102,7 +106,7 @@ function _makefuncs_exprs!(exprs::Vector, eqn_name, expr, tssyms, sssyms, psyms,
     ))
     push!(exprs, :(
         const $fn1 = EquationEvaluatorSym{$(QuoteNode(fn1))}(UInt(0),
-            ModelBaseEcon.LittleDict(Symbol[$(QuoteNode.(psyms)...)],
+            LittleDict(Symbol[$(QuoteNode.(psyms)...)],
                 fill!(Vector{Any}(undef, $(length(psyms))), nothing)),
             # $(Meta.quot(resid)),
         )
@@ -117,7 +121,7 @@ function _makefuncs_exprs!(exprs::Vector, eqn_name, expr, tssyms, sssyms, psyms,
     ))
     push!(exprs, :(
         const $fn2 = GradientEvaluatorSym{$(QuoteNode(fn2))}(UInt(0),
-            ModelBaseEcon.LittleDict(Symbol[$(QuoteNode.(psyms)...)],
+            LittleDict(Symbol[$(QuoteNode.(psyms)...)],
                 fill!(Vector{Any}(undef, $(length(psyms))), nothing)),
             # $(Meta.quot(resid)), [$(Meta.quot.(grad)...)],
             Vector{Float64}(undef, $nvars))
@@ -143,19 +147,13 @@ end
 
 
 function makefuncs(eqn_name, expr, tssyms, sssyms, psyms, mod::Module)
+    mod = invokelatest(mod._module, Val(:symbolics))
     E = Expr(:block)
     _makefuncs_exprs!(E.args, eqn_name, expr, tssyms, sssyms, psyms, mod)
     return Core.eval(mod, E)
 end
 
 function _initfuncs_exprs!(exprs::Vector, mod::Module)
-    if !isdefined(mod, :_Sym)
-        push!(exprs, :(baremodule _Sym
-        import Base
-        import ModelBaseEcon
-        import ModelBaseEcon.DerivsSym.Symbolics
-        end))
-    end
     if !isdefined(mod, :EquationEvaluatorSym)
         push!(exprs, quote
             struct EquationEvaluatorSym{FN} <: ModelBaseEcon.EquationEvaluator
@@ -178,5 +176,43 @@ function _initfuncs_exprs!(exprs::Vector, mod::Module)
     end
     return exprs
 end
+
+## =====================================
+
+function _initcc(CC::CodeCache, model::AbstractModel)
+    DMOD = nameof(@__MODULE__)
+    if !isdefined(CC.cmod, :ModelBaseEcon)
+        runandcache_expr(CC, quote
+            using ModelBaseEcon
+            # using StateSpaceEcon
+            import ModelBaseEcon.LittleDict
+            import ModelBaseEcon.LittleDictVec
+            import ModelBaseEcon.$DMOD.Symbolics
+        end)
+    end
+
+    if !isdefined(CC.cmod, :_Sym)
+        runandcache_expr(CC, :(baremodule _Sym
+        import Base
+        import ModelBaseEcon
+        import ModelBaseEcon.$DMOD.Symbolics
+        end))
+    end
+
+    # Symbolics needs to know about array-valued parameters, if any
+    if any(pv.value isa AbstractArray for (p, pv) in model.parameters)
+        _cc_comment(CC, "Define symbols for array-valued parameters ")
+        E = Expr(:block)
+        for (p, pv) in model.parameters
+            if pv.value isa AbstractArray
+                expr = :(@eval _Sym $p = Symbolics.variables($(QuoteNode(p)), $(axes(pv.value)...)))
+                push!(E.args, expr)
+            end
+        end
+        runandcache_expr(CC, E)
+    end
+
+end
+
 
 end

@@ -16,6 +16,16 @@ using DiffResults
 import ..LittleDict
 import ..LittleDictVec
 
+import ..EquationEvaluator
+import .._update_eqn_params!
+
+import ..CodeCache
+import ..runandcache_expr
+
+import .._unpack_args_expr
+import .._unpack_pars_expr
+import ..funcsyms
+
 struct ModelBaseEconTag end
 
 """
@@ -62,11 +72,6 @@ struct FunctionWrapper <: Function
 end
 (f::FunctionWrapper)(x) = f.f(x)
 
-import ..EquationEvaluator
-# struct EquationEvaluatorFD{FN} <: AbstractEquationEvaluator
-#     rev::Ref{UInt}
-#     params::LittleDictVec{Symbol,Any}
-# end
 
 struct EquationGradientFD{DR<:DiffResults.DiffResult,CFG<:ForwardDiff.GradientConfig} <: Function
     fn1::FunctionWrapper
@@ -88,18 +93,53 @@ end
 function (s::EquationGradientFD)(J::AbstractVector{Float64}, x::Vector{Float64})
     ForwardDiff.gradient!(s.dr, s.fn1, x, s.cfg)
     copyto!(J, s.dr.derivs)
-    return s.dr.value, s.dr.derivs[1]
+    return s.dr.value, J
 end
 
-import .._update_eqn_params!
 _update_eqn_params!(@nospecialize(ee::EquationGradientFD), params) = _update_eqn_params!(ee.fn1.f, params)
 
-import .._unpack_args_expr
-import .._unpack_pars_expr
-import ..funcsyms
 #------------------------------------------------------------------------------
 
 const myhash = @static UInt == UInt64 ? 0x2270e9673a0822b5 : 0x2ce87a13
+
+function _makefuncs_exprs!(exprs::Vector, eqn_name, expr, tssyms, sssyms, psyms, mod::Module)
+    fn1, fn2, fn3 = funcsyms(eqn_name, expr, tssyms, sssyms, psyms, mod,
+        myhash, ("resid", "RJ", "resid_param"))
+    nargs = length(tssyms) + length(sssyms)
+    chunk = min(nargs, MAX_CHUNK_SIZE)
+    if isdefined(mod, fn1) && isdefined(mod, fn2) && isdefined(mod, fn3)
+        push!(exprs, :(($fn1, $fn2, $fn3, $chunk)))
+        return exprs
+    end
+    x = gensym("x")
+    ee = Symbol("#e#")
+    # If the equation has no parameters, then we just unpack x and evaluate the expressions
+    # Otherwise, we unpack the parameters (which have unknown types) and pass it
+    # to another function that acts like a function barrier where the types are known.
+    push!(exprs, :(
+        function ($ee::EquationEvaluatorFD{$(QuoteNode(fn1))})($x::Vector{<:Real})
+            # $(_unpack_args_expr(x, tssyms, sssyms))
+            $(_unpack_pars_expr(ee, psyms).args...)
+            return $fn3($x, $(psyms...))
+        end
+    ))
+    push!(exprs, :(
+        const $fn1 = EquationEvaluatorFD{$(QuoteNode(fn1))}(UInt(0),
+            LittleDict(Symbol[$(QuoteNode.(psyms)...)],
+                fill!(Vector{Any}(undef, $(length(psyms))), nothing)))
+    ))
+    push!(exprs, :(
+        const $fn2 = EquationGradientFD($fn1, $nargs, Val($chunk))
+    ))
+    push!(exprs, :(
+        function $fn3($x::Vector{<:Real}, $(psyms...))
+            $(_unpack_args_expr(x, tssyms, sssyms))
+            $expr
+        end
+    ))
+    push!(exprs, :(($fn1, $fn2, $fn3, $chunk)))
+    return exprs
+end
 
 """
     makefuncs(eqn_name, expr, tssyms, sssyms, psyms, mod)
@@ -123,33 +163,10 @@ callable `EquationEvaluator` instance) and a second function that evaluates both
 the residual and its gradient (as a callable `EquationGradient` instance).
 """
 function makefuncs(eqn_name, expr, tssyms, sssyms, psyms, mod)
-    nargs = length(tssyms) + length(sssyms)
-    chunk = min(nargs, MAX_CHUNK_SIZE)
-    fn1, fn2, fn3 = funcsyms(eqn_name, expr, tssyms, sssyms, psyms, mod, 
-        myhash, ("resid", "RJ", "resid_param"))
-    if isdefined(mod, fn1) && isdefined(mod, fn2) && isdefined(mod, fn3)
-        return mod.eval(:(($fn1, $fn2, $fn3, $chunk)))
-    end
-    x = gensym("x")
-    # If the equation has no parameters, then we just unpack x and evaluate the expressions
-    # Otherwise, we unpack the parameters (which have unknown types) and pass it
-    # to another function that acts like a function barrier where the types are known.
-    return Core.eval(mod, quote
-        function (ee::EquationEvaluatorFD{$(QuoteNode(fn1))})($x::Vector{<:Real})
-            $(_unpack_args_expr(x, tssyms, sssyms))
-            $(_unpack_pars_expr(:ee, psyms))
-            $fn3($x, $(psyms...))
-        end
-        const $fn1 = EquationEvaluatorFD{$(QuoteNode(fn1))}(UInt(0),
-            $(@__MODULE__).LittleDict(Symbol[$(QuoteNode.(psyms)...)],
-                fill!(Vector{Any}(undef, $(length(psyms))), nothing)))
-        const $fn2 = EquationGradientFD($fn1, $nargs, Val($chunk))
-        function $fn3($x::Vector{<:Real}, $(psyms...))
-            $(_unpack_args_expr(x, tssyms, sssyms))
-            $expr
-        end
-        ($fn1, $fn2, $fn3, $chunk)
-    end)
+    mod = invokelatest(mod._module, Val(:forwarddiff))
+    E = Expr(:block)
+    _makefuncs_exprs!(E.args, eqn_name, expr, tssyms, sssyms, psyms, mod)
+    return Core.eval(mod, E)
 end
 
 function _initfuncs_exprs!(exprs::Vector, mod::Module)
@@ -167,6 +184,20 @@ function _initfuncs_exprs!(exprs::Vector, mod::Module)
         end)
     end
     return exprs
+end
+
+## =====================================
+
+function _initcc(CC::CodeCache, args...)
+    DMOD = nameof(@__MODULE__)
+    runandcache_expr(CC, quote
+        using ModelBaseEcon
+        # using StateSpaceEcon
+        import ModelBaseEcon.LittleDict
+        import ModelBaseEcon.LittleDictVec
+        import ModelBaseEcon.$DMOD.ForwardDiff
+        import ModelBaseEcon.$DMOD.DiffResults
+    end)
 end
 
 end
