@@ -1528,12 +1528,8 @@ function initialize!(model::Model, modelmodule::Module;
 
     else
 
-        if model.verbose
-            if isnothing(cachefile)
-                @info "Compiling model with codegen=$(QuoteNode(codegen))"
-            else
-                @info "Compiling model with codegen=$(QuoteNode(codegen)) and caching code into $cachefile"
-            end
+        if model.verbose && !isnothing(cachefile)
+            @info "Compiling model with codegen=$(QuoteNode(codegen)) and caching code into $cachefile"
         end
 
         CC = CodeCache(cachefile, model, modelmodule)

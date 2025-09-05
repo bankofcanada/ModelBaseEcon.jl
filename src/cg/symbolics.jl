@@ -53,12 +53,11 @@ end
 
 function _unpack_grad(J, grad)
     ex = Expr(:block)
-    ind = 0
     for (ind, g) in zip(Iterators.product(axes(grad)...), grad)
         ass = Expr(:(=), Expr(:ref, J, ind...), g)
         push!(ex.args, ass)
     end
-    return Expr(:block, :(@inbounds $ex))
+    return Expr(:block, :(@assert length($J) == $(length(grad))), :(@inbounds $ex))
 end
 
 function make_res_grad_expr(expr, tssyms, sssyms, psyms, mod)
