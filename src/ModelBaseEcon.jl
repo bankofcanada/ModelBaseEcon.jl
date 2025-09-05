@@ -61,7 +61,7 @@ Load models from the package examples/ folder.
 The `@load_example` version is deprecated - stop using it now.
 """
 macro using_example(name)
-    examples_path = joinpath(dirname(pathof(@__MODULE__)), "..", "examples")
+    examples_path = abspath(joinpath(dirname(pathof(@__MODULE__)), "..", "examples"))
     return quote
         push!(LOAD_PATH, $(examples_path))
         using $(name)
@@ -70,6 +70,15 @@ macro using_example(name)
     end |> esc
 end
 export @using_example
+
+macro include_example(name)
+    examples_path = abspath(joinpath(dirname(pathof(@__MODULE__)), "..", "examples", string(name, ".jl")))
+    return quote
+        include($examples_path)
+        $(name)
+    end
+end
+export @include_example
 
 ######################################################################
 

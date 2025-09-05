@@ -89,6 +89,7 @@ function _makefuncs_exprs!(exprs::Vector, eqn_name, expr, tssyms, sssyms, psyms,
         return exprs
     end
     nvars = length(tssyms) + length(sssyms)
+    # npars = length(psyms)
     x = Symbol("#x#")
     G = Symbol("#G#")
     R = Symbol("#R#")
@@ -141,6 +142,8 @@ function _makefuncs_exprs!(exprs::Vector, eqn_name, expr, tssyms, sssyms, psyms,
             return $resid
         end
     ))
+    push!(exprs, :(@assert precompile($fn1, (Vector{Float64},))))
+    push!(exprs, :(@assert precompile($fn2, (Vector{Float64},))))
     push!(exprs, :(($fn1, $fn2, $fn3, $fn4)))
     return exprs
 end

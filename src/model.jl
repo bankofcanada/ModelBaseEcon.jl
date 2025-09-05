@@ -1447,7 +1447,7 @@ macro.
 function initialize!(model::Model, modelmodule::Module;
     modelfile="",
     codegen::Symbol=getoption!(model, :codegen, :forwarddiff),
-    codecache::Union{Bool,AbstractString,Nothing}=false)
+    codecache::Union{Bool,AbstractString,Nothing}=getoption!(model, :codecache, false))
 
     samename = Symbol[intersect(model.allvars, keys(model.parameters))...]
     if !isempty(samename)
@@ -1482,22 +1482,16 @@ function initialize!(model::Model, modelmodule::Module;
         modelerror("Cannot initialize model without variables or equations.")
     end
 
-    if iscacheuptodate(cachefile, modelfile)
-        @warn "Loading code from existing cache not implemented. Will overwrite cache file."
-    end
-
     if (codegen != :symbolics) && !isnothing(cachefile)
         @warn "Caching code is not available with `codegen=$(QuoteNode(codegen))`"
         cachefile = nothing
     end
 
-    CC = CodeCache(cachefile, model, modelmodule)
-    initfuncs(CC)   # prepare model module for code generation
-
-    model.parameters.mod[] = CC.mmod
-    varshks = model.varshks
-    model.variables = varshks[.!isshock.(varshks)]
-    model.shocks = varshks[isshock.(varshks)]
+    model.parameters.mod[] = modelmodule
+    let varshks = model.varshks
+        model.variables = varshks[.!isshock.(varshks)]
+        model.shocks = varshks[isshock.(varshks)]
+    end
 
     if model._state == :new
         empty!(model.auxvars)
@@ -1506,26 +1500,69 @@ function initialize!(model::Model, modelmodule::Module;
 
     model.dynss = false
     var_to_idx = _make_var_to_idx(model.allvars)
-    _cc_newline(CC)
-    if model._state == :new
-        for (key, e) in alleqns(model)
-            add_equation!(model, key, e.expr, CC; var_to_idx)
+
+    if iscacheuptodate(cachefile, modelfile)
+
+        if model.verbose
+            @info "Loading model code from cache file $cachefile"
         end
+
+        # initialize the model module
+        if !isdefined(modelmodule, :_module)
+            Core.eval(modelmodule, Expr(:block,
+                Expr(:(=), :(_module(s::Symbol)), :(_module(Val(s)))),
+                Expr(:(=), :(_module(::Val{:model}=Val(:model))), :(@__MODULE__)),
+            ))
+        end
+        model._module = modelmodule._module
+        Core.include(modelmodule, cachefile)
+        cmod = invokelatest(model._module, Val(codegen))
+
+        for key in keys(model.equations)
+            eqn = getfield(cmod, key)
+            push!(model.equations, key => eqn)
+            model.maxlag = max(model.maxlag, eqn.maxlag)
+            model.maxlead = max(model.maxlead, eqn.maxlead)
+            model.dynss |= !isempty(eqn.ssrefs)
+        end
+
     else
-        for (key, e) in model.equations
-            if e.eval_resid == eqnnotready
-                add_equation!(model, key, e.expr, CC; var_to_idx)
+
+        if model.verbose
+            if isnothing(cachefile)
+                @info "Compiling model with codegen=$(QuoteNode(codegen))"
             else
+                @info "Compiling model with codegen=$(QuoteNode(codegen)) and caching code into $cachefile"
+            end
+        end
+
+        CC = CodeCache(cachefile, model, modelmodule)
+        initfuncs(CC)   # prepare model module for code generation
+
+        _cc_newline(CC)
+        if model._state == :new
+            for (key, e) in alleqns(model)
+                add_equation!(model, key, e.expr, CC; var_to_idx)
+            end
+        else
+            for (key, e) in model.equations
+                if e.eval_resid == eqnnotready
+                    add_equation!(model, key, e.expr, CC; var_to_idx)
+                else
+                    line = e.resid.args[1]
+                    add_equation_quick!(model, key, e.expr, CC, false; var_to_idx, line, e.flags, e.doc)
+                end
+            end
+            for (key, e) in model.auxeqns
                 line = e.resid.args[1]
                 add_equation_quick!(model, key, e.expr, CC, false; var_to_idx, line, e.flags, e.doc)
             end
         end
-        for (key, e) in model.auxeqns
-            line = e.resid.args[1]
-            add_equation_quick!(model, key, e.expr, CC, false; var_to_idx, line, e.flags, e.doc)
-        end
+        _cc_newline(CC)
+        closecc!(CC)
+
     end
-    _cc_newline(CC)
+
     initssdata!(model)
     update_links!(model.parameters)
     if !model.dynss
@@ -1539,7 +1576,6 @@ function initialize!(model::Model, modelmodule::Module;
     checkmodel(model)
     model._state = :ready
 
-    closecc!(CC)
 
     return nothing
 end
