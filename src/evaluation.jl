@@ -96,8 +96,9 @@ end
 
 #------------------------------------------------------------------------------
 
-include("cg/forwarddiff.jl")
-include("cg/symbolics.jl")
+include("codegen/codecache.jl")
+include("codegen/forwarddiff.jl")
+include("codegen/symbolics.jl")
 
 @generated function _derivs_mod(::Val{codegen}) where codegen
     return codegen == :forwarddiff ? :(DerivsFD) :
@@ -105,13 +106,19 @@ include("cg/symbolics.jl")
            :(error("Invalid `codegen` value $(QuoteNode(codegen))"))
 end
 
-function _initfuncs_exprs!(exprs, mod::Module, codegen::Val)
-    if !isdefined(mod, :_hashed_eqn_data)
+function _initfuncs_exprs!(exprs, cmod::Module, codegen::Val)
+    if !isdefined(cmod, :_hashed_eqn_data)
         push!(exprs, :(
             const _hashed_eqn_data = Dict{UInt,Vector{Tuple{Expr,Vector{Symbol},Vector{Symbol},Vector{Symbol}}}}()
         ))
     end
-    return _derivs_mod(codegen)._initfuncs_exprs!(exprs, mod)
+    if !isdefined(cmod, :auxvars)
+        push!(exprs, :(const auxvars = ModelVariable[]))
+    end
+    if !isdefined(cmod, :auxeqns)
+        push!(exprs, :(const auxeqns = Equation[]))
+    end
+    return _derivs_mod(codegen)._initfuncs_exprs!(exprs, cmod)
 end
 
 """
@@ -133,9 +140,12 @@ function initfuncs(CC::CodeCache)
 end
 initfuncs(mod::Module, codegen::Symbol) = initfuncs(initcc!(CodeCache(), mod, Model(; codegen)))
 
-function makeequation(doc, eqn_name, flags, expr, residual, tsrefs, ssrefs, prefs, CC)
+function makeequation(doc, eqn_name, flags, expr, residual, tsrefs, ssrefs, prefs, aux, extern, CC)
 
     if CC.codegen == Val(:forwarddiff)
+        for sym in extern
+            Core.eval(CC.cmod, Expr(:import, Expr(:., :., :., sym)))
+        end
         resid, RJ = DerivsFD.makefuncs(eqn_name, residual, values(tsrefs), values(ssrefs), values(prefs), CC.cmod)
         tsrefs′ = LittleDict{Tuple{ModelVariable,Int},Symbol}()
         for ((s1, i), s2) in tsrefs
@@ -172,8 +182,13 @@ function makeequation(doc, eqn_name, flags, expr, residual, tsrefs, ssrefs, pref
         tsrefs_keys = []
         tsrefs_vals = []
         for ((var, tt), sym) in tsrefs
-            if !isdefined(CC.cmod, var)
-                runandcache_expr(CC, :(const $var = ModelBaseEcon.ModelVariable($(QuoteNode(var)))))
+            if aux && !isdefined(CC.cmod, var)
+                @assert startswith(string(var), "aux")
+                @assert Core.eval(CC.cmod, :($(QuoteNode(var)) ∉ auxvars))
+                runandcache_expr(CC, Expr(:block,
+                    :(const $var = ModelBaseEcon.ModelVariable($(QuoteNode(var)))),
+                    :(push!(auxvars, $var)),
+                ))
             end
             push!(tsrefs_keys, :(($var, $tt)))
             push!(tsrefs_vals, QuoteNode(sym))
@@ -196,8 +211,15 @@ function makeequation(doc, eqn_name, flags, expr, residual, tsrefs, ssrefs, pref
                 LittleDict{ModelVariable,Symbol}(ModelVariable[$(ssrefs_keys...)], Symbol[$(ssrefs_vals...)]),
                 LittleDict{Symbol,Symbol}(Symbol[$(Iterators.map(QuoteNode, keys(prefs))...)], Symbol[$(Iterators.map(QuoteNode, values(prefs))...)]),
                 $resid_nm, $RJ_nm)),
-            :(export $resid_nm, $RJ_nm, $eqn_name)
         )
+        if aux
+            push!(E.args, :(push!(auxeqns, $eqn_name)))
+        end
+        for sym in extern
+            push!(E.args, Expr(:import, Expr(:., :., :., sym)))
+        end
+
+        push!(E.args, :(export $resid_nm, $RJ_nm, $eqn_name))
         runandcache_expr(CC, E; striplines=false)
 
         _cc_newline(CC)

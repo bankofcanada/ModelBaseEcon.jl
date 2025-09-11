@@ -337,7 +337,7 @@ function fullprint(io::IO, model::Model)
     var_to_idx = get_var_to_idx(model)
     longest_key = 0
     if length(model.equations) > 0
-        longest_key = maximum(length.(string.(keys(model.equations))))
+        longest_key = maximum(length ∘ string, keys(model.equations))
     end
     function print_aux_eq(aux_key)
         v = model.auxeqns[aux_key]
@@ -942,7 +942,8 @@ function process_equation(model::Model, expr::Expr, CC::CodeCache;
     flags=EqnFlags(),
     doc="",
     eqn_name=:_unnamed_equation_,
-    codegen=getoption(model, :codegen, :forwarddiff)
+    aux=false,   # specify if this is an auxiliary equation or not; matters if code caching is on.
+    extern::Vector{Symbol}=Symbol[]
 )
 
     ######
@@ -1023,6 +1024,9 @@ function process_equation(model::Model, expr::Expr, CC::CodeCache;
         end
         # is this symbol a valid name in the model module?
         if isdefined(CC.mmod, sym)
+            if !isdefined(CC.cmod, sym)
+                push!(extern, sym)
+            end
             return sym
         end
         # no idea what this is!
@@ -1110,7 +1114,7 @@ function process_equation(model::Model, expr::Expr, CC::CodeCache;
                 #      if-statement evaluates either b or c but not both, while the
                 #      ifelse-function evaluates all three each call regardless of a.
                 #   However, Symbolics.jl can handle ifelse() but not if-statement.
-                if codegen == :symbolics
+                if CC.codegen == Val(:symbolics)
                     if args[1] isa Symbol
                         args[1] = Expr(:call, :(==), args[1], true)
                     end
@@ -1122,11 +1126,11 @@ function process_equation(model::Model, expr::Expr, CC::CodeCache;
                 error_process("Unable to process an `if` statement with a single branch. Use function `ifelse` instead.", expr, CC.mmod)
             end
         end
-        if ex.head ∈ (:(&&), :(||)) && codegen == :symbolics
+        if ex.head ∈ (:(&&), :(||)) && CC.codegen == Val(:symbolics)
             # cf. https://docs.sciml.ai/ModelingToolkit/dev/basics/FAQ/#How-do-I-handle-if-statements-in-my-symbolic-forms?
             return Expr(:call, ex.head == :(&&) ? :(&) : :(|), args...)
         end
-        if ex.head == :comparison && codegen == :symbolics
+        if ex.head == :comparison && CC.codegen == Val(:symbolics)
             # desugar chanined comparison (!!! this is quick and dirty - todo: check correctness and rewrite)
             local x = Expr(:call, :(&))
             L = args[1]
@@ -1216,7 +1220,7 @@ function process_equation(model::Model, expr::Expr, CC::CodeCache;
     expr = Expr(:block, line, expr)   # same source as residual
 
     CC.sfn = line.file
-    E = makeequation(doc, eqn_name, flags, expr, residual, tsrefs, ssrefs, prefs, CC)
+    E = makeequation(doc, eqn_name, flags, expr, residual, tsrefs, ssrefs, prefs, aux, extern, CC)
     CC.sfn = Symbol()
 
     _update_eqn_params!(E, model.parameters)
@@ -1363,11 +1367,11 @@ function add_equation!(model::Model, eqn_key::Symbol, expr::Expr, CC::CodeCache;
                 aux_name = Symbol("$(eqn_key)_AUX$(length(auxeqns)+1)")
                 # substitute log(something) with auxN and add equation exp(auxN) = something
                 push!(model.auxvars, :dummy)  # faster than resize!(model.auxvars, length(model.auxvars)+1)
-                model.auxvars[end] = auxs = Symbol("aux", model.nauxs)
-                push!(auxeqns, aux_name => Expr(:(=), Expr(:call, :exp, Expr(:ref, auxs, :t)), arg))
+                model.auxvars[end] = auxvar = Symbol("aux", model.nauxs)
+                push!(auxeqns, aux_name => Expr(:(=), Expr(:call, :exp, Expr(:ref, auxvar, :t)), arg))
                 # update variables to indexes map
-                push!(var_to_idx, auxs => length(var_to_idx) + 1)
-                return Expr(:ref, auxs, :t)
+                push!(var_to_idx, auxvar => length(var_to_idx) + 1)
+                return Expr(:ref, auxvar, :t)
                 @label skip_substitution
                 nothing
             end
@@ -1379,23 +1383,24 @@ function add_equation!(model::Model, eqn_key::Symbol, expr::Expr, CC::CodeCache;
     new_expr = split_nargs(new_expr)
 
     line = something(source..., LineNumberNode(0))
-    add_equation_quick!(model, eqn_key, new_expr, CC, false; var_to_idx, line, flags, doc)
     for (k, eq) ∈ auxeqns
-        add_equation_quick!(model, k, eq, CC, true; var_to_idx, line, doc)
+        add_equation_quick!(model, k, eq, CC; var_to_idx, line, doc, aux=true)
     end
+    add_equation_quick!(model, eqn_key, new_expr, CC; var_to_idx, line, flags, doc)
     empty!(model.evaldata)
     return model
 end
 @assert precompile(add_equation!, (Model, Symbol, Expr, CodeCache{Nothing}))
 @assert precompile(add_equation!, (Model, Symbol, Expr, CodeCache{IOStream}))
 
-function add_equation_quick!(model::Model, key::Symbol, expr::Expr, CC::CodeCache, aux::Bool;
+function add_equation_quick!(model::Model, key::Symbol, expr::Expr, CC::CodeCache;
     var_to_idx::LittleDict=get_var_to_idx(model),
     line::LineNumberNode=LineNumberNode(0),
     flags::EqnFlags=EqnFlags(),
     doc::AbstractString="",
+    aux::Bool=false
 )
-    eqn = process_equation(model, expr, CC; var_to_idx, line, flags, doc, eqn_name=key)
+    eqn = process_equation(model, expr, CC; var_to_idx, line, flags, doc, aux, eqn_name=key)
     if aux
         push!(model.auxeqns, eqn.name => eqn)
     else
@@ -1518,6 +1523,9 @@ function initialize!(model::Model, modelmodule::Module;
         Core.include(modelmodule, cachefile)
         cmod = invokelatest(model._module, Val(codegen))
 
+        model.auxvars = copy(cmod.auxvars)
+        mode.auxeqns = copy(cmod.auxeqns)
+
         for key in keys(model.equations)
             eqn = getfield(cmod, key)
             push!(model.equations, key => eqn)
@@ -1541,17 +1549,17 @@ function initialize!(model::Model, modelmodule::Module;
                 add_equation!(model, key, e.expr, CC; var_to_idx)
             end
         else
+            for (key, e) in model.auxeqns
+                line = e.resid.args[1]
+                add_equation_quick!(model, key, e.expr, CC; var_to_idx, line, e.flags, e.doc, aux=true)
+            end
             for (key, e) in model.equations
                 if e.eval_resid == eqnnotready
                     add_equation!(model, key, e.expr, CC; var_to_idx)
                 else
                     line = e.resid.args[1]
-                    add_equation_quick!(model, key, e.expr, CC, false; var_to_idx, line, e.flags, e.doc)
+                    add_equation_quick!(model, key, e.expr, CC; var_to_idx, line, e.flags, e.doc)
                 end
-            end
-            for (key, e) in model.auxeqns
-                line = e.resid.args[1]
-                add_equation_quick!(model, key, e.expr, CC, false; var_to_idx, line, e.flags, e.doc)
             end
         end
         _cc_newline(CC)

@@ -194,11 +194,12 @@ function _initcc(CC::CodeCache, model::AbstractModel)
     end
 
     if !isdefined(CC.cmod, :_Sym)
-        runandcache_expr(CC, :(baremodule _Sym
-        import Base
-        import ModelBaseEcon
-        import ModelBaseEcon.$DMOD.Symbolics
-        end))
+        runandcache_expr(CC, :(const _Sym = @__MODULE__))
+        # runandcache_expr(CC, :(baremodule _Sym
+        # import Base
+        # import ModelBaseEcon
+        # import ModelBaseEcon.$DMOD.Symbolics
+        # end))
     end
 
     # Symbolics needs to know about array-valued parameters, if any
@@ -207,7 +208,7 @@ function _initcc(CC::CodeCache, model::AbstractModel)
         E = Expr(:block)
         for (p, pv) in model.parameters
             if pv.value isa AbstractArray
-                expr = :(@eval _Sym $p = Symbolics.variables($(QuoteNode(p)), $(axes(pv.value)...)))
+                expr = :(@eval _Sym const $p = Symbolics.variables($(QuoteNode(p)), $(axes(pv.value)...)))
                 push!(E.args, expr)
             end
         end

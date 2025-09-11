@@ -53,19 +53,19 @@ function _initcc(CC::CodeCache, model::AbstractModel)
     DMOD._initcc(CC, model)
 
     # define ModelVariables in the code module -- needed if caching for equations codes
-    if !isnothing(CC.cf)
-        _cc_comment(CC, "Define ModelVariable instances for model variables ")
-        local E = Expr(:block)
-        for vars in (model.variables, model.shocks, model.auxvars)
-            for v in vars
-                push!(E.args, :($(v.name) =
-                    ModelVariable($(v.doc), $(QuoteNode(v.name)),
-                        $(QuoteNode(v.vr_type)), $(QuoteNode(v.tr_type)),
-                        $(QuoteNode(v.ss_type)))))
-            end
+    # if !isnothing(CC.cf)
+    _cc_comment(CC, "Define ModelVariable instances for model variables ")
+    local E = Expr(:block)
+    for vars in (model.variables, model.shocks, model.auxvars)
+        for v in vars
+            push!(E.args, :(const $(v.name) =
+                ModelVariable($(v.doc), $(QuoteNode(v.name)),
+                    $(QuoteNode(v.vr_type)), $(QuoteNode(v.tr_type)),
+                    $(QuoteNode(v.ss_type)))))
         end
-        runandcache_expr(CC, E)
     end
+    runandcache_expr(CC, E)
+    # end
 end
 
 function initcc!(CC::CodeCache, mmod::Module, model::AbstractModel)

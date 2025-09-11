@@ -41,7 +41,6 @@ include("misc.jl")
 
 # NOTE: The order of inclusions matters.
 include("abstract.jl")
-include("codecache.jl")
 include("parameters.jl")
 include("evaluation.jl")    # Code generation for residuals, gradients and higher order derivatives
 include("transformations.jl")
