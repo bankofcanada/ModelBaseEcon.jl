@@ -29,6 +29,10 @@ import ..funcsyms
 
 #------------------------------------------------------------------------------
 
+_simplify(x) = SymbolicUtils.Fixpoint(simplify)(x)
+
+#------------------------------------------------------------------------------
+
 const myhash = @static UInt == UInt64 ? 0xca19b034b699d744 : 0xd2f14686
 
 function _unpack_array_pars_expr(ee, psyms, mod::Module)
@@ -70,8 +74,8 @@ function make_res_grad_expr(expr, tssyms, sssyms, psyms, mod)
     end
     svars = map(Symbolics.variable, Iterators.flatten((tssyms, sssyms)))
     # dump(resid)   # for debugging when Symbolics.jl complains
-    sexpr = simplify(parse_expr_to_symbolic(resid, symmod))
-    sgrad = simplify.(Symbolics.gradient(sexpr, svars))
+    sexpr = _simplify(parse_expr_to_symbolic(resid, symmod))
+    sgrad = map(simplify, Symbolics.gradient(sexpr, svars))
     sym_resid = Symbolics.toexpr(sexpr)
     if src !== :nothing
         sym_resid = Expr(:block, src, sym_resid)

@@ -70,12 +70,25 @@ macro using_example(name)
 end
 export @using_example
 
-macro include_example(name)
+macro include_example(name, args...)
     examples_path = abspath(joinpath(dirname(pathof(@__MODULE__)), "..", "examples", string(name, ".jl")))
-    return quote
-        include($examples_path)
-        $(name)
+    force = false
+    for a in args
+        if @capture(a, force)
+            force = true
+        elseif @capture(a, force = fval_)
+            @assert fval isa Bool "Expected `true` or `false`, not $(repr(fval)) "
+            force = fval === true
+        else 
+            error("Unknown argument: $a")
+        end
     end
+    return quote
+        if $(force) || !isdefined(@__MODULE__, $(QuoteNode(name)))
+            include($examples_path)
+        end
+        $(name)
+    end |> esc
 end
 export @include_example
 
