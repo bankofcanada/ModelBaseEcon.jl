@@ -453,8 +453,12 @@ end
 @info "Testing `codegen = :symbolics`"
 module TestSymbolics
 using ModelBaseEcon
-ModelBaseEcon.defaultoptions.codegen = :symbolics
-include("codegen.jl")
+@static if VERSION >= v"1.10"
+    ModelBaseEcon.defaultoptions.codegen = :symbolics
+    include("codegen.jl")
+else
+    @warn "Skip DerivSym on Julia 1.9"
+end
 end
 
 ##==============================================================================
