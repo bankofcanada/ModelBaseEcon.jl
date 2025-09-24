@@ -1524,7 +1524,7 @@ function initialize!(model::Model, modelmodule::Module;
         cmod = invokelatest(model._module, Val(codegen))
 
         model.auxvars = copy(cmod.auxvars)
-        mode.auxeqns = copy(cmod.auxeqns)
+        model.auxeqns = OrderedDict{Symbol,Equation}(eqn.nam => eqn for eqn in cmod.auxeqns)
 
         for key in keys(model.equations)
             eqn = getfield(cmod, key)

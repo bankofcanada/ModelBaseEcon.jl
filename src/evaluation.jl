@@ -25,6 +25,7 @@ end
 function _update_eqn_params!(eqn::AbstractEquation, params)
     _update_eqn_params!(eqn.eval_resid, params)
     _update_eqn_params!(eqn.eval_RJ, params)
+    hasproperty(eqn, :eval_HOD) && _update_eqn_params!(eqn.eval_HOD, params)
 end
 
 #------------------------------------------------------------------------------
@@ -155,7 +156,7 @@ function makeequation(doc, eqn_name, flags, expr, residual, tsrefs, ssrefs, pref
         for (s1, s2) in ssrefs
             push!(ssrefs′, (ModelVariable(s1) => s2))
         end
-        return Equation(doc, eqn_name, flags, expr, residual, tsrefs′, ssrefs′, prefs, resid, RJ)
+        return Equation(doc, eqn_name, flags, expr, residual, tsrefs′, ssrefs′, prefs, resid, RJ, nohodeval)
     else
 
         E = Expr(:block)
@@ -163,7 +164,10 @@ function makeequation(doc, eqn_name, flags, expr, residual, tsrefs, ssrefs, pref
         DMOD = _derivs_mod(CC.codegen)
         DMOD._makefuncs_exprs!(E.args, eqn_name, residual, values(tsrefs), values(ssrefs), values(prefs), CC.cmod)
         # extract the names of eval_resid and eval_RJ functions from the last expression pushed by _makefuncs_exprs
-        resid_nm, RJ_nm = pop!(E.args).args
+        funcs = pop!(E.args).args
+        resid_nm = funcs[1]
+        RJ_nm = funcs[2]
+        HOD_nm = length(funcs) > 4 ? funcs[5] : :(ModelBaseEcon.nohodeval)
 
         _cc_comment(CC, " Equation $eqn_name ")
         runandcache_expr(CC, E)
@@ -210,7 +214,7 @@ function makeequation(doc, eqn_name, flags, expr, residual, tsrefs, ssrefs, pref
                 LittleDict{Tuple{ModelVariable,Int},Symbol}(Tuple{ModelVariable,Int}[$(tsrefs_keys...)], Symbol[$(tsrefs_vals...)]),
                 LittleDict{ModelVariable,Symbol}(ModelVariable[$(ssrefs_keys...)], Symbol[$(ssrefs_vals...)]),
                 LittleDict{Symbol,Symbol}(Symbol[$(Iterators.map(QuoteNode, keys(prefs))...)], Symbol[$(Iterators.map(QuoteNode, values(prefs))...)]),
-                $resid_nm, $RJ_nm)),
+                $resid_nm, $RJ_nm, $HOD_nm)),
         )
         if aux
             push!(E.args, :(push!(auxeqns, $eqn_name)))
@@ -219,7 +223,11 @@ function makeequation(doc, eqn_name, flags, expr, residual, tsrefs, ssrefs, pref
             push!(E.args, Expr(:import, Expr(:., :., :., sym)))
         end
 
-        push!(E.args, :(export $resid_nm, $RJ_nm, $eqn_name))
+        if length(funcs) > 4
+            push!(E.args, :(export $resid_nm, $RJ_nm, $HOD_nm, $eqn_name))
+        else
+            push!(E.args, :(export $resid_nm, $RJ_nm, $eqn_name))
+        end
         runandcache_expr(CC, E; striplines=false)
 
         _cc_newline(CC)

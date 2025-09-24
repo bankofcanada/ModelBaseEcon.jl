@@ -11,6 +11,7 @@ module DerivsSym
 using OrderedCollections
 using Symbolics
 using SymbolicUtils
+using SparseArrays
 
 import ..MacroTools
 import ..ModelBaseEcon
@@ -58,11 +59,44 @@ end
 function _unpack_grad(J, grad)
     ex = Expr(:block)
     for (ind, g) in zip(Iterators.product(axes(grad)...), grad)
-        ass = Expr(:(=), Expr(:ref, J, ind...), g)
-        push!(ex.args, ass)
+        assignment = Expr(:(=), Expr(:ref, J, ind...), g)
+        push!(ex.args, assignment)
     end
     return Expr(:block, :(@assert length($J) == $(length(grad))), :(@inbounds $ex))
 end
+
+function _unpack_derivs(D, derivs)
+    exprs = [:(@assert length($D) == $(length(derivs)))]
+    for (o, der) in enumerate(derivs)
+        push!(exprs, :(@assert length($D[$o]) == $(length(der))))
+        ex = Expr(:block)
+        for (ind,expr) in zip(der.nzind, der.nzval)
+            assignment = Expr(:(=), Expr(:ref, Expr(:ref, D, o), ind), expr)
+            push!(ex.args, assignment)
+        end
+        push!(exprs, :(@inbounds $ex))
+    end
+    return exprs
+end
+
+
+function next_deriv(svec, svars)
+    nexpr = length(svec)
+    nvars = length(svars)
+    idxmap = LinearIndices(map(Base.OneTo, (nexpr, nvars)))
+    ret = SparseVector{Symbolics.Num,Int}(undef, length(idxmap))
+    for (idx, sexpr) = enumerate(svec)
+        iszero(sexpr) && continue
+        sgrad = map(_simplify, Symbolics.gradient(_simplify(sexpr), svars))
+        # println.(sgrad)
+        for (jdx, gexpr) = enumerate(sgrad)
+            iszero(gexpr) && continue
+            setindex!(ret, gexpr, idxmap[idx, jdx])
+        end
+    end
+    return ret
+end
+
 
 function make_res_grad_expr(expr, tssyms, sssyms, psyms, mod)
     symmod = isdefined(mod, :_Sym) ? mod._Sym : mod
@@ -72,24 +106,42 @@ function make_res_grad_expr(expr, tssyms, sssyms, psyms, mod)
     else
         src, resid = :nothing, expr
     end
+    # prepare Symbolics variables
     svars = map(Symbolics.variable, Iterators.flatten((tssyms, sssyms)))
     # dump(resid)   # for debugging when Symbolics.jl complains
-    sexpr = _simplify(parse_expr_to_symbolic(resid, symmod))
-    sgrad = map(simplify, Symbolics.gradient(sexpr, svars))
-    sym_resid = Symbolics.toexpr(sexpr)
+    sresid = _simplify(parse_expr_to_symbolic(resid, symmod))   # Symbolics residual
+    jresid = Symbolics.toexpr(sresid)                           # Julia residual
     if src !== :nothing
-        sym_resid = Expr(:block, src, sym_resid)
+        jresid = Expr(:block, src, jresid)
     end
-    sym_grad = Symbolics.toexpr.(sgrad)
-    return sym_resid, sym_grad
+    # first order derivatives
+    sgrad = map(_simplify, Symbolics.gradient(sresid, svars))   # Symbolics gradient
+    jgrad = Symbolics.toexpr.(sgrad)                            # Julia gradient
+    # higher order derivatives
+    max_hod_order = isdefined(mod, :max_hod_order) ? mod.max_hod_order : 1
+    sderivs = [sparsevec(sgrad)]
+    jderivs = SparseVector{<:Any,Int}[SparseVector(length(jgrad), collect(1:length(jgrad)), jgrad)]
+    order = 1
+    while order < max_hod_order
+        deriv = next_deriv(sderivs[order], svars)
+        push!(sderivs, deriv)
+        push!(jderivs, SparseVector(deriv.n, deriv.nzind, Symbolics.toexpr.(deriv.nzval)))
+        order = order + 1
+        @assert order == length(sderivs) == length(jderivs)
+    end
+    return jresid, jgrad, jderivs
 end
 
+
 function _makefuncs_exprs!(exprs::Vector, eqn_name, expr, tssyms, sssyms, psyms, mod::Module)
-    fn1, fn2, fn3, fn4 = funcsyms(eqn_name, expr, tssyms, sssyms, psyms, mod,
-        myhash, ("resid", "RJ", "resid_param", "RJ_param"))
-    if isdefined(mod, fn1) && isdefined(mod, fn2) && isdefined(mod, fn3)
-        push!(exprs, :(($fn1, $fn2, $fn3, $fn4)))
-        return exprs
+    fn1, fn2, fn3, fn4, fn5, fn6 = funcsyms(eqn_name, expr, tssyms, sssyms, psyms, mod,
+        myhash, ("resid", "RJ", "resid_param", "RJ_param", "HOD", "HOD_param"))
+    need_hod = isdefined(mod, :max_hod_order) && mod.max_hod_order > 1
+    if need_hod && all(f -> isdefined(mod, f), [fn1, fn2, fn3, fn4, fn5, fn6])
+        return push!(exprs, :(($fn1, $fn2, $fn3, $fn4, $fn5, $fn6)))
+    end
+    if !need_hod && all(f -> isdefined(mod, f), [fn1, fn2, fn3, fn4])
+        return push!(exprs, :(($fn1, $fn2, $fn3, $fn4)))
     end
     nvars = length(tssyms) + length(sssyms)
     # npars = length(psyms)
@@ -97,7 +149,7 @@ function _makefuncs_exprs!(exprs::Vector, eqn_name, expr, tssyms, sssyms, psyms,
     G = Symbol("#G#")
     R = Symbol("#R#")
     ee = Symbol("#e#")
-    resid, grad = make_res_grad_expr(expr, tssyms, sssyms, psyms, mod)
+    resid, grad, derivs = make_res_grad_expr(expr, tssyms, sssyms, psyms, mod)
     # If the equation has no parameters, then we just unpack x and evaluate the expressions
     # Otherwise, we unpack the parameters (which have unknown types) and pass it
     # to another function that acts like a function barrier where the types are known.
@@ -147,8 +199,37 @@ function _makefuncs_exprs!(exprs::Vector, eqn_name, expr, tssyms, sssyms, psyms,
     ))
     push!(exprs, :(@assert precompile($fn1, (Vector{Float64},))))
     push!(exprs, :(@assert precompile($fn2, (Vector{Float64},))))
-    push!(exprs, :(($fn1, $fn2, $fn3, $fn4)))
-    return exprs
+    if !need_hod
+        return push!(exprs, :(($fn1, $fn2, $fn3, $fn4)))
+    end
+    hod_order = mod.max_hod_order
+    push!(exprs, :(
+        function ($ee::HODEvaluatorSym{$(QuoteNode(fn5))})($x::Vector{<:Real})
+            # $(_unpack_args_expr(x, tssyms, sssyms))
+            $(_unpack_pars_expr(ee, psyms).args...)
+            $R = $fn6($ee.Derivs, $x, $(psyms...))
+            $R, $ee.Derivs
+        end
+    ))
+    push!(exprs, :(
+        const $fn5 = HODEvaluatorSym{$(QuoteNode(fn5))}(UInt(0),
+            LittleDict(Symbol[$(QuoteNode.(psyms)...)],
+                fill!(Vector{Any}(undef, $(length(psyms))), nothing)),
+            # $(Meta.quot(resid)), [$(Meta.quot.(grad)...)],
+            SparseVector{Float64,Int}[
+                SparseVector{Float64,Int}(undef, $nvars^i) for i = 1:$hod_order
+            ])
+    ))
+    D = Symbol("#D#")
+    push!(exprs, :(
+        function $fn6($D::Vector{<:SparseVector}, $x::Vector{<:Real}, $(psyms...))
+            $(_unpack_array_pars_expr(ee, psyms, mod)...)
+            $(_unpack_args_expr(x, tssyms, sssyms))
+            $(_unpack_derivs(D, derivs)...)
+            return $resid
+        end
+    ))
+    return push!(exprs, :(($fn1, $fn2, $fn3, $fn4, $fn5, $fn6)))
 end
 
 
@@ -180,6 +261,17 @@ function _initfuncs_exprs!(exprs::Vector, mod::Module)
             end
         end)
     end
+    if !isdefined(mod, :HODEvaluatorSym)
+        push!(exprs, quote
+            struct HODEvaluatorSym{FN} <: ModelBaseEcon.EquationEvaluator
+                rev::Ref{UInt}
+                params::ModelBaseEcon.LittleDictVec{Symbol,Any}
+                # resid::Expr
+                # grad::Vector
+                Derivs::Vector{SparseVector{Float64,Int}}
+            end
+        end)
+    end
     return exprs
 end
 
@@ -190,6 +282,7 @@ function _initcc(CC::CodeCache, model::AbstractModel)
     if !isdefined(CC.cmod, :ModelBaseEcon)
         runandcache_expr(CC, quote
             using ModelBaseEcon
+            using SparseArrays
             # using StateSpaceEcon
             import ModelBaseEcon.LittleDict
             import ModelBaseEcon.LittleDictVec

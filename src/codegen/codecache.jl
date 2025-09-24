@@ -101,7 +101,8 @@ function initcc!(CC::CodeCache, mmod::Module, model::AbstractModel)
 
     runandcache_expr(CC, Expr(:block,
         :(import .._module),
-        Expr(:(=), :(_module(::$(typeof(CC.codegen)))), nameof(CC.cmod))
+        Expr(:(=), :(_module(::$(typeof(CC.codegen)))), nameof(CC.cmod)),
+        :(const max_hod_order = $(getoption(model, :max_hod_order, 1)))
     ))
 
     # prepare CC.cmod for the current model
