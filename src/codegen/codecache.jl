@@ -5,6 +5,28 @@
 # All rights reserved.
 ##################################################################################
 
+export @use_symbolics
+macro use_symbolics(model, args...)
+    ret = quote
+        setoption!($model, :codegen, :symbolics)
+    end
+    for arg in args
+        if arg == :cache
+            dir = dirname(string(__source__.file))
+            push!(ret.args, :(setoption!($model, :codecache, 
+                joinpath($dir, ".cache", string(nameof(@__MODULE__), "_code.jl"))
+            )))
+            continue
+        end
+        if @capture(arg, opt_ = val_)
+            push!(ret.args, :(setoption!($model, $(QuoteNode(opt)), $val)))
+            continue
+        end
+        error("Unknown arg: $arg")
+    end
+    return esc(ret)
+end
+
 iscacheuptodate(cachefile::Nothing, modelfile::AbstractString) = false
 iscacheuptodate(cachefile::AbstractString, modelfile::AbstractString) = isfile(modelfile) && (mtime(modelfile) < mtime(cachefile))
 
