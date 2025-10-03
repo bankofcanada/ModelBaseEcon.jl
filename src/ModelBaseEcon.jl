@@ -35,6 +35,9 @@ const LittleDictVec{K,V} = LittleDict{K,V,Vector{K},Vector{V}}
 # The Options submodule
 include("Options.jl")
 
+# Simple tensors for handling higher order derivatives
+include("SimpleTensors.jl")
+
 # The "misc" - various types and functions
 include("misc.jl")
 
@@ -71,24 +74,32 @@ end
 export @using_example
 
 macro include_example(name, args...)
-    examples_path = abspath(joinpath(dirname(pathof(@__MODULE__)), "..", "examples", string(name, ".jl")))
+    example_path = joinpath("examples", string(name, ".jl"))
     force = false
+    verbose = true
     for a in args
         if @capture(a, force)
             force = true
         elseif @capture(a, force = fval_)
-            @assert fval isa Bool "Expected `true` or `false`, not $(repr(fval)) "
+            fval isa Bool || error("Expected `true` or `false`, not $(repr(fval))")
             force = fval === true
-        else 
+        elseif @capture(a, quiet)
+            verbose = false
+        elseif @capture(a, from = pval_)
+            example_path = joinpath(pval, string(name, ".jl"))
+        else
             error("Unknown argument: $a")
         end
     end
-    return quote
-        if $(force) || !isdefined(@__MODULE__, $(QuoteNode(name)))
-            include($examples_path)
-        end
-        $(name)
-    end |> esc
+    if !isfile(example_path)
+        example_path = joinpath(dirname(@__DIR__), "examples", string(name, ".jl"))
+    end
+    if isdefined(__module__, name) && !force
+        return esc(verbose ? :(@info($("Example $name already loaded.")); $name) : name)
+    else
+        speak = verbose ? :(@info $("Including \"$example_path\"")) : nothing
+        return esc(:($speak; include($example_path); $(name)))
+    end
 end
 export @include_example
 

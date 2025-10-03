@@ -13,6 +13,8 @@ using Symbolics
 using SymbolicUtils
 using SparseArrays
 
+using ..SimpleTensors
+
 import ..MacroTools
 import ..ModelBaseEcon
 
@@ -66,32 +68,38 @@ function _unpack_grad(J, grad)
 end
 
 function _unpack_derivs(D, derivs)
-    exprs = [:(@assert length($D) == $(length(derivs)))]
-    for (o, der) in enumerate(derivs)
-        push!(exprs, :(@assert length($D[$o]) == $(length(der))))
+    exprs = []
+    for (o, der) in derivs
         ex = Expr(:block)
-        for (ind,expr) in zip(der.nzind, der.nzval)
-            assignment = Expr(:(=), Expr(:ref, Expr(:ref, D, o), ind), expr)
+        i = 1
+        idx = ntuple(one, ndims(der))
+        for (ii, expr) in zip(der.data.nzind, der.data.nzval)
+            while i < ii
+                i = i + 1
+                idx = SimpleTensors.next_sym_idx(der.dim, idx...)
+            end
+            assignment = Expr(:(=), Expr(:ref, Expr(:ref, D, o), idx...), expr)
             push!(ex.args, assignment)
         end
+        isempty(ex.args) && break
+        push!(exprs, :(@assert length($D[$o]) == $(length(der))))
         push!(exprs, :(@inbounds $ex))
     end
     return exprs
 end
 
 
-function next_deriv(svec, svars)
-    nexpr = length(svec)
+function next_deriv(sder::SymmetricTensor{Symbolics.Num,N}, svars) where N
     nvars = length(svars)
-    idxmap = LinearIndices(map(Base.OneTo, (nexpr, nvars)))
-    ret = SparseVector{Symbolics.Num,Int}(undef, length(idxmap))
-    for (idx, sexpr) = enumerate(svec)
+    ret = SymmetricTensor{Symbolics.Num,N + 1}(nvars, Val(:sparse))
+    iszero(sder) && return ret  # shortcut
+    for idx in SymmetricIndices(sder)
+        sexpr = sder[idx...]
         iszero(sexpr) && continue
         sgrad = map(_simplify, Symbolics.gradient(_simplify(sexpr), svars))
-        # println.(sgrad)
-        for (jdx, gexpr) = enumerate(sgrad)
+        for (jdx, gexpr) in enumerate(sgrad)
             iszero(gexpr) && continue
-            setindex!(ret, gexpr, idxmap[idx, jdx])
+            ret[idx..., jdx] = gexpr
         end
     end
     return ret
@@ -119,19 +127,35 @@ function make_res_grad_expr(expr, tssyms, sssyms, psyms, mod)
     jgrad = Symbolics.toexpr.(sgrad)                            # Julia gradient
     # higher order derivatives
     max_hod_order = isdefined(mod, :max_hod_order) ? mod.max_hod_order : 1
-    sderivs = [sparsevec(sgrad)]
-    jderivs = SparseVector{<:Any,Int}[SparseVector(length(jgrad), collect(1:length(jgrad)), jgrad)]
-    order = 1
-    while order < max_hod_order
-        deriv = next_deriv(sderivs[order], svars)
-        push!(sderivs, deriv)
-        push!(jderivs, SparseVector(deriv.n, deriv.nzind, Symbolics.toexpr.(deriv.nzval)))
-        order = order + 1
-        @assert order == length(sderivs) == length(jderivs)
+    # sderivs = [sparsevec(sgrad)]
+    # jderivs = SparseVector{<:Any,Int}[SparseVector(length(jgrad), collect(1:length(jgrad)), jgrad)]
+    jderivs = derivs_container(Any, max_hod_order, length(svars))
+    push!(jderivs[0].data.nzind, 1)
+    push!(jderivs[0].data.nzval, jresid)
+    sder = SymmetricTensor(sgrad)
+    _copytoexpr!(jderivs[1].data, sder.data)
+    for order = 2:max_hod_order
+        sder = next_deriv(sder, svars)
+        _copytoexpr!(jderivs[order].data, sder.data)
     end
     return jresid, jgrad, jderivs
 end
 
+function _copytoexpr!(dest::SparseVector, src::SparseVector{T,Int}) where T
+    @boundscheck @assert size(dest) == size(src)
+    nnz = SparseArrays.nnz(src)
+    resize!(dest.nzind, nnz)
+    copyto!(dest.nzind, src.nzind)
+    resize!(dest.nzval, nnz)
+    if T === Expr
+        dest.nzval .= src.nzval
+    elseif T === Symbolics.Num
+        dest.nzval .= Symbolics.toexpr.(src.nzval)
+    else
+        error("Unexpected element type $T")
+    end
+    return dest
+end
 
 function _makefuncs_exprs!(exprs::Vector, eqn_name, expr, tssyms, sssyms, psyms, mod::Module)
     fn1, fn2, fn3, fn4, fn5, fn6 = funcsyms(eqn_name, expr, tssyms, sssyms, psyms, mod,
@@ -207,8 +231,8 @@ function _makefuncs_exprs!(exprs::Vector, eqn_name, expr, tssyms, sssyms, psyms,
         function ($ee::HODEvaluatorSym{$(QuoteNode(fn5))})($x::Vector{<:Real})
             # $(_unpack_args_expr(x, tssyms, sssyms))
             $(_unpack_pars_expr(ee, psyms).args...)
-            $R = $fn6($ee.Derivs, $x, $(psyms...))
-            $R, $ee.Derivs
+            $R = $fn6($ee.derivs, $x, $(psyms...))
+            $ee.derivs
         end
     ))
     push!(exprs, :(
@@ -216,13 +240,11 @@ function _makefuncs_exprs!(exprs::Vector, eqn_name, expr, tssyms, sssyms, psyms,
             LittleDict(Symbol[$(QuoteNode.(psyms)...)],
                 fill!(Vector{Any}(undef, $(length(psyms))), nothing)),
             # $(Meta.quot(resid)), [$(Meta.quot.(grad)...)],
-            SparseVector{Float64,Int}[
-                SparseVector{Float64,Int}(undef, $nvars^i) for i = 1:$hod_order
-            ])
+            derivs_container(Float64, $hod_order, $nvars))
     ))
     D = Symbol("#D#")
     push!(exprs, :(
-        function $fn6($D::Vector{<:SparseVector}, $x::Vector{<:Real}, $(psyms...))
+        function $fn6($D::DerivsContainer{<:Real}, $x::Vector{<:Real}, $(psyms...))
             $(_unpack_array_pars_expr(ee, psyms, mod)...)
             $(_unpack_args_expr(x, tssyms, sssyms))
             $(_unpack_derivs(D, derivs)...)
@@ -268,7 +290,7 @@ function _initfuncs_exprs!(exprs::Vector, mod::Module)
                 params::ModelBaseEcon.LittleDictVec{Symbol,Any}
                 # resid::Expr
                 # grad::Vector
-                Derivs::Vector{SparseVector{Float64,Int}}
+                derivs::DerivsContainer{Float64}
             end
         end)
     end
@@ -282,6 +304,7 @@ function _initcc(CC::CodeCache, model::AbstractModel)
     if !isdefined(CC.cmod, :ModelBaseEcon)
         runandcache_expr(CC, quote
             using ModelBaseEcon
+            using ModelBaseEcon.SimpleTensors
             using SparseArrays
             # using StateSpaceEcon
             import ModelBaseEcon.LittleDict
