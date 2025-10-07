@@ -17,7 +17,7 @@ SimpleTensors
 export Tensor, DenseTensor, SparseTensor
 export SymmetricTensor, DenseSymmetricTensor, SparseSymmetricTensor
 export SymmetricIndices
-export PolyFunc, DerivsContainer, derivs_container
+export PolyFunc, DerivsContainer, derivs_container, degreeof, nvars
 
 
 """
@@ -113,6 +113,14 @@ SparseTensor(args...) = Tensor(args..., Val(:sparse))
 ################################
 
 abstract type AbstractSymmetricTensor{T,N} <: AbstractTensor{T,N} end
+
+# N.B. disabling broadcasting for symmetric tensors because things go wrong with 
+# the default Julia machinery due to symmetric storage. TODO: fix it, rather than disable
+
+# struct SymmetricTensorStyle <: Broadcast.BroadcastStyle end
+# Base.BroadcastStyle(::Type{<:AbstractSymmetricTensor}) = SymmetricTensorStyle()
+Base.BroadcastStyle(::Type{<:AbstractSymmetricTensor}) = error("Broadcasting not allowed")
+
 
 "Method for symmetric tensors, where only the unique elements are stored."
 n_store(T::Type{<:AbstractSymmetricTensor}, dim::Int) = _n_stored_sym(Val(ndims(T)), Val(dim))
@@ -215,6 +223,7 @@ end
 struct SymmetricIndices{N,dim}
     transform
 end
+SymmetricIndices{N,dim}() where {N,dim} = SymmetricIndices{N,dim}(identity)
 SymmetricIndices(A::AbstractArray, transform=identity) = SymmetricIndices{ndims(A),_dim(A)}(transform)
 function Base.iterate(x::SymmetricIndices{N,dim}, state::NTuple{N,Int}=ntuple(one, N)) where {N,dim}
     first(state) > dim && return nothing
@@ -222,6 +231,7 @@ function Base.iterate(x::SymmetricIndices{N,dim}, state::NTuple{N,Int}=ntuple(on
 end
 Base.iterate(::SymmetricIndices{0}, ::Tuple{}=()) = ((), nothing)
 Base.iterate(::SymmetricIndices{0}, ::Nothing) = nothing
+Base.length(x::SymmetricIndices{N,dim}) where {N,dim} = _n_stored_sym(Val(N), Val(dim))
 
 ################################
 
@@ -291,81 +301,149 @@ SparseSymmetricTensor(args...) = SymmetricTensor(args..., Val(:sparse))
 const DerivsContainer{T} = LittleDictVec{Int,SparseSymmetricTensor{T}}
 derivs_container(T::Type, D::Integer, nvars::Integer) = LittleDict{Int,SparseSymmetricTensor{T}}(0:D, SparseSymmetricTensor{T}[SymmetricTensor{T,N}(nvars, Val(:sparse)) for N = 0:D])
 
-# Function defined as a power series of degree `D` about a point (`xbar`)
+# Function defined as a power series of degree `D` about a point (`x̄`)
 struct PolyFunc{D,T} <: Function
-    xbar::Vector{T}
+    x̄::Vector{T}
     derivs::DerivsContainer{T}
     function PolyFunc{D,F}(nvars::Int) where {D,F}
         @assert 0 <= D <= MAX_N "Maximum degree supported is $MAX_N."
-        new{D,F}(Vector{F}(undef, nvars), derivs_container(F, D, nvars))
+        new{D,F}(zeros(F, nvars), derivs_container(F, D, nvars))
     end
 end
 PolyFunc{D}(dim::Integer) where D = PolyFunc{D,Float64}(Int(dim))
+degreeof(f::PolyFunc{D}) where D = D
+degreeof(::Type{<:PolyFunc{D}}) where D = D
+nvars(f::PolyFunc) = length(f.x̄)
 
-(f::PolyFunc)(x::Number...) = f([x...,])
-@generated function (f::PolyFunc{D})(x::Vector{<:Number}) where {D}
-    ret = quote
-        pt = iszero(f.xbar) ? x : x - f.xbar
-        derivs = f.derivs
-        ret = derivs[0][]
+function Base.show(io::IO, ::MIME"text/plain", f::PolyFunc{D}) where {D}
+    println(io, nameof(typeof(f)), " of degree ", D)
+    print(io, "x̄ = ", f.x̄)
+    print(io, "\nD0 = ", f.derivs[0][])
+    D > 0 && print(io, "\nD1 = ", f.derivs[1][:])
+    for (d, dd) in f.derivs
+        d < 2 && continue
+        print(io, "\nD$d = ", iszero(dd.data) ? "zero" : dd)
+        D == d && return
     end
-    for N = 1:D
-        push!(ret.args, :(ret += add_degree(Val($N), derivs[$N], pt)))
-    end
-    push!(ret.args, :(return ret))
-    return ret
+    # print(io, "\nD1 = ", f.derivs[1][:])
+    # D == 1 && return
+    # print(io, "\nD2 = ", iszero(f.derivs[2]) ? "zero" : f.derivs[2][:,:])
+    # D == 2 && return
+    # print(io, "\n...")
 end
 
-add_degree(::Val{0}, deriv, x) = deriv[]
-_x_tp(x, i::Int) = x[i]
-_x_tp(x, i::Int, I::Int...) = x[i] * _x_tp(x, I...)
+(f::PolyFunc)(x::Number...) = f([x...,])
+@generated function (f::PolyFunc{D,T})(x::Vector{S}, ::Val{deriv}=Val(0)) where {S,T,D,deriv}
+    ST = promote_type(S, T)
+    if deriv > D
+        return :(SymmetricTensor{$ST,$deriv}(length(x), Val(:sparse)))
+    end
+    ret = quote
+        pt = iszero(f.x̄) ? x : x - f.x̄
+        der = f.derivs
+        result = SymmetricTensor{$ST,$deriv}(length(x), Val(:sparse))
+    end
+    for N = deriv:D
+        push!(ret.args, :(add_degree!(result, Val($(N-deriv)), der[$N], pt)))
+    end
+    push!(ret.args, :(return result))
+    return ret
+end
 
 # multinomial coefficients formula using formula based on binomial coefficients 
 # cf. https://en.wikipedia.org/wiki/Multinomial_theorem#Multinomial_coefficients
-function multinom(idx::NTuple{N,Int}) where N
-    N < 2 && return 1.0
-    ret = 1.0
-    s = idx[1]
-    for k = idx[2:N]
-        s += k
-        ret *= binomial(s, k)
-    end
-    return ret
-end
-function _coeff(I::NTuple{N,Int}) where N
-    # count how many times each index appears (these are the corresponding degrees)
-    degrees = ntuple(i -> sum(==(i), I), N)
-    # return the multinomial coefficient
-    return multinom(degrees)
-end
-
-@generated function add_degree(::Val{N}, deriv, x) where {N}
-    if deriv <: AbstractSymmetricTensor
-        return quote
-            val = 0.0
-            i = 1
-            idx = ntuple(one, N)
-            for (ii, dval) in zip(deriv.data.nzind, deriv.data.nzval)
-                while i < ii
-                    i += 1
-                    idx = next_sym_idx(deriv.dim, idx...)
-                end
-                val += _coeff(idx) * dval * _x_tp(x, idx...)
-            end
-            return val / prod(2:N)
+function _multinom_coeff(deg::AbstractVector{T}, der::AbstractVector{S}=T[]) where {T,S}
+    # deg is a vector of integer powers of the mulinomial term we're constructing
+    # der is a vector of integer powers of the derivative we're taking of this term
+    TS = promote_type(T, S)
+    result = one(TS)
+    s = zero(Int)
+    if iszero(der)
+        for ind = eachindex(deg)
+            @inbounds k = deg[ind]
+            k < 0 && return zero(TS)
+            s += k
+            result *= binomial(s, k)
         end
     else
-        return quote
-            val = 0.0
-            for idx in SymmetricIndices{N,deriv.dim}()
-                dval = deriv[idx]
-                iszero(dval) && continue
-                val += _coeff(idx) * dval * _x_tp(x, idx...)
-            end
-            return val / prod(2:N)
+        @assert axes(deg) == axes(der)
+        for ind = eachindex(deg)
+            @inbounds k = deg[ind] - der[ind]
+            k < 0 && return zero(TS)
+            s += k
+            result *= binomial(s, k)
         end
     end
+    return result
 end
+
+
+function _multinom_pow(pt::Vector{R}, deg::AbstractVector{T}, der::AbstractVector{S}=T[]) where {R,T,S}
+    # deg is a vector of integer powers of the mulinomial term we're constructing
+    # der is a vector of integer powers of the derivative we're taking of this term
+    result = one(R)
+    @assert axes(pt) == axes(deg)
+    if iszero(der)
+        for ind in eachindex(pt)
+            @inbounds k = deg[ind]
+            k < 0 && return zero(R)
+            k > 0 && (result *= @inbounds pt[ind]^k)
+        end
+    else
+        @assert axes(pt) == axes(der)
+        for ind in eachindex(pt)
+            @inbounds k = deg[ind] - der[ind]
+            k < 0 && return zero(R)
+            k > 0 && (result *= @inbounds pt[ind]^k)
+        end
+    end
+    return result
+end
+
+count_degrees(::Val{dim}, I::NTuple{N,Int}) where {dim,N} = count_degrees!(zeros(Int, dim), I)
+count_degrees!(x::Vector{Int}, ::Tuple{}) = x
+function count_degrees!(x::Vector{Int}, I::NTuple{N,Int}) where N
+    i, rest... = I
+    x[i] += 1
+    count_degrees!(x, rest)
+end
+
+# return the coefficient count times the the power for the given monomial 
+function _coeff_pow(pt::Vector, deg_idx::NTuple{N,Int}, der_idx::NTuple{d,Int}=()) where {N,d}
+    # deg_idx -- index of the monomial, i.e. (1,1,2) means x*x*y
+    # der_idx -- index of derivative we are taking, e.g., (1,2) means second mixed derivative d^2/dxdy
+    dim = length(pt)
+    x = count_degrees(Val(dim), deg_idx)
+    d == 0 && return _multinom_coeff(x) * _multinom_pow(pt, x)
+    y = count_degrees(Val(dim), der_idx)
+    return _multinom_coeff(x, y) * _multinom_pow(pt, x, y)
+end
+
+
+function add_degree!(result::AbstractSymmetricTensor{T1,d}, ::Val{0},
+    deriv::AbstractSymmetricTensor{T2,d}, pt::Vector) where {T1,T2,d}
+    result.data .+= deriv.data
+    return result
+end
+
+function add_degree!(result::AbstractSymmetricTensor{T1,d},
+    ::Val{N}, deriv::AbstractSymmetricTensor{T2,N1}, pt::Vector) where {d,T1,N,T2,N1}
+    @assert (N1 - N) == d >= 0
+    dim = length(pt)
+    @assert dim == deriv.dim == result.dim
+    coeff1 = N < 2 ? one(T1) : one(T1) / prod(2:N)
+    for (i, idx) in enumerate(SymmetricIndices{N1,dim}())
+        dval = deriv.data[i]
+        iszero(dval) && continue
+        for (j, jdx) in enumerate(SymmetricIndices{d,dim}())
+            coeff2 = _coeff_pow(pt, idx, jdx)
+            iszero(coeff2) && continue
+            result.data[j] += dval * coeff1 * coeff2
+        end
+    end
+    return result
+end
+
 
 ###################################################
 end
