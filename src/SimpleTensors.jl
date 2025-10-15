@@ -18,11 +18,11 @@ export Tensor, DenseTensor, SparseTensor
 export SymmetricTensor, DenseSymmetricTensor, SparseSymmetricTensor
 export SymmetricIndices
 export PolyFunc, DerivsContainer, derivs_container, degreeof, nvars
-
+export gettheta, settheta!, numtheta, d_dtheta, d_dtheta!
 
 """
-There is no fundamental limit on N in the code. However, the code in this 
-module has been written with the assumption that N is small. 
+There is no fundamental limit on N in the code. However, the code in this
+module has been written with the assumption that N is small.
 """
 const MAX_N::Int = 5
 
@@ -114,7 +114,7 @@ SparseTensor(args...) = Tensor(args..., Val(:sparse))
 
 abstract type AbstractSymmetricTensor{T,N} <: AbstractTensor{T,N} end
 
-# N.B. disabling broadcasting for symmetric tensors because things go wrong with 
+# N.B. disabling broadcasting for symmetric tensors because things go wrong with
 # the default Julia machinery due to symmetric storage. TODO: fix it, rather than disable
 
 # struct SymmetricTensorStyle <: Broadcast.BroadcastStyle end
@@ -123,8 +123,9 @@ Base.BroadcastStyle(::Type{<:AbstractSymmetricTensor}) = error("Broadcasting not
 
 
 "Method for symmetric tensors, where only the unique elements are stored."
-n_store(T::Type{<:AbstractSymmetricTensor}, dim::Int) = _n_stored_sym(Val(ndims(T)), Val(dim))
-# Let the compiler build a look-up table for these values and hardcode them 
+@inline n_store(T::Type{<:AbstractSymmetricTensor}, dim::Int) = _n_stored_sym(Val(ndims(T)), Val(dim))
+@inline n_store(x::AbstractSymmetricTensor, dim::Integer=_dim(x)) = _n_stored_sym(Val(ndims(x)), Val(dim))
+# Let the compiler build a look-up table for these values and hardcode them
 @generated _n_stored_sym(::Val{N}, ::Val{dim}) where {N,dim} = binomial(dim + N - 1, N)
 
 sort_ntuple(::Tuple{}) = ()
@@ -152,28 +153,28 @@ Base.Base.@propagate_inbounds function idx_N2O(A::AbstractSymmetricTensor, I::NT
     return idx_t2l_sym(Val(ndims(A)), _dim(A), sortedI)
 end
 
-# Idea. 
-# We store only the elements on or below the main diagonal (N=2 case) or 
+# Idea.
+# We store only the elements on or below the main diagonal (N=2 case) or
 # where the N-tuple of indexes is sorted in descending order.
-# The algorithm below is recursive. The recursion goes along N based on 
-# the last index. 
-# If the last index (call it k) is 1, then the indexing is the same as in the 
-# case N-1 with the first N-1 indices. 
-# If the last index is k=2, then we have to add the number of elements we had 
-# from the k=1 hyper-plane (which is n_store(N-1,dim)) plus the indexing in the 
-# current (k=2) hyper-plane, which is the case N-1 with dim-1 and the first 
-# N-1 indices reduced by 1. This is because all of the first N-1 indexes of 
-# stored elements start from 2, rather than 1, so if we subtract 1 we have normal 
+# The algorithm below is recursive. The recursion goes along N based on
+# the last index.
+# If the last index (call it k) is 1, then the indexing is the same as in the
+# case N-1 with the first N-1 indices.
+# If the last index is k=2, then we have to add the number of elements we had
+# from the k=1 hyper-plane (which is n_store(N-1,dim)) plus the indexing in the
+# current (k=2) hyper-plane, which is the case N-1 with dim-1 and the first
+# N-1 indices reduced by 1. This is because all of the first N-1 indexes of
+# stored elements start from 2, rather than 1, so if we subtract 1 we have normal
 # indexing.
-# And so on. 
+# And so on.
 # In the general case of k>2 we have to add up all elements stored in the first
-# k-1 planes, plus the indexing in the current plane. 
-# So we have the elements from the k=1 plane (which are n_store(N-1, dim)) 
+# k-1 planes, plus the indexing in the current plane.
+# So we have the elements from the k=1 plane (which are n_store(N-1, dim))
 # plus all elements for k=2 plane, which are n_store(N-1,dim-1),
-# plus, and so on, all the way up to all elements for k-1-plane, which are 
-# n_store(N-1,dim-(k-2)), plus the indexing in the k-plane, which is the same 
-# as for the case N-1 with dim-(k-1) and using the first N-1 indices reduced by 
-# k-1 (because stored elements in the k-plane have their first N-1 indexes 
+# plus, and so on, all the way up to all elements for k-1-plane, which are
+# n_store(N-1,dim-(k-2)), plus the indexing in the k-plane, which is the same
+# as for the case N-1 with dim-(k-1) and using the first N-1 indices reduced by
+# k-1 (because stored elements in the k-plane have their first N-1 indexes
 # running from k to dim, so we translate it to 1 to dim-(k-1)).
 # Voilà
 
@@ -182,11 +183,11 @@ idx_t2l_sym(::Val{0}, dim::Int, ::Tuple{}) = 1
 idx_t2l_sym(::Val{1}, dim::Int, idx::Tuple{Int}) = idx[1]
 function idx_t2l_sym(::Val{N}, dim::Int, idx::NTuple{N,Int}) where N
     if _is_alldim(dim, idx)
-        # this case is called repeatedly. 
+        # this case is called repeatedly.
         # luckily we have a direct formula for it, no need for recursion
         return _n_stored_sym(Val(N), Val(dim))
     else
-        # split off the last index and call _impl 
+        # split off the last index and call _impl
         return _idx_t2l_sym_impl(dim, Val(last(idx)), Base.front(idx))
     end
 end
@@ -194,7 +195,7 @@ _is_alldim(dim::Int, ind::Tuple{Int}) = (ind[1] == dim)
 _is_alldim(dim::Int, ind::NTuple) = ((ind[1] == dim) && _is_alldim(dim, Base.tail(ind)))
 @generated function _idx_t2l_sym_impl(dim::Int, ::Val{k}, idx1::NTuple{N,Int}) where {N,k}
     # N.B. The N here is actually N-1, since the last index, k, has been separated
-    #      so using Val($N) is actually a recursive call to the N-1 case 
+    #      so using Val($N) is actually a recursive call to the N-1 case
     if k == 1
         return :(idx_t2l_sym(Val($N), dim, idx1))
     end
@@ -213,8 +214,8 @@ next_sym_idx(dim::Int) = error()
 next_sym_idx(dim::Int, i::Int) = (i + 1,)
 function next_sym_idx(dim::Int, i::Int, J::Int...)
     i < dim && return (i + 1, J...)
-    # Logic. 
-    # i == dim means that i+1 "overflows". 
+    # Logic.
+    # i == dim means that i+1 "overflows".
     # So, we move up I without i and set i to I[1] (to maintain it being sorted)
     J = next_sym_idx(dim, J...)
     return (J[1], J...)
@@ -310,10 +311,31 @@ struct PolyFunc{D,T} <: Function
         new{D,F}(zeros(F, nvars), derivs_container(F, D, nvars))
     end
 end
+PolyFunc(D::Integer, dim::Integer) = PolyFunc{D,Float64}(Int(dim))
 PolyFunc{D}(dim::Integer) where D = PolyFunc{D,Float64}(Int(dim))
 degreeof(f::PolyFunc{D}) where D = D
 degreeof(::Type{<:PolyFunc{D}}) where D = D
 nvars(f::PolyFunc) = length(f.x̄)
+
+numtheta(x::PolyFunc) = sum(n_store, values(x.derivs))
+gettheta(x::PolyFunc{D,T}) where {D,T} = gettheta!(Vector{T}(undef, numtheta(x)), x, 1)
+function gettheta!(θ::AbstractVector, x::PolyFunc{D,T}, offset::Int=1) where {D,T}
+    for der in values(x.derivs)
+        n = length(der.data)
+        copyto!(θ, offset, der.data, 1, n)
+        offset = offset + n
+    end
+    return θ
+end
+function settheta!(x::PolyFunc, θ::AbstractVector, offset::Int=1)
+    for der in values(x.derivs)
+        n = length(der.data)
+        copyto!(der.data, 1, θ, offset, n)
+        offset = offset + n
+    end
+    return θ
+end
+
 
 function Base.show(io::IO, ::MIME"text/plain", f::PolyFunc{D}) where {D}
     println(io, nameof(typeof(f)), " of degree ", D)
@@ -344,13 +366,14 @@ end
         result = SymmetricTensor{$ST,$deriv}(length(x), Val(:sparse))
     end
     for N = deriv:D
-        push!(ret.args, :(add_degree!(result, Val($(N-deriv)), der[$N], pt)))
+        # push!(ret.args, :(add_degree!(result, Val($(N-deriv)), der[$N], pt)))
+        push!(ret.args, :(add_degree!(result, der[$N], pt)))
     end
     push!(ret.args, :(return result))
     return ret
 end
 
-# multinomial coefficients formula using formula based on binomial coefficients 
+# multinomial coefficients formula using formula based on binomial coefficients
 # cf. https://en.wikipedia.org/wiki/Multinomial_theorem#Multinomial_coefficients
 function _multinom_coeff(deg::AbstractVector{T}, der::AbstractVector{S}=T[]) where {T,S}
     # deg is a vector of integer powers of the mulinomial term we're constructing
@@ -408,7 +431,7 @@ function count_degrees!(x::Vector{Int}, I::NTuple{N,Int}) where N
     count_degrees!(x, rest)
 end
 
-# return the coefficient count times the the power for the given monomial 
+# return the coefficient count times the power for the given monomial
 function _coeff_pow(pt::Vector, deg_idx::NTuple{N,Int}, der_idx::NTuple{d,Int}=()) where {N,d}
     # deg_idx -- index of the monomial, i.e. (1,1,2) means x*x*y
     # der_idx -- index of derivative we are taking, e.g., (1,2) means second mixed derivative d^2/dxdy
@@ -420,25 +443,99 @@ function _coeff_pow(pt::Vector, deg_idx::NTuple{N,Int}, der_idx::NTuple{d,Int}=(
 end
 
 
-function add_degree!(result::AbstractSymmetricTensor{T1,d}, ::Val{0},
-    deriv::AbstractSymmetricTensor{T2,d}, pt::Vector) where {T1,T2,d}
+"""
+    result = add_degree!(result, deriv, pt)
+
+Accumulate into result the contribution to a derivative of
+a poly-function from its derivative.
+
+    result::AbstractSymmetricTensor{T,d}
+    deriv::AbstractSymmetricTensor{T,N}
+    pt::Vector
+
+`result` is a symmetric tensor that accumulates the d-th derivative
+of a poly-function at point `x`, such that `pt = x-x̄`. `deriv` contains
+the `N`-th derivative of the poly-function at `x̄`.
+
+Note that we assert `N >= d`.
+
+"""
+function add_degree! end
+
+function add_degree!(result::AbstractSymmetricTensor{T1,d},
+    deriv::AbstractSymmetricTensor{T2,d}, ::Vector) where {T1,T2,d}
     result.data .+= deriv.data
     return result
 end
 
 function add_degree!(result::AbstractSymmetricTensor{T1,d},
-    ::Val{N}, deriv::AbstractSymmetricTensor{T2,N1}, pt::Vector) where {d,T1,N,T2,N1}
-    @assert (N1 - N) == d >= 0
+    deriv::AbstractSymmetricTensor{T2,N}, pt::Vector) where {d,T1,T2,N}
+    @assert d <= N
     dim = length(pt)
     @assert dim == deriv.dim == result.dim
-    coeff1 = N < 2 ? one(T1) : one(T1) / prod(2:N)
-    for (i, idx) in enumerate(SymmetricIndices{N1,dim}())
+    coeff1 = (N - d) < 2 ? one(T1) : one(T1) / prod(2:(N-d))
+    for (i, idx) in enumerate(SymmetricIndices{N,dim}())
         dval = deriv.data[i]
         iszero(dval) && continue
         for (j, jdx) in enumerate(SymmetricIndices{d,dim}())
             coeff2 = _coeff_pow(pt, idx, jdx)
             iszero(coeff2) && continue
             result.data[j] += dval * coeff1 * coeff2
+        end
+    end
+    return result
+end
+
+"""
+    d_dtheta(f, x, Val(d))
+
+This function computes the derivatives of a PolyFunc 'f' with respect to its
+parameters (called θ here) at a given point `x`
+
+The value of `d` determines which x-derivative of `f` is considered here. That
+is, for `d=0` we compute the θ-gradient of `f` itself, if `d=1` we compute the
+θ-Jacobian of the x-gradient of `f`, if `d=2` we compute the θ-Jacobian of the
+unique elements of the x-Hessian of `f` and so on.
+
+Return a M-by-N matrix where `M = n_stor(f.derivs[d])` is the number of unique
+mixed derivatives of f of order `d` and `N = numtheta(f)` is the number of
+parameters in `f`.
+
+Note that `f` and all of its x-derivatives depend linearly on θ, so higher
+derivatives w.r.t. θ are zero.
+
+"""
+function d_dtheta(f::PolyFunc{D,T}, x::AbstractVector{S}, ::Val{DX}=Val(0)) where {D,DX,T,S}
+    TS = promote_type(T, S)
+    # result: axis 1 is the derivatives wrt x, axis 2 is the derivative wrt θ
+    result = spzeros(TS, n_store(AbstractSymmetricTensor{TS,DX}, nvars(f)), numtheta(f))
+    return d_dtheta!(result, f, x, Val(DX), 1, 1)
+end
+
+function d_dtheta!(result::AbstractMatrix{TS}, f::PolyFunc, x::AbstractVector, ::Val{DX}=Val(0), x_offset::Int=1, θ_offset::Int=1) where {TS,DX}
+    x_offset -= 1
+    θ_offset -= 1
+    dim = nvars(f)
+    pt = x ≈ f.x̄ ? zero(x) : iszero(f.x̄) ? x : x - f.x̄
+    ind = 1
+    for (d, deriv) in pairs(f.derivs)
+        # N.B. this is the derivative of add_degree! w.r.t. dval
+        coeff1 = (d - DX) < 2 ? one(TS) : one(TS) / prod(2:(d-DX))
+        for idx in SymmetricIndices(deriv)
+            # loop over all unique elements of deriv
+            if d < DX
+                # derivatives with respect to x have eliminated these coefficients
+                for j in axes(result, 1)
+                    result[x_offset+j, θ_offset+ind] = zero(TS)
+                end
+            else
+                for (j, jdx) in enumerate(SymmetricIndices{DX,dim}())
+                    # loop over all derivative w.r.t x that we're taking
+                    coeff2 = _coeff_pow(pt, idx, jdx)
+                    result[x_offset+j, θ_offset+ind] += coeff1 * coeff2
+                end
+            end
+            ind = ind + 1
         end
     end
     return result
