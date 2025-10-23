@@ -355,7 +355,7 @@ function Base.show(io::IO, ::MIME"text/plain", f::PolyFunc{D}) where {D}
 end
 
 (f::PolyFunc)(x::Number...) = f([x...,])
-@generated function (f::PolyFunc{D,T})(x::Vector{S}, ::Val{deriv}=Val(0)) where {S,T,D,deriv}
+@generated function (f::PolyFunc{D,T})(x::AbstractVector{S}, ::Val{deriv}=Val(0)) where {S,T,D,deriv}
     ST = promote_type(S, T)
     if deriv > D
         return :(SymmetricTensor{$ST,$deriv}(length(x), Val(:sparse)))
@@ -372,6 +372,23 @@ end
     push!(ret.args, :(return result))
     return ret
 end
+
+function eval_hod(f::PolyFunc{D,T}, x::AbstractVector{S}) where {D,T,S}
+    TS = promote_type(T,S)
+    result = derivs_container(TS, D, nvars(f))
+    eval_hod!(result, f, x)
+end
+
+function eval_hod!(result::DerivsContainer, f::PolyFunc, x::AbstractVector) 
+    pt = iszero(f.x̄) ? x : x - f.x̄
+    for i = 0:D
+        for j = i:D
+            add_degree!(result[i], f.derivs[j], pt)
+        end
+    end
+    return result
+end
+
 
 # multinomial coefficients formula using formula based on binomial coefficients
 # cf. https://en.wikipedia.org/wiki/Multinomial_theorem#Multinomial_coefficients
@@ -497,7 +514,7 @@ is, for `d=0` we compute the θ-gradient of `f` itself, if `d=1` we compute the
 θ-Jacobian of the x-gradient of `f`, if `d=2` we compute the θ-Jacobian of the
 unique elements of the x-Hessian of `f` and so on.
 
-Return a M-by-N matrix where `M = n_stor(f.derivs[d])` is the number of unique
+Return a M-by-N matrix where `M = n_store(f.derivs[d])` is the number of unique
 mixed derivatives of f of order `d` and `N = numtheta(f)` is the number of
 parameters in `f`.
 
