@@ -17,7 +17,7 @@ SimpleTensors
 export Tensor, DenseTensor, SparseTensor
 export SymmetricTensor, DenseSymmetricTensor, SparseSymmetricTensor
 export SymmetricIndices
-export PolyFunc, DerivsContainer, derivs_container, degreeof, nvars
+export TaylorPolyFunc, DerivsContainer, derivs_container, degreeof, nvars
 export gettheta, settheta!, numtheta, d_dtheta, d_dtheta!
 
 """
@@ -102,7 +102,7 @@ Tensor(N::Int, dim::Int, kind::Val=Val(:sparse)) = Tensor{Float64,N}(dim, kind)
 Tensor(T::Type, N::Int, dim::Int, kind::Val=Val(:sparse)) = Tensor{T,N}(dim, kind)
 Tensor{T}(N::Int, dim::Int, kind::Val=Val(:sparse)) where T = Tensor{T,N}(dim, kind)
 Tensor{T,N}(dim::Int, ::Val{:sparse}=Val(:sparse)) where {T,N} = Tensor{T,N}(dim, SparseVector{T,Int}(n_store(Tensor{T,N}, dim), Int[], T[]))
-Tensor{T,N}(dim::Int, ::Val{:dense}) where {T,N} = Tensor{T,N}(dim, Vector{T}(undef, n_store(Tensor{T,N}, dim)))
+Tensor{T,N}(dim::Int, ::Val{:dense}) where {T,N} = Tensor{T,N}(dim, zeros(T, n_store(Tensor{T,N}, dim)))
 
 const DenseTensor{T,N} = Tensor{T,N,Vector{T}}
 DenseTensor(args...) = Tensor(args..., Val(:dense))
@@ -288,7 +288,7 @@ SymmetricTensor(N::Int, dim::Int, kind::Val=Val(:sparse)) = SymmetricTensor{Floa
 SymmetricTensor(T::Type, N::Int, dim::Int, kind::Val=Val(:sparse)) = SymmetricTensor{T,N}(dim, kind)
 SymmetricTensor{T}(N::Int, dim::Int, kind::Val=Val(:sparse)) where T = SymmetricTensor{T,N}(dim, kind)
 SymmetricTensor{T,N}(dim::Int, ::Val{:sparse}=Val(:sparse)) where {T,N} = SymmetricTensor{T,N}(dim, SparseVector{T,Int}(n_store(SymmetricTensor{T,N}, dim), Int[], T[]))
-SymmetricTensor{T,N}(dim::Int, ::Val{:dense}) where {T,N} = SymmetricTensor{T,N}(dim, Vector{T}(undef, n_store(SymmetricTensor{T,N}, dim)))
+SymmetricTensor{T,N}(dim::Int, ::Val{:dense}) where {T,N} = SymmetricTensor{T,N}(dim, zeros(T, n_store(SymmetricTensor{T,N}, dim)))
 
 const DenseSymmetricTensor{T,N} = SymmetricTensor{T,N,Vector{T}}
 DenseSymmetricTensor(args...) = SymmetricTensor(args..., Val(:dense))
@@ -299,27 +299,27 @@ SparseSymmetricTensor(args...) = SymmetricTensor(args..., Val(:sparse))
 
 ############################################
 
-const DerivsContainer{T} = LittleDictVec{Int,SparseSymmetricTensor{T}}
-derivs_container(T::Type, D::Integer, nvars::Integer) = LittleDict{Int,SparseSymmetricTensor{T}}(0:D, SparseSymmetricTensor{T}[SymmetricTensor{T,N}(nvars, Val(:sparse)) for N = 0:D])
+const DerivsContainer{T} = LittleDict{Int,SymmetricTensor{T},UnitRange{Int},Vector{SymmetricTensor{T}}}
+derivs_container(T::Type, D::Integer, nvars::Integer, kind::Symbol) = LittleDict{Int,SymmetricTensor{T}}(0:D, SymmetricTensor{T}[SymmetricTensor(T, N, nvars, Val(kind)) for N = 0:D])
 
-# Function defined as a power series of degree `D` about a point (`x̄`)
-struct PolyFunc{D,T} <: Function
+# Function defined as a Taylor polynomial of degree `D` about a point (`x̄`)
+struct TaylorPolyFunc{D,T} <: Function
     x̄::Vector{T}
     derivs::DerivsContainer{T}
-    function PolyFunc{D,F}(nvars::Int) where {D,F}
+    function TaylorPolyFunc{D,F}(nvars::Int) where {D,F}
         @assert 0 <= D <= MAX_N "Maximum degree supported is $MAX_N."
-        new{D,F}(zeros(F, nvars), derivs_container(F, D, nvars))
+        new{D,F}(zeros(F, nvars), derivs_container(F, D, nvars, :dense))
     end
 end
-PolyFunc(D::Integer, dim::Integer) = PolyFunc{D,Float64}(Int(dim))
-PolyFunc{D}(dim::Integer) where D = PolyFunc{D,Float64}(Int(dim))
-degreeof(f::PolyFunc{D}) where D = D
-degreeof(::Type{<:PolyFunc{D}}) where D = D
-nvars(f::PolyFunc) = length(f.x̄)
+TaylorPolyFunc(D::Integer, dim::Integer) = TaylorPolyFunc{D,Float64}(Int(dim))
+TaylorPolyFunc{D}(dim::Integer) where D = TaylorPolyFunc{D,Float64}(Int(dim))
+degreeof(f::TaylorPolyFunc{D}) where D = D
+degreeof(::Type{<:TaylorPolyFunc{D}}) where D = D
+nvars(f::TaylorPolyFunc) = length(f.x̄)
 
-numtheta(x::PolyFunc) = sum(n_store, values(x.derivs))
-gettheta(x::PolyFunc{D,T}) where {D,T} = gettheta!(Vector{T}(undef, numtheta(x)), x, 1)
-function gettheta!(θ::AbstractVector, x::PolyFunc{D,T}, offset::Int=1) where {D,T}
+numtheta(x::TaylorPolyFunc) = sum(n_store, values(x.derivs))
+gettheta(x::TaylorPolyFunc{D,T}) where {D,T} = gettheta!(Vector{T}(undef, numtheta(x)), x, 1)
+function gettheta!(θ::AbstractVector, x::TaylorPolyFunc{D,T}, offset::Int=1) where {D,T}
     for der in values(x.derivs)
         n = length(der.data)
         copyto!(θ, offset, der.data, 1, n)
@@ -327,7 +327,7 @@ function gettheta!(θ::AbstractVector, x::PolyFunc{D,T}, offset::Int=1) where {D
     end
     return θ
 end
-function settheta!(x::PolyFunc, θ::AbstractVector, offset::Int=1)
+function settheta!(x::TaylorPolyFunc, θ::AbstractVector, offset::Int=1)
     for der in values(x.derivs)
         n = length(der.data)
         copyto!(der.data, 1, θ, offset, n)
@@ -337,7 +337,7 @@ function settheta!(x::PolyFunc, θ::AbstractVector, offset::Int=1)
 end
 
 
-function Base.show(io::IO, ::MIME"text/plain", f::PolyFunc{D}) where {D}
+function Base.show(io::IO, ::MIME"text/plain", f::TaylorPolyFunc{D}) where {D}
     println(io, nameof(typeof(f)), " of degree ", D)
     print(io, "x̄ = ", f.x̄)
     print(io, "\nD0 = ", f.derivs[0][])
@@ -354,8 +354,8 @@ function Base.show(io::IO, ::MIME"text/plain", f::PolyFunc{D}) where {D}
     # print(io, "\n...")
 end
 
-(f::PolyFunc)(x::Number...) = f([x...,])
-@generated function (f::PolyFunc{D,T})(x::AbstractVector{S}, ::Val{deriv}=Val(0)) where {S,T,D,deriv}
+(f::TaylorPolyFunc)(x::Number...) = f([x...,])
+@generated function (f::TaylorPolyFunc{D,T})(x::AbstractVector{S}, ::Val{deriv}=Val(0)) where {S,T,D,deriv}
     ST = promote_type(S, T)
     if deriv > D
         return :(SymmetricTensor{$ST,$deriv}(length(x), Val(:sparse)))
@@ -373,17 +373,19 @@ end
     return ret
 end
 
-function eval_hod(f::PolyFunc{D,T}, x::AbstractVector{S}) where {D,T,S}
-    TS = promote_type(T,S)
-    result = derivs_container(TS, D, nvars(f))
+function eval_hod(f::TaylorPolyFunc{D,T}, x::AbstractVector{S}) where {D,T,S}
+    TS = promote_type(T, S)
+    result = derivs_container(TS, D, nvars(f), :dense)
     eval_hod!(result, f, x)
 end
 
-function eval_hod!(result::DerivsContainer, f::PolyFunc, x::AbstractVector) 
+function eval_hod!(result::DerivsContainer, f::TaylorPolyFunc, x::AbstractVector)
     pt = iszero(f.x̄) ? x : x - f.x̄
-    for i = 0:D
-        for j = i:D
-            add_degree!(result[i], f.derivs[j], pt)
+    for i in keys(result)
+        res = result[i]
+        fill!(res.data, zero(eltype(res)))
+        for j = i:degreeof(f)
+            add_degree!(res, f.derivs[j], pt)
         end
     end
     return result
@@ -418,8 +420,8 @@ function _multinom_coeff(deg::AbstractVector{T}, der::AbstractVector{S}=T[]) whe
 end
 
 
-function _multinom_pow(pt::Vector{R}, deg::AbstractVector{T}, der::AbstractVector{S}=T[]) where {R,T,S}
-    # deg is a vector of integer powers of the mulinomial term we're constructing
+function _multinom_pow(pt::AbstractVector{R}, deg::AbstractVector{T}, der::AbstractVector{S}=T[]) where {R,T,S}
+    # deg is a vector of integer powers of the multinomial term we're constructing
     # der is a vector of integer powers of the derivative we're taking of this term
     result = one(R)
     @assert axes(pt) == axes(deg)
@@ -449,7 +451,7 @@ function count_degrees!(x::Vector{Int}, I::NTuple{N,Int}) where N
 end
 
 # return the coefficient count times the power for the given monomial
-function _coeff_pow(pt::Vector, deg_idx::NTuple{N,Int}, der_idx::NTuple{d,Int}=()) where {N,d}
+function _coeff_pow(pt::AbstractVector, deg_idx::NTuple{N,Int}, der_idx::NTuple{d,Int}=()) where {N,d}
     # deg_idx -- index of the monomial, i.e. (1,1,2) means x*x*y
     # der_idx -- index of derivative we are taking, e.g., (1,2) means second mixed derivative d^2/dxdy
     dim = length(pt)
@@ -522,33 +524,34 @@ Note that `f` and all of its x-derivatives depend linearly on θ, so higher
 derivatives w.r.t. θ are zero.
 
 """
-function d_dtheta(f::PolyFunc{D,T}, x::AbstractVector{S}, ::Val{DX}=Val(0)) where {D,DX,T,S}
+function d_dtheta(f::TaylorPolyFunc{D,T}, x::AbstractVector{S}, ::Val{DX}=Val(0)) where {D,DX,T,S}
     TS = promote_type(T, S)
     # result: axis 1 is the derivatives wrt x, axis 2 is the derivative wrt θ
     result = spzeros(TS, n_store(AbstractSymmetricTensor{TS,DX}, nvars(f)), numtheta(f))
-    return d_dtheta!(result, f, x, Val(DX), 1, 1)
+    return d_dtheta!(result, f, x, Val(DX), 0, 0)
 end
 
-function d_dtheta!(result::AbstractMatrix{TS}, f::PolyFunc, x::AbstractVector, ::Val{DX}=Val(0), x_offset::Int=1, θ_offset::Int=1) where {TS,DX}
-    x_offset -= 1
-    θ_offset -= 1
+function d_dtheta!(result::AbstractMatrix{TS}, f::TaylorPolyFunc, x::AbstractVector, ::Val{DX}=Val(0), x_offset::Int=0, θ_offset::Int=0) where {TS,DX}
     dim = nvars(f)
-    pt = x ≈ f.x̄ ? zero(x) : iszero(f.x̄) ? x : x - f.x̄
+    pt = x ≈ f.x̄ ? spzeros(TS, sizeof(x)) : iszero(f.x̄) ? x : x - f.x̄
     ind = 1
+    fill!(result, zero(TS))
     for (d, deriv) in pairs(f.derivs)
         # N.B. this is the derivative of add_degree! w.r.t. dval
         coeff1 = (d - DX) < 2 ? one(TS) : one(TS) / prod(2:(d-DX))
         for idx in SymmetricIndices(deriv)
             # loop over all unique elements of deriv
             if d < DX
-                # derivatives with respect to x have eliminated these coefficients
-                for j in axes(result, 1)
-                    result[x_offset+j, θ_offset+ind] = zero(TS)
-                end
+                # derivatives with respect to x have eliminated these
+                # coefficients, which are already zero as per fill!() above
+                # for j in axes(result, 1)
+                #     result[x_offset+j, θ_offset+ind] = zero(TS)
+                # end
             else
                 for (j, jdx) in enumerate(SymmetricIndices{DX,dim}())
                     # loop over all derivative w.r.t x that we're taking
                     coeff2 = _coeff_pow(pt, idx, jdx)
+                    iszero(coeff2) && continue
                     result[x_offset+j, θ_offset+ind] += coeff1 * coeff2
                 end
             end

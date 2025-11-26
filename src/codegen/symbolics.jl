@@ -129,7 +129,7 @@ function make_res_grad_expr(expr, tssyms, sssyms, psyms, mod)
     max_hod_order = isdefined(mod, :max_hod_order) ? mod.max_hod_order : 1
     # sderivs = [sparsevec(sgrad)]
     # jderivs = SparseVector{<:Any,Int}[SparseVector(length(jgrad), collect(1:length(jgrad)), jgrad)]
-    jderivs = derivs_container(Any, max_hod_order, length(svars))
+    jderivs = derivs_container(Any, max_hod_order, length(svars), :sparse)
     push!(jderivs[0].data.nzind, 1)
     push!(jderivs[0].data.nzval, jresid)
     sder = SymmetricTensor(sgrad)
@@ -240,7 +240,7 @@ function _makefuncs_exprs!(exprs::Vector, eqn_name, expr, tssyms, sssyms, psyms,
             LittleDict(Symbol[$(QuoteNode.(psyms)...)],
                 fill!(Vector{Any}(undef, $(length(psyms))), nothing)),
             # $(Meta.quot(resid)), [$(Meta.quot.(grad)...)],
-            derivs_container(Float64, $hod_order, $nvars))
+            derivs_container(Float64, $hod_order, $nvars, :sparse))
     ))
     D = Symbol("#D#")
     push!(exprs, :(
