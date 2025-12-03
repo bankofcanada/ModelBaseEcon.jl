@@ -46,7 +46,7 @@ Base.@propagate_inbounds function Base.setindex!(A::AbstractTensor, val, I::Inte
     setindex!(A.data, val, idx_N2O(A, I[1:ndims(A)]))
 end
 
-"convert a tuple of indexes to a linear index; NB: our tensors are alwauys \"square\"."
+"convert a tuple of indexes to a linear index; NB: our tensors are always \"square\"."
 idx_tup2lin(::Val{0}, dim::Integer, I::NTuple{0}) = 1
 idx_tup2lin(::Val{1}, dim::Integer, I::NTuple{1}) = I[1]
 idx_tup2lin(::Val{N}, dim::Integer, I::NTuple{N}) where N = I[1] + dim * (idx_tup2lin(Val(N - 1), dim, Base.tail(I)) - 1)
@@ -96,19 +96,35 @@ struct Tensor{T,N,D<:AbstractVector{T}} <: AbstractTensor{T,N}
         return new{T,N,D}(dim, data)
     end
 end
-Tensor(A::AbstractArray{T,N}, ::Val{:sparse}=Val(:sparse)) where {T,N} = Tensor{T,N}(_dim(A), sparsevec(A))
-Tensor(A::AbstractArray{T,N}, ::Val{:dense}) where {T,N} = Tensor{T,N}(_dim(A), vec(A))
-Tensor(N::Int, dim::Int, kind::Val=Val(:sparse)) = Tensor{Float64,N}(dim, kind)
-Tensor(T::Type, N::Int, dim::Int, kind::Val=Val(:sparse)) = Tensor{T,N}(dim, kind)
-Tensor{T}(N::Int, dim::Int, kind::Val=Val(:sparse)) where T = Tensor{T,N}(dim, kind)
-Tensor{T,N}(dim::Int, ::Val{:sparse}=Val(:sparse)) where {T,N} = Tensor{T,N}(dim, SparseVector{T,Int}(n_store(Tensor{T,N}, dim), Int[], T[]))
-Tensor{T,N}(dim::Int, ::Val{:dense}) where {T,N} = Tensor{T,N}(dim, zeros(T, n_store(Tensor{T,N}, dim)))
+function Tensor(A::AbstractArray{T,N}, kind::Symbol=:sparse) where {T,N} 
+    if kind == :sparse
+        return Tensor{T,N}(_dim(A), sparsevec(A))
+    end
+    if kind == :dense
+        return Tensor{T,N}(_dim(A), vec(A))
+    end
+    error("Not supported kind=$(QuoteNode(kind))")
+end
+
+Tensor(N::Int, dim::Int, kind::Symbol=:sparse) = Tensor{Float64,N}(dim, kind)
+Tensor(T::Type, N::Int, dim::Int, kind::Symbol=:sparse) = Tensor{T,N}(dim, kind)
+Tensor{T}(N::Int, dim::Int, kind::Symbol=:sparse) where T = Tensor{T,N}(dim, kind)
+
+function Tensor{T,N}(dim::Int, kind::Symbol=:sparse) where {T,N} 
+    if kind == :sparse 
+        return Tensor{T,N}(dim, SparseVector{T,Int}(n_store(Tensor{T,N}, dim), Int[], T[]))
+    end
+    if kind == :dense
+        return Tensor{T,N}(dim, zeros(T, n_store(Tensor{T,N}, dim)))
+    end
+    error("Not supported kind=$(QuoteNode(kind))")
+end
 
 const DenseTensor{T,N} = Tensor{T,N,Vector{T}}
-DenseTensor(args...) = Tensor(args..., Val(:dense))
+DenseTensor(args...) = Tensor(args..., :dense)
 
 const SparseTensor{T,N} = Tensor{T,N,SparseVector{T,Int}}
-SparseTensor(args...) = Tensor(args..., Val(:sparse))
+SparseTensor(args...) = Tensor(args..., :sparse)
 
 ################################
 
@@ -123,10 +139,11 @@ Base.BroadcastStyle(::Type{<:AbstractSymmetricTensor}) = error("Broadcasting not
 
 
 "Method for symmetric tensors, where only the unique elements are stored."
-@inline n_store(T::Type{<:AbstractSymmetricTensor}, dim::Int) = _n_stored_sym(Val(ndims(T)), Val(dim))
-@inline n_store(x::AbstractSymmetricTensor, dim::Integer=_dim(x)) = _n_stored_sym(Val(ndims(x)), Val(dim))
-# Let the compiler build a look-up table for these values and hardcode them
-@generated _n_stored_sym(::Val{N}, ::Val{dim}) where {N,dim} = binomial(dim + N - 1, N)
+@inline n_store(T::Type{<:AbstractSymmetricTensor}, dim::Int) = _n_stored_sym(ndims(T), dim)
+@inline n_store(x::AbstractSymmetricTensor, dim::Integer=_dim(x)) = _n_stored_sym(ndims(x), dim)
+
+"Number of unique entries that must be stored for a symmetric tensor."
+_n_stored_sym(N::Integer, dim::Integer) = binomial(dim + N - 1, N)
 
 sort_ntuple(::Tuple{}) = ()
 sort_ntuple(x::Tuple{Int}) = x
@@ -185,7 +202,7 @@ function idx_t2l_sym(::Val{N}, dim::Int, idx::NTuple{N,Int}) where N
     if _is_alldim(dim, idx)
         # this case is called repeatedly.
         # luckily we have a direct formula for it, no need for recursion
-        return _n_stored_sym(Val(N), Val(dim))
+        return _n_stored_sym(N, dim)
     else
         # split off the last index and call _impl
         return _idx_t2l_sym_impl(dim, Val(last(idx)), Base.front(idx))
@@ -200,12 +217,12 @@ _is_alldim(dim::Int, ind::NTuple) = ((ind[1] == dim) && _is_alldim(dim, Base.tai
         return :(idx_t2l_sym(Val($N), dim, idx1))
     end
     if k == 2
-        return :(idx_t2l_sym(Val($N), dim - 1, idx1 .- 1) + _n_stored_sym(Val($N), Val(dim)))
+        return :(idx_t2l_sym(Val($N), dim - 1, idx1 .- 1) + _n_stored_sym($N, dim))
     end
     @assert k > 2
     ret = :(idx_t2l_sym(Val($N), dim - $(k - 1), idx1 .- $(k - 1)))
     for s = 0:k-2
-        ret = :($ret + _n_stored_sym(Val($N), Val(dim - $s)))
+        ret = :($ret + _n_stored_sym($N, dim - $s))
     end
     return ret
 end
@@ -216,7 +233,7 @@ function next_sym_idx(dim::Int, i::Int, J::Int...)
     i < dim && return (i + 1, J...)
     # Logic.
     # i == dim means that i+1 "overflows".
-    # So, we move up I without i and set i to I[1] (to maintain it being sorted)
+    # So, we move up J without i and set i to J[1] (to maintain it being sorted)
     J = next_sym_idx(dim, J...)
     return (J[1], J...)
 end
@@ -232,7 +249,7 @@ function Base.iterate(x::SymmetricIndices{N,dim}, state::NTuple{N,Int}=ntuple(on
 end
 Base.iterate(::SymmetricIndices{0}, ::Tuple{}=()) = ((), nothing)
 Base.iterate(::SymmetricIndices{0}, ::Nothing) = nothing
-Base.length(x::SymmetricIndices{N,dim}) where {N,dim} = _n_stored_sym(Val(N), Val(dim))
+Base.length(x::SymmetricIndices{N,dim}) where {N,dim} = _n_stored_sym(N, dim)
 
 ################################
 
@@ -252,7 +269,7 @@ end
 # unique elements from it into the given data storage vector. As it goes, it
 # also checks to make sure it is indeed symmetric.
 function _take_sym!(::Val{0.0}, data::AbstractVector, A::Array, dim::Int=_dim(A))
-    # the case of no check
+    # the case of no check for symmetry
     @assert length(data) == n_store(AbstractSymmetricTensor{eltype(A),ndims(A)}, dim)
     @inbounds for (i, I) in enumerate(SymmetricIndices(A, CartesianIndex))
         data[i] = A[I]
@@ -269,14 +286,14 @@ function _take_sym!(v::Val{tol}, data::AbstractVector, A::Array, dim::Int=_dim(A
         else
             idx = idx_t2l_sym(Val(ndims(A)), dim, sort_ntuple(Tuple(I)))
             if abs(data[idx] - A[I]) > tol
-                error("Not symmetric: data[$idx] = $(data[idx]), A[$(Tuple(I)...)] = $(A[I])")
+                error("Not symmetric: data[$idx] = $(data[idx]), A$([Tuple(I)...]) = $(A[I])")
             end
         end
     end
     return data
 end
 
-function SymmetricTensor(A::AbstractArray, kind::Val=Val(:sparse);
+function SymmetricTensor(A::AbstractArray, kind::Symbol=:sparse;
     check::Bool=false, tol::AbstractFloat=eps(Float64) * 1e3)
     dim = _dim(A)
     x = SymmetricTensor{eltype(A),ndims(A)}(dim, kind)
@@ -284,56 +301,131 @@ function SymmetricTensor(A::AbstractArray, kind::Val=Val(:sparse);
     return x
 end
 
-SymmetricTensor(N::Int, dim::Int, kind::Val=Val(:sparse)) = SymmetricTensor{Float64,N}(dim, kind)
-SymmetricTensor(T::Type, N::Int, dim::Int, kind::Val=Val(:sparse)) = SymmetricTensor{T,N}(dim, kind)
-SymmetricTensor{T}(N::Int, dim::Int, kind::Val=Val(:sparse)) where T = SymmetricTensor{T,N}(dim, kind)
-SymmetricTensor{T,N}(dim::Int, ::Val{:sparse}=Val(:sparse)) where {T,N} = SymmetricTensor{T,N}(dim, SparseVector{T,Int}(n_store(SymmetricTensor{T,N}, dim), Int[], T[]))
-SymmetricTensor{T,N}(dim::Int, ::Val{:dense}) where {T,N} = SymmetricTensor{T,N}(dim, zeros(T, n_store(SymmetricTensor{T,N}, dim)))
+SymmetricTensor(N::Int, dim::Int, kind::Symbol=:sparse) = SymmetricTensor{Float64,N}(dim, kind)
+SymmetricTensor(T::Type, N::Int, dim::Int, kind::Symbol=:sparse) = SymmetricTensor{T,N}(dim, kind)
+SymmetricTensor{T}(N::Int, dim::Int, kind::Symbol=:sparse) where T = SymmetricTensor{T,N}(dim, kind)
+
+function SymmetricTensor{T,N}(dim::Int, kind::Symbol=:sparse) where {T,N}
+    if kind == :sparse 
+        return SymmetricTensor{T,N}(dim, SparseVector{T,Int}(n_store(SymmetricTensor{T,N}, dim), Int[], T[]))
+    end
+    if kind == :dense
+        return SymmetricTensor{T,N}(dim, zeros(T, n_store(SymmetricTensor{T,N}, dim)))
+    end
+    error("Not supported kind=$(QuoteNode(kind))")
+end
 
 const DenseSymmetricTensor{T,N} = SymmetricTensor{T,N,Vector{T}}
-DenseSymmetricTensor(args...) = SymmetricTensor(args..., Val(:dense))
+DenseSymmetricTensor(args...) = SymmetricTensor(args..., :dense)
 
 const SparseSymmetricTensor{T,N} = SymmetricTensor{T,N,SparseVector{T,Int}}
-SparseSymmetricTensor(args...) = SymmetricTensor(args..., Val(:sparse))
+SparseSymmetricTensor(args...) = SymmetricTensor(args..., :sparse)
 
 
 ############################################
 
 const DerivsContainer{T} = LittleDict{Int,SymmetricTensor{T},UnitRange{Int},Vector{SymmetricTensor{T}}}
-derivs_container(T::Type, D::Integer, nvars::Integer, kind::Symbol) = LittleDict{Int,SymmetricTensor{T}}(0:D, SymmetricTensor{T}[SymmetricTensor(T, N, nvars, Val(kind)) for N = 0:D])
+derivs_container(T::Type, D::Integer, nvars::Integer, kind::Symbol) = 
+    LittleDict{Int,SymmetricTensor{T}}(0:D, SymmetricTensor{T}[SymmetricTensor(T, N, nvars, kind) for N = 0:D])
 
 # Function defined as a Taylor polynomial of degree `D` about a point (`x̄`)
+"""
+    struct TaylorPolyFunc{D,T} <: Function 
+        x̄::Vector
+        derivs::DerivsContainer
+    end
+
+A Taylor polynomial of degree D, that is, a multivariate polynomial function of
+total degree D, defined by the value and partial derivatives of another function
+at a given point `x̄`.
+
+Constructors: `TaylorPolyFunc{D,T}(nvars)`, where `D` is the degree, `T` is the
+data type and `nvars` is the length of `x̄`. `TaylorPolyFunc{D}(dim)` and
+`TaylorPolyFunc(D, dim)` do the same with data type set to the default
+`T=Float64`. The values of `x̄` and all derivatives are set to 0 and must be
+filled in directly in a separate step.
+
+"""
 struct TaylorPolyFunc{D,T} <: Function
     x̄::Vector{T}
     derivs::DerivsContainer{T}
-    function TaylorPolyFunc{D,F}(nvars::Int) where {D,F}
+    function TaylorPolyFunc{D,F}(nvars::Int, kind=:dense) where {D,F}
         @assert 0 <= D <= MAX_N "Maximum degree supported is $MAX_N."
-        new{D,F}(zeros(F, nvars), derivs_container(F, D, nvars, :dense))
+        new{D,F}(zeros(F, nvars), derivs_container(F, D, nvars, kind))
     end
 end
 TaylorPolyFunc(D::Integer, dim::Integer) = TaylorPolyFunc{D,Float64}(Int(dim))
 TaylorPolyFunc{D}(dim::Integer) where D = TaylorPolyFunc{D,Float64}(Int(dim))
-degreeof(f::TaylorPolyFunc{D}) where D = D
-degreeof(::Type{<:TaylorPolyFunc{D}}) where D = D
-nvars(f::TaylorPolyFunc) = length(f.x̄)
 
-numtheta(x::TaylorPolyFunc) = sum(n_store, values(x.derivs))
-gettheta(x::TaylorPolyFunc{D,T}) where {D,T} = gettheta!(Vector{T}(undef, numtheta(x)), x, 1)
-function gettheta!(θ::AbstractVector, x::TaylorPolyFunc{D,T}, offset::Int=1) where {D,T}
-    for der in values(x.derivs)
+"""
+    degreeof(::TaylorPolyFunc)
+    degreeof(::Type{<:TaylorPolyFunc})
+
+Return the degree of the given Taylor polynomial function or type.
+"""
+degreeof(::TaylorPolyFunc{D}) where D = D
+degreeof(::Type{<:TaylorPolyFunc{D}}) where D = D
+
+"""
+    nvars(f::TaylorPolyFunc)
+
+Return the number of variables of the given Taylor polynomial function.
+"""
+nvars(p::TaylorPolyFunc) = length(p.x̄)
+
+"""
+    numtheta(p::TaylorPolyFunc)
+
+Return the number of parameters θ that specify the given Taylor polynomial
+function.
+"""
+numtheta(p::TaylorPolyFunc) = sum(n_store, values(p.derivs))
+
+"""
+    θ = gettheta(p::TaylorPolyFunc)
+
+Collect all parameters that specify `p` into a single vector `θ` and return it. 
+
+Note that the `θ` values are the derivatives, not the coefficients.
+For example, if `p` is degree 2 with 3 variables, then 
+    p(x) = θ[1] + θ[2]*x[1] + θ[3]*x[2] + θ[4]*x[3] + 
+        θ[5]*x[1]^2/2 + θ[6]*x[1]*x[2] + θ[7]*x[1]*x[2] + 
+        θ[8]*x[2]^2/2 + θ[9]*x[2]*x[3] + θ[10]*x[3]^2/2
+
+The θ are stacked by order of derivative (0, 1, ..., D) and in the order of 
+`SymmetricIndices` within each.
+"""
+gettheta(p::TaylorPolyFunc{D,T}) where {D,T} = gettheta!(Vector{T}(undef, numtheta(p)), p, 0)
+
+"""
+    gettheta!(θ, p::TaylorPolyFunc, offset=0)
+
+Same as [`gettheta`](@ref), but puts the values in a location provided by the
+caller.
+"""
+function gettheta!(θ::AbstractVector, p::TaylorPolyFunc{D,T}, offset::Int=0) where {D,T}
+    offset += 1  # copy takes the first index to be copied into
+    for der in values(p.derivs)
         n = length(der.data)
         copyto!(θ, offset, der.data, 1, n)
         offset = offset + n
     end
     return θ
 end
-function settheta!(x::TaylorPolyFunc, θ::AbstractVector, offset::Int=1)
-    for der in values(x.derivs)
+
+"""
+    settheta!(p::TaylorPolyFunc, θ, offset=0)
+
+The opposite of [`gettheta`](@ref) and [`gettheta!`](@ref).
+"""
+function settheta!(p::TaylorPolyFunc, θ::AbstractVector, offset::Int=0)
+    offset += 1 # copy takes the first index to be copied from
+    for der in values(p.derivs)
         n = length(der.data)
         copyto!(der.data, 1, θ, offset, n)
         offset = offset + n
     end
-    return θ
+    return p
 end
 
 
@@ -355,37 +447,48 @@ function Base.show(io::IO, ::MIME"text/plain", f::TaylorPolyFunc{D}) where {D}
 end
 
 (f::TaylorPolyFunc)(x::Number...) = f([x...,])
-@generated function (f::TaylorPolyFunc{D,T})(x::AbstractVector{S}, ::Val{deriv}=Val(0)) where {S,T,D,deriv}
+(f::TaylorPolyFunc)(d::Val{deriv}, x::Number...) where {deriv} = f(d, [x...,])
+(f::TaylorPolyFunc)(x::AbstractVector) = f(Val(0), x)
+@generated function (f::TaylorPolyFunc{D,T})(::Val{deriv}, x::AbstractVector{S}) where {S,T,D,deriv}
     ST = promote_type(S, T)
     if deriv > D
-        return :(SymmetricTensor{$ST,$deriv}(length(x), Val(:sparse)))
+        return :(SymmetricTensor{$ST,$deriv}(length(x), :sparse))
     end
     ret = quote
         pt = iszero(f.x̄) ? x : x - f.x̄
         der = f.derivs
-        result = SymmetricTensor{$ST,$deriv}(length(x), Val(:sparse))
+        result = SymmetricTensor{$ST,$deriv}(length(x), :sparse)
     end
     for N = deriv:D
-        # push!(ret.args, :(add_degree!(result, Val($(N-deriv)), der[$N], pt)))
         push!(ret.args, :(add_degree!(result, der[$N], pt)))
     end
     push!(ret.args, :(return result))
     return ret
 end
 
-function eval_hod(f::TaylorPolyFunc{D,T}, x::AbstractVector{S}) where {D,T,S}
+"""
+    eval_hod(p::TaylorPolyFunc, x)
+
+Compute the value and all derivatives of `p` at `x` and return them in a
+`DerivsContainer`. Contrast with `p(Val(N), x)`, which computes on the `N`-th
+derivative for `N` between 0 and [`degreeof`](@ref)`(p)`.
+"""
+function eval_hod(p::TaylorPolyFunc{D,T}, x::AbstractVector{S}) where {D,T,S}
     TS = promote_type(T, S)
-    result = derivs_container(TS, D, nvars(f), :dense)
-    eval_hod!(result, f, x)
+    result = derivs_container(TS, D, nvars(p), :dense)
+    eval_hod!(result, p, x)
 end
 
-function eval_hod!(result::DerivsContainer, f::TaylorPolyFunc, x::AbstractVector)
-    pt = iszero(f.x̄) ? x : x - f.x̄
+"""
+
+"""
+function eval_hod!(result::DerivsContainer, p::TaylorPolyFunc, x::AbstractVector)
+    pt = iszero(p.x̄) ? x : x - p.x̄
     for i in keys(result)
         res = result[i]
         fill!(res.data, zero(eltype(res)))
-        for j = i:degreeof(f)
-            add_degree!(res, f.derivs[j], pt)
+        for j = i:degreeof(p)
+            add_degree!(res, p.derivs[j], pt)
         end
     end
     return result
@@ -396,7 +499,7 @@ end
 # cf. https://en.wikipedia.org/wiki/Multinomial_theorem#Multinomial_coefficients
 function _multinom_coeff(deg::AbstractVector{T}, der::AbstractVector{S}=T[]) where {T,S}
     # deg is a vector of integer powers of the mulinomial term we're constructing
-    # der is a vector of integer powers of the derivative we're taking of this term
+    # der is a vector of integer numbers of the derivative we're taking of this term
     TS = promote_type(T, S)
     result = one(TS)
     s = zero(Int)
@@ -524,14 +627,17 @@ Note that `f` and all of its x-derivatives depend linearly on θ, so higher
 derivatives w.r.t. θ are zero.
 
 """
-function d_dtheta(f::TaylorPolyFunc{D,T}, x::AbstractVector{S}, ::Val{DX}=Val(0)) where {D,DX,T,S}
+function d_dtheta end
+d_dtheta(f::TaylorPolyFunc, x::AbstractVector) = d_dtheta(Val(0), f, x)
+function d_dtheta(::Val{DX}, f::TaylorPolyFunc{D,T}, x::AbstractVector{S}) where {D,DX,T,S}
     TS = promote_type(T, S)
     # result: axis 1 is the derivatives wrt x, axis 2 is the derivative wrt θ
     result = spzeros(TS, n_store(AbstractSymmetricTensor{TS,DX}, nvars(f)), numtheta(f))
-    return d_dtheta!(result, f, x, Val(DX), 0, 0)
+    return d_dtheta!(result, Val(DX), f, x, 0, 0)
 end
 
-function d_dtheta!(result::AbstractMatrix{TS}, f::TaylorPolyFunc, x::AbstractVector, ::Val{DX}=Val(0), x_offset::Int=0, θ_offset::Int=0) where {TS,DX}
+d_dtheta!(result::AbstractMatrix, f::TaylorPolyFunc, x::AbstractVector, args...) = d_dtheta!(result, Val(0), f, x, args...)
+function d_dtheta!(result::AbstractMatrix{TS}, ::Val{DX}, f::TaylorPolyFunc, x::AbstractVector, x_offset::Int=0, θ_offset::Int=0) where {TS,DX}
     dim = nvars(f)
     pt = x ≈ f.x̄ ? spzeros(TS, sizeof(x)) : iszero(f.x̄) ? x : x - f.x̄
     ind = 1

@@ -242,7 +242,7 @@ end
     end
 end
 
-@testset "Abstract" begin
+@testset "AbstractModel" begin
     struct AM <: ModelBaseEcon.AbstractModel end
     m = AM()
     @test_throws ErrorException ModelBaseEcon.alleqns(m)
@@ -387,6 +387,11 @@ end
         end
     end
 end
+
+##==============================================================================
+
+include("simpletensorstests.jl")
+
 
 ##==============================================================================
 

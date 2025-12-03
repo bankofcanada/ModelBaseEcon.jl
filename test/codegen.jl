@@ -502,7 +502,17 @@ function compare_RJ_R!_(m::Model)
     @test R ≈ S
 end
 
-@include_example E1
+@testset "include_example" begin
+    @test_throws r".*no such file"i @include_example NOSUCHEXAMPLE
+    @test_throws r".*no such file"i @include_example NOSUCHEXAMPLE force
+    @test_throws r".*no such file"i @include_example NOSUCHEXAMPLE force=true
+    @test_throws r".*no such file"i @include_example NOSUCHEXAMPLE from="/doesnotexist"
+    @test_throws r".*expected `true` or `false`"i @eval @include_example NOSUCHEXAMPLE force=seven
+    @test_throws r".*no such file"i @include_example NOSUCHEXAMPLE quiet
+    @test_throws r".*unknown argument"i @eval @include_example NOSUCHEXAMPLE nosucharg
+end
+
+@include_example E1 force
 @testset "Deepcopy" begin
     @test E1.model.evaldata[:default].params[] === E1.model.parameters
     m1 = deepcopy(E1.model)
@@ -569,7 +579,7 @@ end
     @test islinearized(m)
 end
 
-@include_example E1
+@include_example E1 force=true
 @testset "E1.params" begin
     let m = E1.newmodel()
         @test propertynames(m.parameters) == (:α, :β)
