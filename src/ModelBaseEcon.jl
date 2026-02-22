@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020-2023, Bank of Canada
+# Copyright (c) 2020-2025, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -35,13 +35,17 @@ const LittleDictVec{K,V} = LittleDict{K,V,Vector{K},Vector{V}}
 # The Options submodule
 include("Options.jl")
 
+# Simple tensors for handling higher order derivatives
+include("SimpleTensors.jl")
+
 # The "misc" - various types and functions
 include("misc.jl")
+
 
 # NOTE: The order of inclusions matters.
 include("abstract.jl")
 include("parameters.jl")
-include("evaluation.jl")
+include("evaluation.jl")    # Code generation for residuals, gradients and higher order derivatives
 include("transformations.jl")
 include("variables.jl")
 include("equation.jl")
@@ -59,7 +63,7 @@ Load models from the package examples/ folder.
 The `@load_example` version is deprecated - stop using it now.
 """
 macro using_example(name)
-    examples_path = joinpath(dirname(pathof(@__MODULE__)), "..", "examples")
+    examples_path = abspath(joinpath(dirname(pathof(@__MODULE__)), "..", "examples"))
     return quote
         push!(LOAD_PATH, $(examples_path))
         using $(name)
@@ -67,13 +71,37 @@ macro using_example(name)
         $(name)
     end |> esc
 end
+export @using_example
 
-" Deprecated. Use `@using_example` instead."
-macro load_example(name)
-    Base.depwarn("Use `@using_example` instead.", Symbol("@load_example"))
-    return esc(:(@using_example $name))
+macro include_example(name, args...)
+    example_path = joinpath("examples", string(name, ".jl"))
+    force = false
+    verbose = true
+    for a in args
+        if @capture(a, force)
+            force = true
+        elseif @capture(a, force = fval_)
+            fval isa Bool || error("Expected `true` or `false`, not $(repr(fval))")
+            force = fval === true
+        elseif @capture(a, quiet)
+            verbose = false
+        elseif @capture(a, from = pval_)
+            example_path = joinpath(pval, string(name, ".jl"))
+        else
+            error("Unknown argument: $a")
+        end
+    end
+    if !isfile(example_path)
+        example_path = joinpath(dirname(@__DIR__), "examples", string(name, ".jl"))
+    end
+    if isdefined(__module__, name) && !force
+        return esc(verbose ? :(@info($("Example $name already loaded.")); $name) : name)
+    else
+        speak = verbose ? :(@info $("Including \"$example_path\"")) : nothing
+        return esc(:($speak; include($example_path); $(name)))
+    end
 end
-export @using_example, @load_example
+export @include_example
 
 ######################################################################
 

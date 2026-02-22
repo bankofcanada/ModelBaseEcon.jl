@@ -27,6 +27,17 @@ function export_model(model::Model, name::AbstractString, path::AbstractString="
     return nothing
 end
 
+function _print_modified_options(fio, opts, default, prefix)
+    for (ok, ov) in pairs(opts)
+        dv = getoption(default, ok, :not_a_default)
+        if ov isa Options && dv isa Options
+            _print_modified_options(fio, ov, dv, prefix * "$ok.")
+        elseif dv === :not_a_default || dv != ov
+            println(fio, prefix, ok, " = ", repr(ov))
+        end
+    end
+end
+
 function export_model(model::Model, name::AbstractString, fio::IO)
     _check_name(name)
     println(fio, "module ", name)
@@ -39,19 +50,8 @@ function export_model(model::Model, name::AbstractString, fio::IO)
     println(fio, "const model = Model()")
     println(fio)
 
-    function _print_modified_options(opts, default, prefix)
-        for (ok, ov) in pairs(opts)
-            dv = getoption(default, ok, :not_a_default)
-            if ov isa Options && dv isa Options
-                _print_modified_options(ov, dv, prefix * "$ok.")
-            elseif dv === :not_a_default || dv != ov
-                println(fio, prefix, ok, " = ", repr(ov))
-            end
-        end
-    end
-
     println(fio, "# options")
-    _print_modified_options(model.options, defaultoptions, "model.options.")
+    _print_modified_options(fio, model.options, defaultoptions, "model.options.")
     println(fio)
 
     println(fio, "# flags")
@@ -135,7 +135,7 @@ function export_model(model::Model, name::AbstractString, fio::IO)
         for eqn_pair in alleqns
             str = sprint(print, eqn_pair[2], context=fio, sizehint=0)
             str = replace(str, r"(\s*\".*\"\n)" => s"\1    ")
-            str = replace(str, r":_S?S?EQ\d+(_AUX\d+)? => " => "") 
+            str = replace(str, r":_S?S?EQ\d+(_AUX\d+)? => " => "")
             println(fio, "    ", unescape_string(str))
         end
         println(fio, "end # equations")
@@ -148,7 +148,7 @@ function export_model(model::Model, name::AbstractString, fio::IO)
     for cons_pair in sd.constraints
         println(fio)
         str = sprint(print, cons_pair[2], context=fio, sizehint=0)
-        str = replace(str, r":_S?S?EQ\d+(_AUX\d+)? => " => "") 
+        str = replace(str, r":_S?S?EQ\d+(_AUX\d+)? => " => "")
         println(fio, "@steadystate model ", str)
     end
 
@@ -162,4 +162,4 @@ function export_model(model::Model, name::AbstractString, fio::IO)
     return nothing
 end
 
-    
+

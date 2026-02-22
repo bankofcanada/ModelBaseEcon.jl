@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020-2022, Bank of Canada
+# Copyright (c) 2020-2025, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -15,6 +15,9 @@ struct EqnNotReadyError <: ModelErrorBase end
 msg(::EqnNotReadyError) = "Equation not ready to use."
 hint(::EqnNotReadyError) = "Call `@initialize model` or `add_equation!()` first."
 
+struct EqnNoHODError <: ModelErrorBase end
+msg(::EqnNoHODError) = "No Higher Order Derivatives available."
+
 ###############################################
 # 
 
@@ -26,6 +29,8 @@ const ExtExpr = Union{Expr,Symbol,Number}
 # Placeholder evaluation function to use in Equation construction while it is
 # being created
 eqnnotready(x...) = throw(EqnNotReadyError())
+
+nohodeval(x...) = throw(EqnNoHODError())
 
 """
     mutable struct EqnFlags ⋯ end
@@ -93,10 +98,11 @@ struct Equation <: AbstractEquation
     ssrefs::LittleDictVec{ModelSymbol, Symbol}
     "references to parameter values"
     prefs::LittleDictVec{Symbol, Symbol}
-    "A callable (function) evaluating the residual. Argument is a vector of Float64 same lenght as `vinds`"
+    "A callable (function) evaluating the residual. Argument is a vector of Float64 same length as `tsrefs` + `ssrefs`"
     eval_resid::Function  # function evaluating the residual
-    "A callable (function) evaluating the (residual, gradient) pair. Argument is a vector of Float64 same lenght as `vinds`"
+    "A callable (function) evaluating the (residual, gradient) pair. Argument is a vector of Float64 same length as `vinds`"
     eval_RJ::Function     # Function evaluating the residual and its gradient
+    eval_HOD::Function    # Function evaluating higher order derivatives
 end
 
 # 
@@ -105,7 +111,7 @@ Equation(expr::ExtExpr) = Equation("", :_unnamed_equation_, EqnFlags(), expr, Ex
                                     LittleDict{Tuple{ModelSymbol, Int}, Symbol}(),
                                     LittleDict{ModelSymbol, Symbol}(), 
                                     LittleDict{Symbol, Symbol}(),
-                                    eqnnotready, eqnnotready)
+                                    eqnnotready, eqnnotready, nohodeval)
 
 
 function Base.getproperty(eqn::Equation, sym::Symbol)

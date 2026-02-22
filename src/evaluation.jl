@@ -1,216 +1,244 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020-2023, Bank of Canada
+# Copyright (c) 2020-2025, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
 ###########################################################
-# Part 1: Helper functions
+# Part 1: Code generation for residuals and their derivatives
 
-struct ModelBaseEconTag end
+abstract type EquationEvaluator <: Function end
 
-"""
-    precompilefuncs(resid, RJ, resid_param, N::Int)
-
-Pre-compiles the given `resid` and `RJ` functions together
-with the dual-number arithmetic required by ForwardDiff.
-
-!!! warning
-    Internal function. Do not call directly
-
-"""
-function precompilefuncs(resid, RJ, resid_param, N::Int)
-    ccall(:jl_generating_output, Cint, ()) == 1 || return nothing
-
-    tagtype = ModelBaseEconTag
-    dual = ForwardDiff.Dual{tagtype,Float64,N}
-    duals = Vector{dual}
-
-    precompile(resid, (Vector{Float64},)) || error("precompile")
-    precompile(resid, (duals,)) || error("precompile")
-    precompile(RJ, (Vector{Float64},)) || error("precompile")
-
-    # We precompile a version of the "function barrier" for the inital types
-    # of the parameters. This is a good apprixmimation of what will be evaluated
-    # in practice. If a user updates the parameter to a different type, a new version
-    # of the function barrier will have to be compiled but this should be fairly rare in
-    # practice.
-    type_params = typeof.(values(resid.params))
-    if !isempty(type_params)
-        precompile(resid_param, (duals, type_params...)) || error("precompile")
+_update_eqn_params!(ee, params) = error()
+_update_eqn_params!(ee::Nothing, params) = nothing
+_update_eqn_params!(ee::Function, params) = nothing
+function _update_eqn_params!(ee::EquationEvaluator, params)
+    @nospecialize(ee)
+    ee.rev[] == params.rev && return
+    for k in keys(ee.params)
+        ee.params[k] = getproperty(params, k)
     end
-
-    return nothing
+    ee.rev[] = params.rev[]
+    return
+end
+function _update_eqn_params!(eqn::AbstractEquation, params)
+    _update_eqn_params!(eqn.eval_resid, params)
+    _update_eqn_params!(eqn.eval_RJ, params)
+    hasproperty(eqn, :eval_HOD) && _update_eqn_params!(eqn.eval_HOD, params)
 end
 
-# """
-#     funcsyms(mod::Module)
+#------------------------------------------------------------------------------
 
-# Create a pair of identifiers that does not conflict with existing identifiers in
-# the given module.
-
-#. !!! warning
-#     Internal function. Do not call directly.
-
-# ### Implementation (for developers)
-# We need two identifiers `resid_N` and `RJ_N` where "N" is some integer number.
-# The first is going to be the name of the function that evaluates the equation
-# and the second is going to be the name of the function that evaluates both the
-# equation and its gradient.
-# """
-# function funcsyms end
-
-# function funcsyms(mod::Module, eqn_name::Symbol, args...)
-#     iterator = 1
-#     fn1 = Symbol("resid_", eqn_name)
-#     fn2 = Symbol("RJ_", eqn_name)
-#     fn3 = Symbol("resid_param_", eqn_name)
-#     while isdefined(mod, fn1) || isdefined(Main, fn1)
-#         iterator += 1
-#         fn1 = Symbol("resid_", eqn_name, "_", iterator)
-#         fn2 = Symbol("RJ_", eqn_name, "_", iterator)
-#         fn3 = Symbol("resid_param_", eqn_name, "_", iterator)
-#     end
-#     return fn1, fn2, fn3
-# end
-
-function funcsyms(mod, eqn_name::Symbol, expr::Expr, tssyms, sssyms, psyms)
-    eqn_data = (expr, collect(tssyms), collect(sssyms), collect(psyms))
-    myhash = @static UInt == UInt64 ? 0x2270e9673a0822b5 : 0x2ce87a13
-    myhash = Base.hash(eqn_data, myhash)
-    he = mod._hashed_expressions
-    hits = get!(he, myhash, valtype(he)())
-    ind = indexin([eqn_data], hits)[1]
-    if isnothing(ind)
-        push!(hits, eqn_data)
-        ind = 1
+function _unpack_args_expr(x, tssyms, sssyms)
+    ex = Expr(:block)
+    ind = 0
+    for sym in Iterators.flatten((tssyms, sssyms))
+        ind += 1
+        push!(ex.args, :($sym = $x[$ind]))
     end
-    fn1 = Symbol("resid_", eqn_name, "_", ind, "_", myhash)
-    fn2 = Symbol("RJ_", eqn_name, "_", ind, "_", myhash)
-    fn3 = Symbol("resid_param_", eqn_name, "_", ind, "_", myhash)
-    return fn1, fn2, fn3
+    return :(@assert length($x) == $ind; @inbounds $ex)
 end
 
-const MAX_CHUNK_SIZE = 4
-
-# Used to avoid specializing the ForwardDiff functions on
-# every equation.
-struct FunctionWrapper <: Function
-    f::Function
-end
-(f::FunctionWrapper)(x) = f.f(x)
-
-"""
-    makefuncs(expr, tssyms, sssyms, psyms, mod)
-
-Create two functions that evaluate the residual and its gradient for the given
-expression.
-
-!!! warning
-    Internal function. Do not call directly.
-
-### Arguments
-- `expr`: the expression
-- `tssyms`: list of time series variable symbols
-- `sssyms`: list of steady state symbols
-- `psyms`: list of parameter symbols
-
-### Return value
-Return a quote block to be evaluated in the module where the model is being
-defined. The quote block contains definitions of the residual function (as a
-callable `EquationEvaluator` instance) and a second function that evaluates both
-the residual and its gradient (as a callable `EquationGradient` instance).
-"""
-function makefuncs(eqn_name, expr, tssyms, sssyms, psyms, mod)
-    nargs = length(tssyms) + length(sssyms)
-    chunk = min(nargs, MAX_CHUNK_SIZE)
-    fn1, fn2, fn3 = funcsyms(mod, eqn_name, expr, tssyms, sssyms, psyms)
-    if isdefined(mod, fn1) && isdefined(mod, fn2) && isdefined(mod, fn3)
-        return mod.eval(:(($fn1, $fn2, $fn3, $chunk)))
+function _unpack_pars_expr(ee, psyms)
+    ex = Expr(:block)
+    isempty(psyms) && return ex
+    pv = Symbol("#p#")
+    ind = 0
+    for sym in psyms
+        ind += 1
+        push!(ex.args, :($sym = $pv[$ind]))
     end
-    x = gensym("x")
-    has_psyms = !isempty(psyms)
-    # This is the expression that goes inside the body of the "outer" function.
-    # If the equation has no parameters, then we just unpack x and evaluate the expressions
-    # Otherwise, we unpack the parameters (which have unknown types) and pass it
-    # to another function that acts like a function barrier where the types are known.
-    psym_expr = if has_psyms
-        quote
-            ($(psyms...),) = values(ee.params)
-            $fn3($x, $(psyms...))
-        end
-    else
-        quote
-            ($(tssyms...), $(sssyms...),) = $x
-            $expr
-        end
-    end
-    # The expression for the function barrier
-    fn3_expr = if has_psyms
-        quote
-            function $fn3($x, $(psyms...))
-                ($(tssyms...), $(sssyms...),) = $x
-                $expr
-            end
-        end
-    else
-        :(const $fn3 = nothing)
-    end
-    return mod.eval(quote
-        function (ee::EquationEvaluator{$(QuoteNode(fn1))})($x::Vector{<:Real})
-            $psym_expr
-        end
-        const $fn1 = EquationEvaluator{$(QuoteNode(fn1))}(UInt(0),
-            $(@__MODULE__).LittleDict(Symbol[$(QuoteNode.(psyms)...)], fill!(Vector{Any}(undef, $(length(psyms))), nothing)))
-        const $fn2 = EquationGradient($FunctionWrapper($fn1), $nargs, Val($chunk))
-        $fn3_expr
-        ($fn1, $fn2, $fn3, $chunk)
-    end)
+    return Expr(:block,
+        :($pv = $ee.params.vals),
+        :(@assert length($pv) == $ind),
+        :(@inbounds $ex),
+    )
 end
 
-"""
-    initfuncs(mod::Module)
+#------------------------------------------------------------------------------
 
-Initialize the given module before creating functions that evaluate residuals
-and thier gradients.
+
+"""
+    funcsyms(mod, eqn_name::Symbol, expr::Expr, tssyms, sssyms, psyms)
+
+Create a pair of identifiers that does not conflict with existing identifiers in
+the given module.
 
 !!! warning
     Internal function. Do not call directly.
 
 ### Implementation (for developers)
-Declare the necessary types in the module where the model is being defined.
-There are two such types. First is `EquationEvaluator`, which is callable and
-stores a collection of parameters. The call will be defined in
-[`makefuncs`](@ref) and will evaluate the residual. The other type is
-`EquationGradient`, which is also callable and stores the `EquationEvaluator`
-together with a `DiffResult` and a `GradientConfig` used by `ForwardDiff`. Its
-call is defined here and computes the residual and the gradient.
+We need two identifiers `resid_N` and `RJ_N` where "N" is some integer number.
+The first is going to be the name of the function that evaluates the equation
+and the second is going to be the name of the function that evaluates both the
+equation and its gradient.
 """
-function initfuncs(mod::Module)
-    if !isdefined(mod, :EquationEvaluator)
-        mod.eval(quote
-            const _hashed_expressions = Dict{UInt,Vector{Tuple{Expr,Vector{Symbol},Vector{Symbol},Vector{Symbol}}}}()
-            struct EquationEvaluator{FN} <: Function
-                rev::Ref{UInt}
-                params::$(@__MODULE__).LittleDictVec{Symbol,Any}
-            end
-            struct EquationGradient{DR,CFG} <: Function
-                fn1::Function
-                dr::DR
-                cfg::CFG
-            end
-            EquationGradient(fn1::Function, nargs::Int, ::Val{N}) where {N} = EquationGradient(fn1,
-                $(@__MODULE__).DiffResults.DiffResult(zero(Float64), zeros(Float64, nargs)),
-                $(@__MODULE__).ForwardDiff.GradientConfig(fn1, zeros(Float64, nargs), $(@__MODULE__).ForwardDiff.Chunk{N}(), $ModelBaseEconTag()))
-            function (s::EquationGradient)(x::Vector{Float64})
-                $(@__MODULE__).ForwardDiff.gradient!(s.dr, s.fn1, x, s.cfg)
-                return s.dr.value, s.dr.derivs[1]
-            end
-        end)
-    end
-    return nothing
+function funcsyms(eqn_name::Symbol, expr::Expr, tssyms, sssyms, psyms,
+    mod::Module, hash::UInt, prefs::Tuple
+)
+    eqn_data = (expr, collect(tssyms), collect(sssyms), collect(psyms))
+    eqn_hash = hash_eqn_data(eqn_data, mod, hash)
+    return ((Symbol(p, '_', eqn_name, '_', eqn_hash) for p in prefs)...,)
 end
+
+function hash_eqn_data(eqn_data, mod::Module, hash::UInt)
+    # myhash = @static UInt == UInt64 ? 0x2270e9673a0822b5 : 0x2ce87a13
+    eqn_hash = Base.hash(eqn_data, Base.hash(mod, hash))
+    he = invokelatest(getfield, mod, :_hashed_eqn_data)
+    hits = get!(he, eqn_hash, valtype(he)())
+    ind = indexin([eqn_data], hits)[1]
+    if isnothing(ind)
+        push!(hits, eqn_data)
+        ind = length(hits)
+    end
+    return string(repr(eqn_hash), '_', ind)
+end
+
+#------------------------------------------------------------------------------
+
+include("codegen/codecache.jl")
+include("codegen/forwarddiff.jl")
+include("codegen/symbolics.jl")
+
+@generated function _derivs_mod(::Val{codegen}) where codegen
+    return codegen == :forwarddiff ? :(DerivsFD) :
+           codegen == :symbolics ? :(DerivsSym) :
+           :(error("Invalid `codegen` value $(QuoteNode(codegen))"))
+end
+
+function _initfuncs_exprs!(exprs, cmod::Module, codegen::Val)
+    if !isdefined(cmod, :_hashed_eqn_data)
+        push!(exprs, :(
+            const _hashed_eqn_data = Dict{UInt,Vector{Tuple{Expr,Vector{Symbol},Vector{Symbol},Vector{Symbol}}}}()
+        ))
+    end
+    if !isdefined(cmod, :auxvars)
+        push!(exprs, :(const auxvars = ModelVariable[]))
+    end
+    if !isdefined(cmod, :auxeqns)
+        push!(exprs, :(const auxeqns = Equation[]))
+    end
+    return _derivs_mod(codegen)._initfuncs_exprs!(exprs, cmod)
+end
+
+"""
+    initfuncs(CC::CodeCache)
+
+Initialize the code generation engine for creating functions that evaluate residuals
+and their derivatives.
+
+!!! warning
+    Internal function. Do not call directly.
+
+"""
+function initfuncs(CC::CodeCache)
+    _cc_comment(CC, "Initialize ")
+    E = Expr(:block)
+    _initfuncs_exprs!(E.args, CC.cmod, CC.codegen)
+    runandcache_expr(CC, E; striplines=true, unblock=true)
+    _cc_newline(CC)
+end
+initfuncs(mod::Module, codegen::Symbol) = initfuncs(initcc!(CodeCache(), mod, Model(; codegen)))
+
+function makeequation(doc, eqn_name, flags, expr, residual, tsrefs, ssrefs, prefs, aux, extern, CC)
+
+    if CC.codegen == Val(:forwarddiff)
+        for sym in extern
+            Core.eval(CC.cmod, Expr(:import, Expr(:., :., :., sym)))
+        end
+        resid, RJ = DerivsFD.makefuncs(eqn_name, residual, values(tsrefs), values(ssrefs), values(prefs), CC.cmod)
+        tsrefs′ = LittleDict{Tuple{ModelVariable,Int},Symbol}()
+        for ((s1, i), s2) in tsrefs
+            push!(tsrefs′, (ModelVariable(s1), i) => s2)
+        end
+        ssrefs′ = LittleDict{ModelVariable,Symbol}()
+        for (s1, s2) in ssrefs
+            push!(ssrefs′, (ModelVariable(s1) => s2))
+        end
+        return Equation(doc, eqn_name, flags, expr, residual, tsrefs′, ssrefs′, prefs, resid, RJ, nohodeval)
+    else
+
+        E = Expr(:block)
+        # get the definitions from the relevant DerivsXYZ module
+        DMOD = _derivs_mod(CC.codegen)
+        invokelatest(DMOD._makefuncs_exprs!, E.args, eqn_name, residual, values(tsrefs), values(ssrefs), values(prefs), CC.cmod)
+        # extract the names of eval_resid and eval_RJ functions from the last expression pushed by _makefuncs_exprs
+        funcs = pop!(E.args).args
+        resid_nm = funcs[1]
+        RJ_nm = funcs[2]
+        HOD_nm = length(funcs) > 4 ? funcs[5] : :(ModelBaseEcon.nohodeval)
+
+        _cc_comment(CC, " Equation $eqn_name ")
+        runandcache_expr(CC, E)
+
+        # if we're writing to a file, we must write the code that hashes the equation data
+        if !isnothing(CC.cf)
+            runandcache_expr(CC, :(ModelBaseEcon.hash_eqn_data(
+                    ($(Meta.quot(residual)),
+                        [$((Meta.quot(s) for s in values(tsrefs))...)],
+                        [$((Meta.quot(s) for s in values(ssrefs))...)],
+                        [$((Meta.quot(s) for s in values(prefs))...)],
+                    ), $(nameof(CC.cmod)), ModelBaseEcon.$(nameof(DMOD)).myhash)
+                ); striplines=false)
+        end
+        # create the equation instance.
+        tsrefs_keys = []
+        tsrefs_vals = []
+        for ((var, tt), sym) in tsrefs
+            if aux && !isdefined(CC.cmod, var)
+                if !startswith(string(var), "aux")
+                    @error "DEBUG: var=$var is not defined in cmod=$(nameof(CC.cmod)), all names=$(names(CC.cmod, all=true))"
+                end
+                @assert startswith(string(var), "aux")
+                @assert Core.eval(CC.cmod, :($(QuoteNode(var)) ∉ auxvars))
+                runandcache_expr(CC, Expr(:block,
+                    :(const $var = ModelBaseEcon.ModelVariable($(QuoteNode(var)))),
+                    :(push!(auxvars, $var)),
+                ))
+            end
+            push!(tsrefs_keys, :(($var, $tt)))
+            push!(tsrefs_vals, QuoteNode(sym))
+        end
+        ssrefs_keys = []
+        ssrefs_vals = []
+        for (var, sym) in ssrefs
+            if !isdefined(CC.cmod, var)
+                runandcache_expr(CC, :(const $var = ModelBaseEcon.ModelVariable($(QuoteNode(var)))))
+            end
+            push!(ssrefs_keys, :($var))
+            push!(ssrefs_vals, QuoteNode(sym))
+        end
+        E = Expr(:block,
+            :($eqn_name = Equation(
+                $(doc), $(Meta.quot(eqn_name)), $(flags),
+                $(Meta.quot(expr)),
+                $(Meta.quot(residual)),
+                LittleDict{Tuple{ModelVariable,Int},Symbol}(Tuple{ModelVariable,Int}[$(tsrefs_keys...)], Symbol[$(tsrefs_vals...)]),
+                LittleDict{ModelVariable,Symbol}(ModelVariable[$(ssrefs_keys...)], Symbol[$(ssrefs_vals...)]),
+                LittleDict{Symbol,Symbol}(Symbol[$(Iterators.map(QuoteNode, keys(prefs))...)], Symbol[$(Iterators.map(QuoteNode, values(prefs))...)]),
+                $resid_nm, $RJ_nm, $HOD_nm)),
+        )
+        if aux
+            push!(E.args, :(push!(auxeqns, $eqn_name)))
+        end
+        for sym in extern
+            push!(E.args, Expr(:import, Expr(:., :., :., sym)))
+        end
+
+        if length(funcs) > 4
+            push!(E.args, :(export $resid_nm, $RJ_nm, $HOD_nm, $eqn_name))
+        else
+            push!(E.args, :(export $resid_nm, $RJ_nm, $eqn_name))
+        end
+        runandcache_expr(CC, E; striplines=false)
+
+        _cc_newline(CC)
+        return invokelatest(getfield, CC.cmod, eqn_name)
+    end
+end
+
+
 
 ###########################################################
 # Part 2: Evaluation data for models and equations
@@ -252,13 +280,13 @@ function DynEqnEvalData(eqn, model, var_to_ind=get_var_to_idx(model))
     )
 end
 
-eval_resid(eqn::AbstractEquation, x, ed::DynEqnEvalDataN) = eqn.eval_resid(vcat(x, ed.ss))
+eval_resid(eqn::AbstractEquation, x, ed::DynEqnEvalDataN) = invokelatest(eqn.eval_resid, vcat(x, ed.ss))
 @inline function eval_RJ(eqn::AbstractEquation, x, ed::DynEqnEvalDataN)
-    R, J = eqn.eval_RJ(vcat(x, ed.ss))
+    R, J = invokelatest(eqn.eval_RJ, vcat(x, ed.ss))
     return (R, J[1:length(x)])
 end
-eval_resid(eqn::AbstractEquation, x, ::DynEqnEvalData0) = eqn.eval_resid(x)
-eval_RJ(eqn::AbstractEquation, x, ::DynEqnEvalData0) = eqn.eval_RJ(x)
+eval_resid(eqn::AbstractEquation, x, ::DynEqnEvalData0) = invokelatest(eqn.eval_resid, x)
+eval_RJ(eqn::AbstractEquation, x, ::DynEqnEvalData0) = invokelatest(eqn.eval_RJ, x)
 
 
 """
@@ -339,15 +367,6 @@ struct ModelEvaluationData{E<:AbstractEquation,I,D<:DynEqnEvalData} <: AbstractM
     rowinds::Vector{Vector{Int64}}
 end
 
-@inline function _update_eqn_params!(ee, params)
-    if ee.rev[] !== params.rev[]
-        for k in keys(ee.params)
-            ee.params[k] = getproperty(params, k)
-        end
-        ee.rev[] = params.rev[]
-    end
-end
-
 function _make_var_to_idx(allvars)
     # Precompute index lookup for variables
     return LittleDictVec{Symbol,Int}(allvars, 1:length(allvars))
@@ -374,7 +393,7 @@ function ModelEvaluationData(model::AbstractModel)
     M.nzval .= 1:length(II)
     rowinds = [copy(M[i, LI[inds]].nzval) for (i, inds) in enumerate(JJ)]
     # this is the only place where we must pass var_to_idx to DynEqnEvalData explicitly
-    # this is because normally var_to_idx is taken from the ModelEvaluationData, but that's 
+    # this is because normally var_to_idx is taken from the ModelEvaluationData, but that's
     # what's being built here, so it doesn't yet exist in the `model`
     eedata = [DynEqnEvalData(eqn, model, var_to_idx) for eqn in alleqns]
     if model.dynss && !issssolved(model)
@@ -386,7 +405,7 @@ end
 
 function eval_R!(res::AbstractVector{Float64}, point::AbstractMatrix{Float64}, med::ModelEvaluationData)
     for (i, eqn, inds, ed) in zip(1:length(med.alleqns), med.alleqns, med.allinds, med.eedata)
-        _update_eqn_params!(eqn.eval_resid, med.params[])
+        _update_eqn_params!(eqn, med.params[])
         res[i] = eval_resid(eqn, point[inds], ed)
     end
     return nothing
@@ -397,7 +416,7 @@ function eval_RJ(point::Matrix{Float64}, med::ModelEvaluationData)
     res = similar(med.R)
     jac = med.J
     for (i, eqn, inds, ri, ed) in zip(1:neqns, med.alleqns, med.allinds, med.rowinds, med.eedata)
-        _update_eqn_params!(eqn.eval_resid, med.params[])
+        _update_eqn_params!(eqn, med.params[])
         res[i], jac.nzval[ri] = eval_RJ(eqn, point[inds], ed)
     end
     return res, jac
@@ -455,7 +474,7 @@ function SelectiveLinearizationMED(model::AbstractModel)
     eedata = Vector{AbstractEqnEvalData}(undef, length(med.alleqns))
     num_lin = 0
     for (i, (eqn, inds)) in enumerate(zip(med.alleqns, med.allinds))
-        _update_eqn_params!(eqn.eval_resid, model.parameters)
+        _update_eqn_params!(eqn, model.parameters)
         ed = DynEqnEvalData(eqn, model)
         if islin(eqn)
             num_lin += 1
@@ -478,7 +497,7 @@ end
 function eval_R!(res::AbstractVector{Float64}, point::AbstractMatrix{Float64}, slmed::SelectiveLinearizationMED)
     med = slmed.med
     for (i, eqn, inds, eed) in zip(1:length(med.alleqns), med.alleqns, med.allinds, slmed.eedata)
-        islin(eqn) || _update_eqn_params!(eqn.eval_resid, med.params[])
+        islin(eqn) || _update_eqn_params!(eqn, med.params[])
         res[i] = eval_resid(eqn, point[inds], eed)
     end
     return nothing
@@ -490,7 +509,7 @@ function eval_RJ(point::Matrix{Float64}, slmed::SelectiveLinearizationMED)
     res = similar(med.R)
     jac = med.J
     for (i, eqn, inds, ri, eed) in zip(1:neqns, med.alleqns, med.allinds, med.rowinds, slmed.eedata)
-        islin(eqn) || _update_eqn_params!(eqn.eval_resid, med.params[])
+        islin(eqn) || _update_eqn_params!(eqn, med.params[])
         res[i], jac.nzval[ri] = eval_RJ(eqn, point[inds], eed)
     end
     return res, jac
@@ -512,7 +531,7 @@ This function calculates the residuals of the provided equation `eqn` for each t
 # Returns
 - `res::Vector{Float64}`: A vector of residuals for each time point in the range `rng`. Entries for time points where residuals cannot be computed (due to insufficient lags or leads) are filled with `NaN`.
 """
-function eval_equation(model::AbstractModel, eqn::AbstractEquation, sim_data::AbstractMatrix{Float64}, rng::UnitRange{Int64} = 1:size(sim_data,1))
+function eval_equation(model::AbstractModel, eqn::AbstractEquation, sim_data::AbstractMatrix{Float64}, rng::UnitRange{Int64}=1:size(sim_data, 1))
     # Check bounds
     @assert rng[begin] >= 1 && rng[end] <= size(sim_data, 1) "Error: The range specified is out of bounds. Ensure that the range starts from 1 or higher and ends within the size of the data."
 
@@ -534,7 +553,7 @@ function eval_equation(model::AbstractModel, eqn::AbstractEquation, sim_data::Ab
     # Iterate over the specified time range
     for (idx, t) = enumerate(rng)
         # Define the range of data points required for evaluation, including lags and leads
-        rng_sub = t - model.maxlag : t + model.maxlead
+        rng_sub = t-model.maxlag:t+model.maxlead
 
         # Ensure the subrange is within bounds of the data
         if rng_sub[begin] >= 1 && rng_sub[end] <= size(sim_data, 1)

@@ -48,8 +48,11 @@
             0 0 0 0 -0.4 1 0 0 0 -1]
     end
     let
+        import ModelBaseEcon.ss_var_sym
         seq = ss.equations[:_EQ3]
-        inds = indexin([Symbol("#c#lvl#"), Symbol("#c#slp#"), Symbol("#b#lvl#")], seq.vsyms)
+        a, b, c = m.variables
+        ssv = [ss_var_sym(c, :level), ss_var_sym(c, :slope), ss_var_sym(b, :level)]
+        inds = indexin(ssv, seq.vsyms)
         for i = 1:50
             m.β = β = rand()
             m.α = α = rand()
@@ -66,7 +69,7 @@ end
 @testset "dynss2" begin
     m = S2.newmodel()
     # make sure @sstate(x) was transformed
-    @test m.equations[:_EQ1].ssrefs[:x] === Symbol("#log#x#ss#")
+    @test m.equations[:_EQ1].ssrefs[:x] === :log_xˢˢ
 
     xi = ModelBaseEcon.get_var_to_idx(m)[:x]
     for i = 1:10

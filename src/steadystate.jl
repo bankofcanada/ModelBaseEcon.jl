@@ -1,7 +1,7 @@
 ##################################################################################
 # This file is part of ModelBaseEcon.jl
 # BSD 3-Clause License
-# Copyright (c) 2020-2024, Bank of Canada
+# Copyright (c) 2020-2025, Bank of Canada
 # All rights reserved.
 ##################################################################################
 
@@ -45,7 +45,7 @@ struct SteadyStateVariable{DATA<:AbstractVector{Float64},MASK<:AbstractVector{Bo
     index::Int
     # A view in the SteadyStateData.values location for this variable
     data::DATA
-    # A view into the mask array 
+    # A view into the mask array
     mask::MASK
 end
 
@@ -99,7 +99,7 @@ function Base.getindex(v::SteadyStateVariable, t; ref=first(t))
 end
 
 #################################
-# pretty printing 
+# pretty printing
 
 
 # Return a 5-tuple with the number of characters for the name, and the alignment
@@ -298,10 +298,18 @@ Base.getindex(ssd::SteadyStateData, sym::ModelSymbol) = getproperty(ssd, sym.nam
 Base.getindex(ssd::SteadyStateData, sym::Symbol) = getproperty(ssd, sym)
 Base.getindex(ssd::SteadyStateData, sym::AbstractString) = getproperty(ssd, Symbol(sym))
 
-@inline ss_symbol(ssd::SteadyStateData, vi::Int) = Symbol("#", ssd.vars[(1+vi)÷2].name.name, "#", (vi % 2 == 1) ? :lvl : :slp, "#")
+function ss_var_sym(var::ModelVariable, type::Symbol)
+    ty = (type === :level ? "ˡᵛˡ" : "ˢˡᵖ")
+    pref = islog(var) ? "log_" : isneglog(var) ? "logm_" : ""
+    return Symbol(pref, var.name, ty)
+end
+
+function ss_symbol(ssd::SteadyStateData, vi::Int)
+    return ss_var_sym(ssd.vars[(1+vi)÷2].name, vi % 2 == 1 ? :level : :slope)
+end
 
 #########################
-# 
+#
 
 export printsstate
 
@@ -334,14 +342,14 @@ printsstate(model::AbstractModel) = printsstate(Base.stdout, model)
 #   in the steady state equation, we assume that the variable y_ss
 #   follows a linear motion expressed as y_ss[t] = y_ss#lvl + t * y_ss#slp
 #   where y_ss#lvl and y_ss#slp are two unknowns we solve for.
-# 
+#
 #   The dynamic equation has mentions of lags and leads. We replace those
 #   with the above expression.
-# 
+#
 #   Since we have two parameters to determine, we need two steady state equations
 #   from each dynamic equation. We get this by writing the dynamic equation at
 #   two different values of `t` - 0 and another one we call `shift`.
-# 
+#
 #   Shift is a an option in the model object, which the user can set to any integer
 #   other than 0. The default is 10.
 
@@ -420,11 +428,11 @@ dynamic equation using information from the given [`SSEqnData`](@ref).
 """
 function sseqn_resid_RJ(s::SSEqnData)
     function _resid(pt::Vector{<:Real})
-        _update_eqn_params!(s.eqn.eval_resid, s.model[].parameters)
+        _update_eqn_params!(s.eqn, s.model[].parameters)
         return s.eqn.eval_resid(__to_dyn_pt(pt, s))
     end
     function _RJ(pt::Vector{<:Real})
-        _update_eqn_params!(s.eqn.eval_resid, s.model[].parameters)
+        _update_eqn_params!(s.eqn, s.model[].parameters)
         R, jj = s.eqn.eval_RJ(__to_dyn_pt(pt, s))
         return R, __to_ssgrad(pt, jj, s)
     end
@@ -493,7 +501,7 @@ end
 
 
 """
-    setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Module, eqn_key=:_unnamed_equation_, var_to_idx=get_var_to_idx(model))
+    setss!(model::AbstractModel, expr::Expr; type::Symbol, eqn_key=:_unnamed_equation_, var_to_idx=get_var_to_idx(model))
 
 Add a steady state equation to the model. Equations added by `setss!` are in
 addition to the equations generated automatically from the dynamic system.
@@ -503,7 +511,12 @@ addition to the equations generated automatically from the dynamic system.
     directly by users. Use [`@steadystate`](@ref) instead of calling this
     function.
 """
-function setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Module=moduleof(model), eqn_key=:_unnamed_equation_, var_to_idx=get_var_to_idx(model), _source_=LineNumberNode(0))
+function setss!(model::AbstractModel, expr::Expr; type::Symbol,
+    eqn_key=:_unnamed_equation_,
+    var_to_idx=get_var_to_idx(model),
+    _source_,
+    codegen=getoption(model, :codegen, :forwarddiff)
+)
     if eqn_key == :_unnamed_equation_
         eqn_key = get_next_equation_name(model.sstate.constraints, "_SSEQ")
     end
@@ -518,23 +531,16 @@ function setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Mod
 
     local allvars = model.allvars
 
-    ss_var_sym(var) = begin
-        ty = (type === :level ? "lvl" : "slp")
-        islog(var) ? Symbol("#log#", var.name, "#", ty, "#") :
-        isneglog(var) ? Symbol("#logm#", var.name, "#", ty, "#") :
-        Symbol("#", var.name, "#", ty, "#")
-    end
-
     ###############################################
     #     ssprocess(val)
-    # 
+    #
     # Process the given value to extract information about mentioned parameters and variables.
     # This function has the side effect of populating the vectors
     # `vinds`, `vsyms`, `val_params` and `source`
-    # 
+    #
     # Algorithm is recursive over the given expression. The bottom of the recursion is the
     # processing of a `Number`, a `Symbol`, (or a `LineNumberNode`).
-    # 
+    #
     # we will store indices
     local vinds = Int64[]
     local vsyms = Symbol[]
@@ -555,12 +561,12 @@ function setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Mod
             # it's a vriable of some sort: make a symbol and an index for the
             # corresponding steady state unknown
             var = allvars[vind]
-            vsym = ss_var_sym(var)
+            vsym = ss_var_sym(var, type)
             push!(vsyms, vsym)
             push!(vinds, type == :level ? 2vind - 1 : 2vind)
             if need_transform(var)
                 func = inverse_transformation(var)
-                return :($func($vsym))
+                return :($(nameof(func))($vsym))
             else
                 return vsym
             end
@@ -598,32 +604,34 @@ function setss!(model::AbstractModel, expr::Expr; type::Symbol, modelmodule::Mod
     end
     # end of ssprocess() definition
     ###############################################
-    # 
+    #
     lhs, rhs = expr.args
     lhs = ssprocess(lhs)
     rhs = ssprocess(rhs)
     expr.args .= MacroTools.unblock.(expr.args)
-    # 
+    #
     nargs = length(vinds)
     # In case there's no source information, add a dummy one
     push!(source, _source_)
     # create the resid and RJ functions for the new equation
     # To do this, we use `makefuncs` from evaluation.jl
     residual = Expr(:block, source[1], :($(lhs) - $(rhs)))
-    resid, RJ = makefuncs(eqn_key, residual, vsyms, [], unique(val_params), modelmodule)
+    cmod = invokelatest(model._module, Val(codegen))
+    resid, RJ = _derivs_mod(Val(codegen)).makefuncs(eqn_key, residual, vsyms, [], unique(val_params), cmod)
     _update_eqn_params!(resid, model.parameters)
-    # We have all the ingredients to create the instance of SteadyStateEquation
-    for i = 1:2
-        # remove blocks with line numbers from expr.args[i]
-        a = expr.args[i]
-        if Meta.isexpr(a, :block)
-            args = filter(x -> !isa(x, LineNumberNode), a.args)
-            if length(a.args) == 1
-                expr.args[i] = args[1]
-            end
-        end
-    end
-    sscon = SteadyStateEquation(type, eqn_key, vinds, vsyms, expr, resid, RJ)
+    _update_eqn_params!(RJ, model.parameters)
+    # # We have all the ingredients to create the instance of SteadyStateEquation
+    # for i = 1:2
+    #     # remove blocks with line numbers from expr.args[i]
+    #     a = expr.args[i]
+    #     if Meta.isexpr(a, :block)
+    #         args = filter(x -> !isa(x, LineNumberNode), a.args)
+    #         if length(a.args) == 1
+    #             expr.args[i] = args[1]
+    #         end
+    #     end
+    # end
+    sscon = SteadyStateEquation(type, eqn_key, vinds, vsyms, Expr(:block, source[1], expr), resid, RJ)
     if nargs == 1
         # The equation involves only one variable. See if there's already an equation
         # with just that variable and, if so, remove it.
@@ -670,9 +678,8 @@ to help the steady state solver find the one you want to use.
 
 """
 macro steadystate(model, type::Symbol, equation::Expr)
-    thismodule = @__MODULE__
     _source_ = QuoteNode(__source__)
-    return esc(:($(thismodule).setss!($(model), $(Meta.quot(equation)); type=$(QuoteNode(type)), _source_=$(_source_))))
+    return esc(:($(@__MODULE__).setss!($(model), $(Meta.quot(equation)); type=$(QuoteNode(type)), _source_=$(_source_))))
 end
 
 macro steadystate(model, block::Expr)
@@ -681,7 +688,6 @@ macro steadystate(model, block::Expr)
 end
 
 function macro_steadystate_impl(__source__::LineNumberNode, model, block::Expr)
-    thismodule = @__MODULE__
     source_line = __source__
     todo = Expr[]
     if !Meta.isexpr(block, :block)
@@ -694,7 +700,7 @@ function macro_steadystate_impl(__source__::LineNumberNode, model, block::Expr)
         end
         if @capture(expr, @delete tags__)
             tags = collect(Symbol, tags)
-            push!(todo, :($thismodule.delete_sstate_equations!($model, $tags)))
+            push!(todo, :($(@__MODULE__).delete_sstate_equations!($model, $tags)))
             continue
         end
         type = :(:level)
@@ -726,10 +732,10 @@ function macro_steadystate_impl(__source__::LineNumberNode, model, block::Expr)
         end
         eqn_expr = Meta.quot(eqn)
         _source_ = Meta.quot(source_line)
-        push!(todo, :($thismodule.setss!($model, $eqn_expr; type=$type, _source_=$_source_, eqn_key=$tag)))
+        push!(todo, :($(@__MODULE__).setss!($model, $eqn_expr; type=$type, _source_=$_source_, eqn_key=$tag)))
     end
     return quote
-        $thismodule.update_model_state!($model)
+        $(@__MODULE__).update_model_state!($model)
         $(todo...)
     end
 end
@@ -804,8 +810,8 @@ function updatessdata!(model::AbstractModel)
     # update vinds in the equations
     vinds_map = Dict{Symbol,Int}()
     for (i, var) in enumerate(model.allvars)
-        vinds_map[Symbol("#$(var.name)#lvl#")] = 2i - 1
-        vinds_map[Symbol("#$(var.name)#slp#")] = 2i
+        vinds_map[ss_var_sym(var, :level)] = 2i - 1
+        vinds_map[ss_var_sym(var, :slope)] = 2i
     end
     for eqn in values(alleqns(ss))
         for j in 1:length(eqn.vinds)
@@ -849,7 +855,7 @@ issssolved(ss::SteadyStateData) = all(ss.mask)
     assign_sstate!(model; var = value, ...)
 
 Assign a steady state solution from the given collection of name=>value pairs
-into the given model. 
+into the given model.
 
 In each pair, the value can be a number in which case it is assigned as the
 level and the slope is set to 0. The value can also be a `Tuple` or a `Vector`
@@ -909,7 +915,7 @@ export export_sstate
 """
     export_sstate!(container, model)
 
-Fill the given container with the steady state solution stored in the 
+Fill the given container with the steady state solution stored in the
 given model. The value for each variable will be a number, if the variable has
 zero slope, or else a named tuple of the form `(level = NUM, slope=NUM)`.
 """
