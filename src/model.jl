@@ -1723,7 +1723,7 @@ function update_auxvars(data::AbstractArray{Float64,2}, model::Model;
         aux_eqn_count += 1
         for t in (eqn.maxlag+1):(nt-eqn.maxlead)
             idx = [CartesianIndex((t + ti, var_to_idx[var])) for (var, ti) in keys(eqn.tsrefs)]
-            res = eqn.eval_resid(result[idx])
+            res = invokelatest(eqn.eval_resid, result[idx])
             # TODO: what is this logic?
             if res < 1.0
                 result[t, nvarshk+aux_eqn_count] = log(1.0 - res)

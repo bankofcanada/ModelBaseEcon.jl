@@ -73,3 +73,55 @@ using Test
     @test isempty(m1.auxeqns)
 end
 
+@testset "update_auxvars world age" begin
+    # This test guards against a world age regression in update_auxvars.
+    #
+    # The bug: update_auxvars calls eqn.eval_resid(...) directly. After the
+    # codegen refactor, eval_resid is an EquationEvaluatorFD instance whose
+    # callable method is created via Core.eval at model-initialization time.
+    # If update_auxvars was already compiled (first call), it runs under the
+    # old world age and cannot see the eval_resid method of a model that was
+    # initialized later — causing a silent MethodError.
+    # The fix is invokelatest(eqn.eval_resid, ...) in update_auxvars.
+    #
+    # To reproduce: compile update_auxvars by calling it on a first model,
+    # then initialize a second model (advances the world age via Core.eval),
+    # then call update_auxvars on the second model's data.
+
+    make_log_model(modname::Symbol) = let M = Module(modname)
+        @eval M using ModelBaseEcon
+        include_string(M, """
+            const model = Model()
+            model.substitutions = true
+            @variables model begin
+                @log x
+            end
+            @shocks model x_shk
+            @equations model begin
+                log(x[t] / x[t-1]) = 0.0 + x_shk[t]
+            end
+            @initialize model
+            newmodel() = deepcopy(model)
+        """)
+        M
+    end
+
+    check_update_auxvars(m) = let
+        nvarshk = length(m.variables) + length(m.shocks)
+        nt = 1 + m.maxlag + m.maxlead + 3
+        data = fill(1.0, nt, nvarshk)
+        result = ModelBaseEcon.update_auxvars(data, m)
+        @test size(result, 2) == nvarshk + length(m.auxvars)
+    end
+
+    # First model: compiles update_auxvars at the current world age
+    M1 = make_log_model(:AuxWorldAge1)
+    check_update_auxvars(M1.newmodel())
+
+    # Second model: Core.eval in @initialize advances the world age.
+    # Without invokelatest, calling update_auxvars here would throw:
+    #   MethodError: applicable method may be too new
+    M2 = make_log_model(:AuxWorldAge2)
+    check_update_auxvars(M2.newmodel())
+end
+
