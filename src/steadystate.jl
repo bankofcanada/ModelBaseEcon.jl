@@ -616,7 +616,7 @@ function setss!(model::AbstractModel, expr::Expr; type::Symbol,
     # create the resid and RJ functions for the new equation
     # To do this, we use `makefuncs` from evaluation.jl
     residual = Expr(:block, source[1], :($(lhs) - $(rhs)))
-    cmod = model._module(Val(codegen))
+    cmod = invokelatest(model._module, Val(codegen))
     resid, RJ = _derivs_mod(Val(codegen)).makefuncs(eqn_key, residual, vsyms, [], unique(val_params), cmod)
     _update_eqn_params!(resid, model.parameters)
     _update_eqn_params!(RJ, model.parameters)

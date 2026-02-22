@@ -40,10 +40,10 @@ const myhash = @static UInt == UInt64 ? 0xca19b034b699d744 : 0xd2f14686
 
 function _unpack_array_pars_expr(ee, psyms, mod::Module)
     ex = Expr(:block)
-    symmod = isdefined(mod, :_Sym) ? mod._Sym : mod
+    symmod = isdefined(mod, :_Sym) ? invokelatest(getfield, mod, :_Sym) : mod
     for sym in psyms
         if isdefined(symmod, sym)
-            foo = getfield(symmod, sym)
+            foo = invokelatest(getfield, symmod, sym)
             if foo isa Array
                 push!(ex.args, :(@assert axes($sym) == $(axes(foo))))
                 for idx in Iterators.product(axes(foo)...)
@@ -107,7 +107,7 @@ end
 
 
 function make_res_grad_expr(expr, tssyms, sssyms, psyms, mod)
-    symmod = isdefined(mod, :_Sym) ? mod._Sym : mod
+    symmod = isdefined(mod, :_Sym) ? invokelatest(getfield, mod, :_Sym) : mod
     # the residual `expr` comes to us packaged in a block with a source line
     if Meta.isexpr(expr, :block) && (length(expr.args) == 2)
         src, resid = expr.args
@@ -126,7 +126,7 @@ function make_res_grad_expr(expr, tssyms, sssyms, psyms, mod)
     sgrad = map(_simplify, Symbolics.gradient(sresid, svars))   # Symbolics gradient
     jgrad = Symbolics.toexpr.(sgrad)                            # Julia gradient
     # higher order derivatives
-    max_hod_order = isdefined(mod, :max_hod_order) ? mod.max_hod_order : 1
+    max_hod_order = isdefined(mod, :max_hod_order) ? invokelatest(getfield, mod, :max_hod_order) : 1
     # sderivs = [sparsevec(sgrad)]
     # jderivs = SparseVector{<:Any,Int}[SparseVector(length(jgrad), collect(1:length(jgrad)), jgrad)]
     jderivs = derivs_container(Any, max_hod_order, length(svars), :sparse)
@@ -160,7 +160,7 @@ end
 function _makefuncs_exprs!(exprs::Vector, eqn_name, expr, tssyms, sssyms, psyms, mod::Module)
     fn1, fn2, fn3, fn4, fn5, fn6 = funcsyms(eqn_name, expr, tssyms, sssyms, psyms, mod,
         myhash, ("resid", "RJ", "resid_param", "RJ_param", "HOD", "HOD_param"))
-    need_hod = isdefined(mod, :max_hod_order) && mod.max_hod_order > 1
+    need_hod = isdefined(mod, :max_hod_order) && invokelatest(getfield, mod, :max_hod_order) > 1
     if need_hod && all(f -> isdefined(mod, f), [fn1, fn2, fn3, fn4, fn5, fn6])
         return push!(exprs, :(($fn1, $fn2, $fn3, $fn4, $fn5, $fn6)))
     end
@@ -226,7 +226,7 @@ function _makefuncs_exprs!(exprs::Vector, eqn_name, expr, tssyms, sssyms, psyms,
     if !need_hod
         return push!(exprs, :(($fn1, $fn2, $fn3, $fn4)))
     end
-    hod_order = mod.max_hod_order
+    hod_order = invokelatest(getfield, mod, :max_hod_order)
     push!(exprs, :(
         function ($ee::HODEvaluatorSym{$(QuoteNode(fn5))})($x::Vector{<:Real})
             # $(_unpack_args_expr(x, tssyms, sssyms))
@@ -256,7 +256,7 @@ end
 
 
 function makefuncs(eqn_name, expr, tssyms, sssyms, psyms, mod::Module)
-    mod = invokelatest(mod._module, Val(:symbolics))
+    mod = invokelatest(m -> m._module(Val(:symbolics)), mod)
     E = Expr(:block)
     _makefuncs_exprs!(E.args, eqn_name, expr, tssyms, sssyms, psyms, mod)
     return Core.eval(mod, E)

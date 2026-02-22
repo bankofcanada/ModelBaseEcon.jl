@@ -116,7 +116,7 @@ else
 end
 function moduleof(m::M) where {M<:AbstractModel}
     if hasfield(M, :_module) && m._module isa Function
-        return m._module()
+        return invokelatest(m._module)
     end
     # for (_, eqn) in equations(m)
     #     mod = moduleof(eqn)

@@ -52,13 +52,14 @@ function CodeCache(fn::Union{Nothing,AbstractString}, model::AbstractModel, mmod
     codegen = model.options.codegen
     CC.codegen = Val(codegen)
     if hasmethod(model._module, (Val{codegen},))
-        CC.mmod = model._module(Val(:model))
-        CC.cmod = model._module(Val(codegen))
-    elseif isdefined(mmod, :_module) && hasmethod(mmod._module, (Val{codegen},))
+        CC.mmod = invokelatest(model._module, Val(:model))
+        CC.cmod = invokelatest(model._module, Val(codegen))
+    elseif isdefined(mmod, :_module) && hasmethod(invokelatest(getfield, mmod, :_module), (Val{codegen},))
         # allow for a new model in the same module
-        CC.mmod = mmod._module(Val(:model))
-        CC.cmod = mmod._module(Val(codegen))
-        model._module = mmod._module
+        _mfn = invokelatest(getfield, mmod, :_module)
+        CC.mmod = invokelatest(_mfn, Val(:model))
+        CC.cmod = invokelatest(_mfn, Val(codegen))
+        model._module = _mfn
         _initcc(CC, model)  # prepared the existing cmod for use with model
     else
         isnothing(mmod) && error("Module of model must be supplied.")
@@ -101,7 +102,7 @@ function initcc!(CC::CodeCache, mmod::Module, model::AbstractModel)
             Expr(:(=), :(_module(::Val{:model}=Val(:model))), :($(CC.mmod))),
         ))
     end
-    model._module = CC.mmod._module
+    model._module = invokelatest(getfield, CC.mmod, :_module)
 
     # startup a new code generation module
     CC.codegen = Val(codegen)

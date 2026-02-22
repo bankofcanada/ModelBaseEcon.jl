@@ -245,10 +245,12 @@ end
 @testset "AbstractModel" begin
     struct AM <: ModelBaseEcon.AbstractModel end
     m = AM()
-    @test_throws ErrorException ModelBaseEcon.alleqns(m)
-    @test_throws ErrorException ModelBaseEcon.allvars(m)
-    @test_throws ErrorException ModelBaseEcon.nalleqns(m) == 0
-    @test_throws ErrorException ModelBaseEcon.nallvars(m) == 0
+    # Julia 1.12 and beyond throws FieldError for invalid field access while older versions throw ErrorException
+    _FieldAccessError = @static VERSION >= v"1.12" ? FieldError : ErrorException
+    @test_throws _FieldAccessError ModelBaseEcon.alleqns(m)
+    @test_throws _FieldAccessError ModelBaseEcon.allvars(m)
+    @test_throws _FieldAccessError ModelBaseEcon.nalleqns(m) == 0
+    @test_throws _FieldAccessError ModelBaseEcon.nallvars(m) == 0
     @test_throws ErrorException ModelBaseEcon.moduleof(m) == @__MODULE__
 end
 

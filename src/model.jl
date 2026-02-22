@@ -202,7 +202,7 @@ function Base.getproperty(model::Model, name::Symbol)
             return getindex(getfield(model, :auxvars), ind)
         end
     end
-    return getfield(model, name)
+    error("type Model has no property $name")
 end
 
 function Base.propertynames(model::Model, private::Bool=false)
@@ -253,7 +253,7 @@ function Base.setproperty!(model::Model, name::Symbol, val::Any)
             end
             return setindex!(getfield(model, :auxvars), val, ind)
         end
-        setfield!(model, name, val)  # will throw an error since Model doesn't have field `$name`
+        error("type Model has no property $name")
     end
 end
 
@@ -930,7 +930,7 @@ function process_equation end
 function process_equation(model::Model, expr::Union{Expr,String}; modelmodule::Union{Module,Nothing}=nothing, kw...)
     if isnothing(modelmodule)
         (model._module isa Function) || error("Model must be initialized or a `modelmodule` must be given.")
-        modelmodlue = model._module()
+        modelmodlue = invokelatest(model._module)
     end
     process_equation(model, expr, CodeCache(model, modelmodule); kw...)
 end
@@ -1519,7 +1519,7 @@ function initialize!(model::Model, modelmodule::Module;
                 Expr(:(=), :(_module(::Val{:model}=Val(:model))), :(@__MODULE__)),
             ))
         end
-        model._module = modelmodule._module
+        model._module = invokelatest(getfield, modelmodule, :_module)
         Core.include(modelmodule, cachefile)
         cmod = invokelatest(model._module, Val(codegen))
 

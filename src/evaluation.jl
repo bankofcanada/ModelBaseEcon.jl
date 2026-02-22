@@ -85,7 +85,7 @@ end
 function hash_eqn_data(eqn_data, mod::Module, hash::UInt)
     # myhash = @static UInt == UInt64 ? 0x2270e9673a0822b5 : 0x2ce87a13
     eqn_hash = Base.hash(eqn_data, Base.hash(mod, hash))
-    he = mod._hashed_eqn_data
+    he = invokelatest(getfield, mod, :_hashed_eqn_data)
     hits = get!(he, eqn_hash, valtype(he)())
     ind = indexin([eqn_data], hits)[1]
     if isnothing(ind)
@@ -162,7 +162,7 @@ function makeequation(doc, eqn_name, flags, expr, residual, tsrefs, ssrefs, pref
         E = Expr(:block)
         # get the definitions from the relevant DerivsXYZ module
         DMOD = _derivs_mod(CC.codegen)
-        DMOD._makefuncs_exprs!(E.args, eqn_name, residual, values(tsrefs), values(ssrefs), values(prefs), CC.cmod)
+        invokelatest(DMOD._makefuncs_exprs!, E.args, eqn_name, residual, values(tsrefs), values(ssrefs), values(prefs), CC.cmod)
         # extract the names of eval_resid and eval_RJ functions from the last expression pushed by _makefuncs_exprs
         funcs = pop!(E.args).args
         resid_nm = funcs[1]
@@ -187,6 +187,9 @@ function makeequation(doc, eqn_name, flags, expr, residual, tsrefs, ssrefs, pref
         tsrefs_vals = []
         for ((var, tt), sym) in tsrefs
             if aux && !isdefined(CC.cmod, var)
+                if !startswith(string(var), "aux")
+                    @error "DEBUG: var=$var is not defined in cmod=$(nameof(CC.cmod)), all names=$(names(CC.cmod, all=true))"
+                end
                 @assert startswith(string(var), "aux")
                 @assert Core.eval(CC.cmod, :($(QuoteNode(var)) ∉ auxvars))
                 runandcache_expr(CC, Expr(:block,
@@ -231,7 +234,7 @@ function makeequation(doc, eqn_name, flags, expr, residual, tsrefs, ssrefs, pref
         runandcache_expr(CC, E; striplines=false)
 
         _cc_newline(CC)
-        return getfield(CC.cmod, eqn_name)
+        return invokelatest(getfield, CC.cmod, eqn_name)
     end
 end
 
@@ -277,13 +280,13 @@ function DynEqnEvalData(eqn, model, var_to_ind=get_var_to_idx(model))
     )
 end
 
-eval_resid(eqn::AbstractEquation, x, ed::DynEqnEvalDataN) = eqn.eval_resid(vcat(x, ed.ss))
+eval_resid(eqn::AbstractEquation, x, ed::DynEqnEvalDataN) = invokelatest(eqn.eval_resid, vcat(x, ed.ss))
 @inline function eval_RJ(eqn::AbstractEquation, x, ed::DynEqnEvalDataN)
-    R, J = eqn.eval_RJ(vcat(x, ed.ss))
+    R, J = invokelatest(eqn.eval_RJ, vcat(x, ed.ss))
     return (R, J[1:length(x)])
 end
-eval_resid(eqn::AbstractEquation, x, ::DynEqnEvalData0) = eqn.eval_resid(x)
-eval_RJ(eqn::AbstractEquation, x, ::DynEqnEvalData0) = eqn.eval_RJ(x)
+eval_resid(eqn::AbstractEquation, x, ::DynEqnEvalData0) = invokelatest(eqn.eval_resid, x)
+eval_RJ(eqn::AbstractEquation, x, ::DynEqnEvalData0) = invokelatest(eqn.eval_RJ, x)
 
 
 """

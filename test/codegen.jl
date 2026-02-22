@@ -421,13 +421,15 @@ end
             include(fn)
         end
 
-        @test parameters(TestModel.model) == parameters(m)
-        @test variables(TestModel.model) == variables(m)
-        @test shocks(TestModel.model) == shocks(m)
-        @test equations(TestModel.model) == equations(m)
-        @test sstate(TestModel.model).constraints == sstate(m).constraints
+        _TM = invokelatest(getfield, @__MODULE__, :TestModel)
+        _TM_model = invokelatest(getfield, _TM, :model)
+        @test parameters(_TM_model) == parameters(m)
+        @test variables(_TM_model) == variables(m)
+        @test shocks(_TM_model) == shocks(m)
+        @test equations(_TM_model) == equations(m)
+        @test sstate(_TM_model).constraints == sstate(m).constraints
 
-        m2 = TestModel.newmodel()
+        m2 = invokelatest(() -> TestModel.newmodel())
         @test parameters(m2) == parameters(m)
         @test variables(m2) == variables(m)
         @test shocks(m2) == shocks(m)
@@ -437,7 +439,7 @@ end
         @test_throws ArgumentError m2.parameters.d = @alias c
 
         @test export_parameters(m2) == Dict(:a => 0.3, :b => 0.7, :d => [1, 2, 3], :c => sin(2π / 3))
-        @test export_parameters!(Dict{Symbol,Any}(), m2) == export_parameters(TestModel.model.parameters)
+        @test export_parameters!(Dict{Symbol,Any}(), m2) == export_parameters(_TM_model.parameters)
 
         p = deepcopy(parameters(m))
         # link c expects d to be a vector - it'll fail to update with a BoundsError if d is just a number
@@ -656,13 +658,13 @@ end
         α = 0.132434
         new_E1 = E1_noparams.newmodel()
         codegen = new_E1.options.codegen
-        codemod = new_E1._module(codegen)
-        prev_length = length(names(codemod, all=true))
+        codemod = invokelatest(new_E1._module, codegen)
+        prev_length = length(invokelatest(names, codemod; all=true))
         @equations new_E1 begin
             :maineq => y[t] = $α * y[t-1] + $(1 - α) * y[t+1] + y_shk[t]
         end
         @reinitialize(new_E1)
-        new_length = length(names(codemod, all=true))
+        new_length = length(invokelatest(names, codemod; all=true))
         if i == 1
             @test new_length == prev_length + n_new_syms[codegen]
         else
@@ -670,11 +672,11 @@ end
         end
         @test ModelBaseEcon.moduleof(new_E1.equations[:maineq]) === codemod
         # also make sure moduleof didn't add any new symbols to modules
-        @test new_length == length(names(codemod, all=true))
+        @test new_length == length(invokelatest(names, codemod; all=true))
         # make sure moduleof(model) doesn't add any new symbols
-        prev_length = length(names(E1_noparams, all=true))
+        prev_length = length(invokelatest(names, E1_noparams; all=true))
         @test ModelBaseEcon.moduleof(new_E1) === E1_noparams
-        @test prev_length == length(names(E1_noparams, all=true))
+        @test prev_length == length(invokelatest(names, E1_noparams; all=true))
     end
 end
 
@@ -1291,7 +1293,9 @@ m2_for_satellite_tests = nothing
     findequations(m, :cr)
     redirect_stdout(original_stdout)
     close(write_pipe)
-    @test readline(read_pipe) == ":_EQ2 => \e[38;2;29;120;116mrate\e[39m[t] = \e[38;2;244;192;149;1mcr\e[39;22m[1] * \e[38;2;29;120;116mrate\e[39m[t - 1] + ((1 - \e[38;2;244;192;149;1mcr\e[39;22m[1]) * (\e[38;2;244;192;149;1mcr\e[39;22m[2] * \e[38;2;29;120;116mpinf\e[39m[t] + \e[38;2;244;192;149;1mcr\e[39;22m[3] * \e[38;2;29;120;116mygap\e[39m[t]) + \e[38;2;238;46;49mrate_shk\e[39m[t])"
+    # Remove ANSI codes since colored output isn't guaranteed across Julia versions
+    ansi_strip(s) = replace(s, r"\e\[[0-9;]*m" => "")
+    @test ansi_strip(readline(read_pipe)) == ":_EQ2 => rate[t] = cr[1] * rate[t - 1] + ((1 - cr[1]) * (cr[2] * pinf[t] + cr[3] * ygap[t]) + rate_shk[t])"
 
 end
 

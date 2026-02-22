@@ -70,7 +70,7 @@ const MAX_CHUNK_SIZE = 4
 struct FunctionWrapper <: Function
     f::Function
 end
-(f::FunctionWrapper)(x) = f.f(x)
+(f::FunctionWrapper)(x) = invokelatest(f.f, x)
 
 
 struct EquationGradientFD{DR<:DiffResults.DiffResult,CFG<:ForwardDiff.GradientConfig} <: Function
@@ -163,7 +163,7 @@ callable `EquationEvaluator` instance) and a second function that evaluates both
 the residual and its gradient (as a callable `EquationGradient` instance).
 """
 function makefuncs(eqn_name, expr, tssyms, sssyms, psyms, mod)
-    mod = invokelatest(mod._module, Val(:forwarddiff))
+    mod = invokelatest(m -> m._module(Val(:forwarddiff)), mod)
     E = Expr(:block)
     _makefuncs_exprs!(E.args, eqn_name, expr, tssyms, sssyms, psyms, mod)
     return Core.eval(mod, E)
