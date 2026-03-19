@@ -250,7 +250,6 @@ Base.:(==)(a::Symbol, b::ModelVariable) = (@nospecialize; a == b.name)
 # The hash must be the same as the hash of the symbol, so that we can use
 # ModelVariable as index in a Dict with Symbol keys
 Base.hash(v::ModelVariable, h::UInt) = (@nospecialize; hash(v.name, h))
-Base.hash(v::ModelVariable) = (@nospecialize; hash(v.name))
 
 function Base.show(io::IO, v::ModelVariable)
     @nospecialize(v)
