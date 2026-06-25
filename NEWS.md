@@ -52,9 +52,15 @@ behavior is preserved by the new core or guarded by the existing tests:
 - The runtime `Parameters` container and the `@peval` / `@alias` macros. `@alias`
   is subsumed by `@link`. Parameter accessors keep their names.
 
-### `@auxvar`
+### Automatic auxiliary-variable substitution removed
 
-Auxiliary variables are now sugar over an explicit identity equation: writing
-`@auxvar c_log = log(c)` declares `c_log` and adds the equation
-`c_log[t] = log(c[t])`, instead of being expanded behind the scenes during
-differentiation. Existing `@auxvar` usage continues to work.
+The automatic substitution engine (`model.substitutions = true`, `update_auxvars`,
+and the internal `auxvars` / `auxeqns`) is removed. It existed only to make
+equations containing a transform of a non-trivial subexpression — e.g.
+`log(x[t] + x[t-1])` — tractable for the ForwardDiff backend, by rewriting them
+into extra auxiliary variables and identity equations behind the scenes.
+
+The Symbolics-based core differentiates through such expressions directly, so no
+auxiliary substitution is needed: write the equation as-is and it builds and
+evaluates correctly. There is no migration — model definitions are unchanged; the
+extra auxiliary variables/equations simply no longer appear in the built model.
