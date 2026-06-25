@@ -1240,42 +1240,10 @@ end
     @test_logs (:warn, "Model contains different numbers of equations (2) and endogenous variables (3).") @reinitialize m
 end
 
-@include_example E2sat
-m2_for_satellite_tests = E2sat.newmodel()
-@testset "satellite models" begin
-    m1 = E2.newmodel()
-
-    m_satellite = Model()
-
-    @parameters m_satellite begin
-        _parent = E2.model
-        cx = @link _parent.cp
-    end
-    @test m1.cp == [0.5, 0.02]
-    @test m_satellite.cx == [0.5, 0.02]
-
-    m1.cp = [0.6, 0.03]
-    @test m1.cp == [0.6, 0.03]
-
-    m_satellite.parameters._parent = m1.parameters
-    update_links!(m_satellite)
-    @test m_satellite.cx == [0.6, 0.03]
-
-    # m2_for_satellite_tests = E2sat.newmodel()
-    m2_satellite = deepcopy(E2sat.satmodel)
-
-    m2_for_satellite_tests.cp = [0.7, 0.05]
-
-    @test m2_for_satellite_tests.cp == [0.7, 0.05]
-    @test m2_satellite.cz == [0.5, 0.02]
-    @replaceparameterlinks m2_satellite E2sat.model => m2_for_satellite_tests
-    @test m2_satellite.cz == [0.7, 0.05]
-    m2_for_satellite_tests.cp = [0.3, 0.08]
-    update_links!(m2_satellite.parameters)
-    @test m2_satellite.cz == [0.3, 0.08]
-
-end
-m2_for_satellite_tests = nothing
+# NOTE (v0.8.0): the "satellite models" testset was removed. Satellite models and
+# `@replaceparameterlinks` are no longer supported because parameter `@link`s are
+# now resolved eagerly at `@initialize` (the change that enables C export). Runtime-
+# resolved cross-model links are therefore impossible. See NEWS.md for the migration.
 
 @testset "Model find" begin
     m = E3.newmodel()
