@@ -146,10 +146,23 @@ mutable struct ModelDef
     autoexog::Vector{AutoexogPair}
     ss_equations::Vector{SSEquationAST}
     initialized::Bool
+    # Compatibility slot (v0.8.0 alias layer): when the model is initialized
+    # in-place via the legacy `@initialize model` idiom, the frozen compiled
+    # `Model` is cached here so legacy property access (`model.maxlag`,
+    # `model.eqns`, residual evaluation, …) keeps working on the same object.
+    # Typed `Any` because `Model` is defined later (compile.jl). `nothing`
+    # until initialized. Not part of the rewrite's own pipeline, which uses
+    # `initialize_model(def) -> Model` directly.
+    compiled::Any
+    # Compatibility slot for the legacy model-level `flags` holder
+    # (`flags.linear`, …). Typed `Any` because the `ModelFlags` type is
+    # defined later (compat.jl). Travels with the object through `deepcopy`,
+    # unlike an identity-keyed side table. `nothing` until first touched.
+    flags::Any
 end
 ModelDef(name::Symbol=:model) =
     ModelDef(name, VarDecl[], ShockDecl[], ParamDecl[],
-             EquationAST[], AutoexogPair[], SSEquationAST[], false)
+             EquationAST[], AutoexogPair[], SSEquationAST[], false, nothing, nothing)
 
 # ----------------------------------------------------------------------
 # Mutation API used by macros

@@ -6,7 +6,7 @@ using ..Symbolic
 using ..Codegen
 using Symbolics: Symbolics, Num
 
-export Equation, Model, SteadyStateUserEquation
+export Equation, CompiledModel, SteadyStateUserEquation
 export expr_hash, initialize_model, reinitialize_model
 export model_tuple_threshold, DEFAULT_MODEL_TUPLE_THRESHOLD
 export var"@initialize", var"@reinitialize"
@@ -77,21 +77,21 @@ struct SteadyStateUserEquation
     eqn::Equation
 end
 
-struct Model{Eqns<:Union{Tuple, Vector{Equation}}}
+struct CompiledModel{Eqns<:Union{Tuple, Vector{Equation}}}
     name::Symbol
     eqns::Eqns
     param_layout::Vector{Symbolic.ParamRef}
     defs::IR.ModelDef
     ss_eqns::Vector{SteadyStateUserEquation}
 end
-# Backward-compat constructor: pre-G4 callers that built a Model with
+# Backward-compat constructor: pre-G4 callers that built a CompiledModel with
 # four positional args still work; ss_eqns defaults to empty.
-Model(name::Symbol, eqns, param_layout::Vector{Symbolic.ParamRef},
+CompiledModel(name::Symbol, eqns, param_layout::Vector{Symbolic.ParamRef},
       defs::IR.ModelDef) =
-    Model(name, eqns, param_layout, defs, SteadyStateUserEquation[])
+    CompiledModel(name, eqns, param_layout, defs, SteadyStateUserEquation[])
 
-Base.length(m::Model) = length(m.eqns)
-Base.getindex(m::Model, i::Int) = m.eqns[i]
+Base.length(m::CompiledModel) = length(m.eqns)
+Base.getindex(m::CompiledModel, i::Int) = m.eqns[i]
 
 # ----------------------------------------------------------------------
 # Tuple-vs-vector threshold (PLAN_v2 §1.1 / Chunk T)
@@ -174,7 +174,7 @@ function initialize_model(def::IR.ModelDef; max_hod_order::Int = 1)
     end
     ss_eqns = _build_ss_user_equations(def; max_hod_order)
     def.initialized = true
-    return Model(def.name, _pack_eqns(eqs), param_layout, def, ss_eqns)
+    return CompiledModel(def.name, _pack_eqns(eqs), param_layout, def, ss_eqns)
 end
 
 # Build per-SS-equation `Equation`s wrapped in `SteadyStateUserEquation`.
@@ -229,7 +229,7 @@ The third condition is conservative - for v1 we treat any change to vars,
 shocks, or params as invalidating *all* equations. Per-equation dependency
 tracking is a v1.5 refinement.
 """
-function reinitialize_model(prev::Model, def::IR.ModelDef;
+function reinitialize_model(prev::CompiledModel, def::IR.ModelDef;
                             max_hod_order::Int = 1)
     Validate.validate(def)
 
@@ -262,7 +262,7 @@ function reinitialize_model(prev::Model, def::IR.ModelDef;
     end
     ss_eqns = _build_ss_user_equations(def; max_hod_order)
     def.initialized = true
-    return Model(def.name, _pack_eqns(eqs), param_layout, def, ss_eqns), n_rebuilt
+    return CompiledModel(def.name, _pack_eqns(eqs), param_layout, def, ss_eqns), n_rebuilt
 end
 
 # Lightweight signature of vars/shocks/params used to invalidate the cache

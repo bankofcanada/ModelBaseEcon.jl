@@ -29,6 +29,7 @@ include("compile.jl")
 include("linearize.jl")
 include("export_model.jl")
 include("dfm/dfm.jl")
+include("compat.jl")
 
 using .IR
 using .Validate
@@ -36,9 +37,16 @@ using .MetaFuncs
 using .Macros
 using .Symbolic
 using .Codegen
-using .Compile
+# Compile exports `@initialize`/`@reinitialize`; the compat layer shadows
+# them with the caching variants, so import Compile's surface WITHOUT those
+# two macros, then bring in the whole Compat module below.
+using .Compile: Equation, CompiledModel, SteadyStateUserEquation,
+                expr_hash, initialize_model, reinitialize_model,
+                model_tuple_threshold, DEFAULT_MODEL_TUPLE_THRESHOLD,
+                doc, tags
 using .Linearize
 using .Export
+using .Compat
 
 # Re-export the public surface
 export ModelDef
@@ -51,12 +59,22 @@ export is_exogenous, exogenous_names
 export validate, ValidationError, LinkCycleError
 export TimeRef, ParamRef, EquationKernel, build_equation_kernels
 export EquationFunctions, build_equation_functions, build_model_functions
-export Equation, Model, expr_hash, initialize_model, reinitialize_model
+export Equation, CompiledModel, expr_hash, initialize_model, reinitialize_model
 export doc, tags
 export export_model
 export model_tuple_threshold, DEFAULT_MODEL_TUPLE_THRESHOLD
 export var"@initialize", var"@reinitialize"
 export LinEqnEvalData, LinearizationError, linearize_equation, selectively_linearize
+
+# Backward-compatibility layer (v0.8.0 alias surface, compat.jl).
+# `shocks`/`nshocks`/`allvars`/`nallvars`/`isshock` are exported below via
+# the DFM subsystem — the compat layer extends those same generics.
+export Model
+export parameters, variables, equations
+export nvariables, nparameters, nequations, alleqns
+export islog, islin
+export update_links!, moduleof
+export var"@using_example", var"@include_example"
 
 # DFM subsystem (G2). Self-contained above the equation-kernel layer; accessed as
 # `ModelBaseEcon.DFMModels` (matches the legacy access path). We export the
@@ -71,7 +89,7 @@ export MixFreq, NoMixFreq, ismixfreq
 export add_observed!, add_components!, map_loadings!, add_shocks!, initialize_dfm!
 export init_params, init_params!
 export observed, nobserved, states, nstates, varshks, nvarshks
-export shocks, nshocks
+export shocks, nshocks, allvars, nallvars, isshock
 export endog, nendog, exog, nexog, lags, leads, order
 export states_with_lags, nstates_with_lags
 

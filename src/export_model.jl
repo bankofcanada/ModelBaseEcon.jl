@@ -251,7 +251,7 @@ end
 # ----------------------------------------------------------------------
 
 """
-    export_model(model::Compile.Model, name::Symbol, dir::AbstractString;
+    export_model(model::Compile.CompiledModel, name::Symbol, dir::AbstractString;
                  build_fn::Symbol = Symbol("build_", name)) -> String
 
 Write `model` out as a runnable Julia source file at `joinpath(dir, "<name>.jl")`.
@@ -271,7 +271,7 @@ Limitations at v2.1:
 - Array-parameter element documentation (sub-tag granularity) is not
   preserved; the array as a whole is.
 """
-function export_model(model::Compile.Model, name::Symbol, dir::AbstractString;
+function export_model(model::Compile.CompiledModel, name::Symbol, dir::AbstractString;
                       build_fn::Symbol = Symbol(:build_, name))
     _check_name(string(name))
     _check_name(string(build_fn))

@@ -122,9 +122,9 @@ end
 # ----------------------------------------------------------------------
 
 """
-    selectively_linearize(model::Model, x_ss::Vector{Float64}; tol=1e-8) -> Model
+    selectively_linearize(model::CompiledModel, x_ss::Vector{Float64}; tol=1e-8) -> CompiledModel
 
-Return a new `Model` in which every equation flagged `EQ_LIN` has been
+Return a new `CompiledModel` in which every equation flagged `EQ_LIN` has been
 replaced with its linearization around `x_ss`. Non-linearized equations
 are kept by reference (object identity preserved). `x_ss` must have
 length `length(model.defs.vars)`.
@@ -133,7 +133,7 @@ Throws `LinearizationError` on the first `@lin` equation whose residual
 at `x_ss` exceeds `tol` - per REQUIREMENTS.md §11 #3, this is a hard
 failure, not a warning.
 """
-function selectively_linearize(model::Compile.Model,
+function selectively_linearize(model::Compile.CompiledModel,
                                 x_ss::AbstractVector{Float64};
                                 tol::Float64 = 1e-8)
     def = model.defs
@@ -155,7 +155,7 @@ function selectively_linearize(model::Compile.Model,
             push!(new_eqs, eq)
         end
     end
-    return Compile.Model(def.name, Compile._pack_eqns(new_eqs),
+    return Compile.CompiledModel(def.name, Compile._pack_eqns(new_eqs),
                          model.param_layout, def, model.ss_eqns)
 end
 
