@@ -1,8 +1,5 @@
 ##################################################################################
-# This file is part of ModelBaseEcon.jl
-# BSD 3-Clause License
-# Copyright (c) 2020-2025, Bank of Canada
-# All rights reserved.
+# Verbatim port of ModelBaseEcon.jl/src/dfm/utils.jl (BSD 3-Clause, Bank of Canada).
 ##################################################################################
 
 
@@ -43,9 +40,7 @@ _num2sup(n::Integer) = n < 0 ? '⁻' * _num2sup(-n) :
 
 @inline _enumerate_vars(vars) = (; (Symbol(v) => n for (n, v) = enumerate(vars))...)
 
-# _do_wrap(::Nothing, AXES...) = nothing
 _do_wrap(X::AbstractArray, AXES...) = ComponentArray(X, AXES...)
-# _do_wrap(X, AXES...) = error("Unable to wrap $(nameof(typeof(X))) in a ComponentArray")
 
 function _wrap_arrays(bm::DFMBlockOrModel, R, J, point)
     # number of equations (same as number of endogenous variables)
@@ -82,10 +77,9 @@ function _wrap_arrays(bm::DFMBlockOrModel, R, J, point)
 end
 
 @inline ComponentArrays.toval(v::ModelVariable) = ComponentArrays.toval(Symbol(v))
-@inline ComponentArrays.toval(tv::NTuple{N,ModelVariable}) where {N} = ComponentArrays.toval(Symbol[t fot t in tv])
+@inline ComponentArrays.toval(tv::NTuple{N,ModelVariable}) where {N} = ComponentArrays.toval(Symbol[t for t in tv])
 @inline ComponentArrays.toval(av::AbstractArray{<:ModelVariable}) = ComponentArrays.toval(Symbol[a for a in av])
 
 "Check if the reference includes the entire block (`true`) or only some components in it (`false`)"
 isa_BlockRef(x) = x isa _BlockRef
 all_BlockRef(x::NamedList) = all(isa_BlockRef, x.vals)
-

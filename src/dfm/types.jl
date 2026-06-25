@@ -1,90 +1,9 @@
 ##################################################################################
-# This file is part of ModelBaseEcon.jl
-# BSD 3-Clause License
-# Copyright (c) 2020-2025, Bank of Canada
-# All rights reserved.
+# Verbatim port of ModelBaseEcon.jl/src/dfm/DFMModels.jl (BSD 3-Clause, Bank of
+# Canada) — the DFM types, DSL builder API, and state-space accessors. The
+# include() statements for utils/params/evals/constraints/show that the legacy
+# file carried inline live in dfm.jl; everything else from DFMModels.jl is here.
 ##################################################################################
-
-module DFMModels
-
-import ..ModelVariable
-import ..shocks
-import ..nshocks
-import ..allvars
-import ..nallvars
-
-import ..eval_resid
-import ..eval_RJ
-import ..eval_R!
-# import ..eval_RJ!
-
-import ..to_shock
-import ..isshock
-
-import ..AbstractModel
-
-using LinearAlgebra
-using OrderedCollections
-using ComponentArrays
-using SparseArrays
-# using FillArrays
-
-####################################################
-
-const LittleDictVec{K,V} = LittleDict{K,V,Vector{K},Vector{V}}
-const NamedList{V} = LittleDictVec{Symbol,V}
-
-const Sym = Union{AbstractString,Symbol,ModelVariable}
-const LikeVec{T} = Union{Vector{T},NTuple{N,T} where {N},NamedTuple{NT,NTuple{N,T} where {N}} where {NT}}
-const SymVec = LikeVec{<:Sym}
-
-const DiagonalF64 = Diagonal{Float64,Vector{Float64}}
-const SymmetricF64 = Symmetric{Float64,Matrix{Float64}}
-
-####################################################
-
-"""
-A Dynamic Factor Model (DFM) with n blocks is a state-space model with
-the following structure:
-
-```
-    x[t] = μ + Λ₁ F₁[t] + ⋯ + Λₙ Fₙ[t] + η[t]
-    F₁[t] = A₁₁ F₁[t-1] + ⋯ + A₁ₚ₁ F₁[t-p₁] + u₁[t]
-    . . .
-    Fₙ[t] = Aₙ₁ Fₙ[t-1] + ⋯ + Aₙₚₙ Fₙ[t-pₙ] + uₙ[t]
-```
-
-where
-  * `x[t]` is a vector of observed variables
-  * `μ` is a vector of unconditional means
-  * `Fᵢ[t]` is the i-th block a factors, which follow an VAR process of order `pᵢ`
-  * `η[t]` is a block of observation shocks
-  * `uᵢ[t]` is a vector of state shocks associated with the i-th block of factors
-  * `Aᵢⱼ` is the VAR coefficients matrix for the i-th block of factors for its
-    j-th lag
-  * `Λᵢ` is the loadings matrix for the i-th block of factors. It has non-zero
-    rows only for the observed variables that load the i-th factor block.
-
-Notes
-  * Some of the factor blocks may be "dense" and some may be "diagonal". The dense
-    factor blocks represent common components, while the diagonal ones represent
-    idiosyncratic components.
-  * An observed variable must either load an idiosyncratic component from one
-    diagonal factor block, or it must have an observation shock, but not both.
-
-[`DFMModel`](@ref) represents the model. It contains an observation block and a
-collection of components blocks.
-
-[`DFMBlock`](@ref) is an abstract type representing a block of equations in a
-[`DFMModel`](@ref).
-
-[`DFMObsBlock`](@ref) `<: DFMBlock` represents a block of observation equations.
-
-[`ComponentsBlock`](@ref)`<: DFMBlock` represents a block of latent
-components.
-
-"""
-DFMModels
 
 ####################################################
 
@@ -188,16 +107,6 @@ function mf_coefs end
 Base.@propagate_inbounds mf_coefs(::Type{NoMixFreq}, i=:) = @inbounds (1,)[i]
 Base.@propagate_inbounds mf_coefs(::Type{MixFreq{:MQ}}, i=:) = (1, 2, 3, 2, 1)[i]
 
-# """
-#     MixFreq(mf, blk)
-
-# Convenience wrapper that re-constructs the given block as a mixed-frequency block.
-# The given block must be a `NoMixFreq` block.
-# """
-# function MixFreq(WHICH::Symbol, blk::ComponentsBlock{TYPE,NoMixFreq}) where {TYPE}
-#     MF = MixFreq{WHICH}
-#     ComponentsBlock{TYPE,MF}(blk.vars, blk.shks, blk.size, blk.order, max(blk.nlags, mf_ncoefs(MF)))
-# end
 export MixFreq, NoMixFreq
 
 """
@@ -343,7 +252,7 @@ comp_ref(b::CommonComponents) = _BlockRef(b.vars)
 # ... or add a component to the reference list
 comp_ref(b::CommonComponents, comp::Sym) = comp_ref(_CompRef(b.vars), Val(Symbol(comp)))
 
-# ?? is this needed? 
+# ?? is this needed?
 # method to convert any reference to a reference to the entire block
 comp_ref(::_BlockComponentRef{ALL,N,NAMES}) where {ALL,N,NAMES} = _BlockRef(NAMES)
 
@@ -428,12 +337,6 @@ ObservedBlock(var::Sym, vars::Sym...) = ObservedBlock([var, vars...])
 ObservedBlock(vars::SymVec) = add_observed_vars!(ObservedBlock(), vars)
 ObservedBlock(MF::Type{<:MixedFrequency}, var::Sym, vars::Sym...) = ObservedBlock(MF, [var, vars...])
 ObservedBlock(MF::Type{<:MixedFrequency}, vars::SymVec) = add_observed_vars!(ObservedBlock(MF), vars)
-
-
-# function MixFreq(WHICH::Symbol, blk::ObservedBlock{NoMixFreq})
-#     MF = MixFreq{WHICH}
-#     ObservedBlock{MF}((getfield(blk, fn) for fn in fieldnames(typeof(blk)))...,)
-# end
 
 mf_coefs(::ObservedBlock{MF}) where {MF} = mf_coefs(MF)
 mf_ncoefs(::ObservedBlock{MF}) where {MF} = mf_ncoefs(MF)
@@ -522,8 +425,10 @@ _comp_exog(crefs) = unique!(mapreduce(vars_comp_refs, append!, values(crefs), in
 exog(b::ObservedBlock) = mapfoldl(_comp_exog, append!, values(b.comp2vars), init=ModelVariable[])
 nexog(b::ObservedBlock) = sum(length ∘ _comp_exog, values(b.comp2vars))
 
-# @inline allvars(bm::DFMBlockOrModel) = varshks(bm)
-# @inline nallvars(bm::DFMBlockOrModel) = nvarshks(bm)
+# allvars/nallvars are imported-but-dead for DFM in legacy (the model-level
+# definitions are commented out); the documented intent is varshks/nvarshks.
+@inline allvars(bm::DFMBlockOrModel) = varshks(bm)
+@inline nallvars(bm::DFMBlockOrModel) = nvarshks(bm)
 
 endog(m::DFMModel) = [observed(m); states(m)]
 nendog(m::DFMModel) = nobserved(m) + nstates(m)
@@ -532,28 +437,6 @@ nendog(m::DFMModel) = nobserved(m) + nstates(m)
 
 ## ##########################################################################
 #    user interface to setup the dfm model
-
-#  Create an empty DFM model
-#       m = DFMModel(<name>)
-#  Add factors -- common and idiosyncratic components
-#       add_components!(m,
-#           F = CommonComponents("F", 2, 1),
-#           ic = IdiosyncraticComponents()
-#       )
-#  Add observed variables and map them to which components they load
-#       map_loadings!(m
-#           [:a, :b] => :F,
-#           :a => :ic
-#       )
-#  In this example the model has two observed variables.
-#  Both variables load the common factor F (two factors, VAR(1))
-#  Only :a has an idiosyncratic component, so :b needs an observation shock.
-#  Add shocks
-#       add_shocks!(m, :b)
-#  This will add a shock :b_shk associated with the observation equation for :b.
-#  Syntax :b => :b_shock_name can be used to customize the shock's name.
-#  When the model is fully defined, call initialize
-#       initialize_dfm!(m)
 
 """
 Add observed variable and observed blocks to a DFM model.
@@ -746,10 +629,10 @@ function _add_var2comp_ref(observed::NamedList{ObservedBlock}, vars::SymVec, blk
             not_done[i] || continue
             sv = Symbol(var)
             if obnm == sv
-                # name of block - apply to entire observed block 
+                # name of block - apply to entire observed block
                 _add_var2comp_ref(oblk, blk_name, blk, comp...)
             elseif haskey(v2c, var) || haskey(v2s, var)
-                # name of observed variable in oblk 
+                # name of observed variable in oblk
                 _add_var2comp_ref(v2c, sv, blk_name, blk, comp...)
             else
                 # name not found in block
@@ -771,8 +654,6 @@ end
 
 
 function map_loadings!(m::DFMModel, args::Pair...)
-    # obs = m.observed
-    # ocomps = obs.components
     mcomps = m.components
     mobs = m.observed
     for (vars, comp_names) in args
@@ -835,8 +716,6 @@ end
 # methods that allow multiple arguments, yet they are processed one at a time
 add_shocks!(b::Union{DFMModel,ObservedBlock}, args...) = _add_shocks_loop!(b, args)
 add_shocks!(b::Union{DFMModel,ObservedBlock}, args::SymVec) = _add_shocks_loop!(b, args)
-# add_shocks!(b::Union{DFMModel,ObservedBlock}, args::AbstractVector) = _add_shocks_loop!(b, args)
-
 
 ##### methods that add a shock directly to an ObservedBlock
 
@@ -861,10 +740,10 @@ function add_shocks!(b::ObservedBlock, varshk::Pair{<:Sym,<:Sym})
     return b
 end
 
-##### methods that add a shock to a model, that is, we have to find the relevant ObservedBlock 
+##### methods that add a shock to a model, that is, we have to find the relevant ObservedBlock
 
 # method where only the variable name is given and its shock name is made up by default
-function add_shocks!(m::DFMModel, var::Sym) 
+function add_shocks!(m::DFMModel, var::Sym)
     obs = m.observed
     svar = Symbol(var)
     if haskey(obs, svar)
@@ -874,7 +753,7 @@ function add_shocks!(m::DFMModel, var::Sym)
     end
 end
 
-# method where no variables are given, therefore we add shocks to all observed variable 
+# method where no variables are given, therefore we add shocks to all observed variable
 # in all observed blocks.
 add_shocks!(m::DFMModel) = (foreach(add_shocks!, values(m.observed)); m)
 
@@ -1013,8 +892,6 @@ function check_dfm(m::DFMModel)
                 nic = has_shk + sum(Base.Fix2(in, ic_names), keys(oblk.var2comps[var]))
                 if nic == 0
                     error("Variable `$var` in block `$onm` has neither a shock nor an idiosyncratic component.")
-                    # elseif nic > 1
-                    #     @warn("Variable `$var` in block `$onm` has more than one shock or idiosyncratic components.")
                 end
             end
         end
@@ -1058,85 +935,4 @@ end
 export initialize_dfm!
 
 ################################################################################
-
-include("utils.jl")
-include("params.jl")
-include("evals.jl")
-
-################################################################################
-
-export DFM
-mutable struct DFM{T} <: AbstractModel
-    model::DFMModel
-    params::DFMParams{T}
-end
-DFM(name::Sym=:dfm, T::Type{<:Real}=Float64) = DFM{T}(DFMModel(name), DFMParams{T}())
-
-@inline ismixfreq(dfm::DFM) = ismixfreq(dfm.model)
-
-eval_resid(point::AbstractMatrix, dfm::DFM) = eval_resid(point, dfm.model, dfm.params)
-eval_RJ(point::AbstractMatrix, dfm::DFM) = eval_RJ(point, dfm.model, dfm.params)
-eval_R!(R::AbstractVector, point::AbstractMatrix, dfm::DFM) = eval_R!(R, point, dfm.model, dfm.params)
-eval_RJ!(R::AbstractVector, J::AbstractMatrix, point::AbstractMatrix, dfm::DFM) = eval_RJ!(R, J, point, dfm.model, dfm.params)
-add_components!(dfm::DFM, args...; kwargs...) = (add_components!(dfm.model, args...; kwargs...); dfm)
-map_loadings!(dfm::DFM, args...) = (map_loadings!(dfm.model, args...); dfm)
-add_shocks!(dfm::DFM, args...) = (add_shocks!(dfm.model, args...); dfm)
-add_observed!(dfm::DFM, args...; kwargs...) = (add_observed!(dfm.model, args...; kwargs...); dfm)
-initialize_dfm!(dfm::DFM, args...; kwargs...) = (initialize_dfm!(dfm.model, args...; kwargs...); dfm.params = init_params(dfm.model); dfm)
-
-lags(dfm::DFM) = lags(dfm.model)
-leads(dfm::DFM) = leads(dfm.model)
-
-get_covariance(dfm::DFM) = get_covariance(dfm.model, dfm.params)
-function get_covariance(dfm::DFM, B::Sym)
-    model = dfm.model
-    if haskey(model.observed, B)
-        return get_covariance(model.observed[B], getproperty(dfm.params, B))
-    else
-        return get_covariance(model.components[B], getproperty(dfm.params, B))
-    end
-end
-
-get_covariance(dfm::DFM, V::Val) = get_covariance(dfm.model, dfm.params, V)
-set_covariance!(dfm::DFM, COV::AbstractMatrix, V::Val) = set_covariance!(dfm.params, dfm.model, COV, V)
-
-for f in (:observed, :states, :shocks, :endog, :exog, :varshks, :allvars)
-    nf = Symbol("n", f)
-    @eval begin
-        $f(dfm::DFM) = $f(dfm.model)
-        $nf(dfm::DFM) = $nf(dfm.model)
-    end
-end
-
-nstates_with_lags(m::DFM) = nstates_with_lags(m.model)
-nstates_with_lags(m::DFMModel) = sum(nstates_with_lags, values(m.components), init=0)
-nstates_with_lags((n, b)::Pair{Symbol,<:DFMBlock}) = nstates_with_lags(b)
-nstates_with_lags(::ObservedBlock) = 0
-nstates_with_lags(b::ComponentsBlock) = nstates(b) * lags(b)
-
-states_with_lags(m::DFM) = states_with_lags(m.model)
-states_with_lags(m::DFMModel) = mapfoldl(states_with_lags, append!, values(m.components), init=Symbol[])
-states_with_lags((n, b)::Pair{Symbol,<:DFMBlock}) = states_with_lags(b)
-states_with_lags(::ObservedBlock) = Symbol[]
-function states_with_lags(blk::ComponentsBlock)
-    return [_make_lag_name(v, lags(blk) - l) for l = 1:lags(blk) for v in states(blk)]
-end
-
-get_mean(dfm::DFM) = get_mean!(Vector{eltype(dfm.params)}(undef, nobserved(dfm)), dfm)
-get_mean!(x::AbstractVector, dfm::DFM) = get_mean!(x, dfm.model, dfm.params)
-set_mean!(dfm::DFM, mu::AbstractVector) = set_mean!(dfm.params, dfm.model, mu)
-
-get_loading(dfm::DFM) = get_loading(dfm.model, dfm.params)
-get_loading!(x::AbstractMatrix, dfm::DFM) = get_loading!(x, dfm.model, dfm.params)
-set_loading!(dfm::DFM, x::AbstractMatrix) = set_loading!(dfm.params, dfm.model, x)
-
-get_transition(dfm::DFM) = get_transition(dfm.model, dfm.params)
-get_transition!(x::AbstractMatrix, dfm::DFM) = get_transition!(x, dfm.model, dfm.params)
-set_transition!(dfm::DFM, T::AbstractMatrix) = set_transition!(dfm.params, dfm.model, T)
-
-export states_with_lags, nstates_with_lags
-
-include("constraints.jl")
-include("show.jl")
-end
 
