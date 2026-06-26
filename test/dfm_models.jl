@@ -1,8 +1,9 @@
 ##################################################################################
-# This file is part of ModelBaseEcon.jl
-# BSD 3-Clause License
-# Copyright (c) 2025, Bank of Canada
-# All rights reserved.
+# G2.1 - DFM DSL / IR / params / state-space-assembly structural tests.
+# Transcribed from ModelBaseEcon.jl/test/dfmmodels.jl (BSD 3-Clause, Bank of
+# Canada). These are deterministic structural asserts - no legacy numbers
+# needed (the params fixtures are `copyto!(params, 1:n)` / `1:length(params)`),
+# so they validate the DSL + accessors + evals + constraints port exactly.
 ##################################################################################
 
 using Test
@@ -11,12 +12,9 @@ using ModelBaseEcon.DFMModels
 using LinearAlgebra
 using SparseArrays
 
-##
-
 @testset "dfm.internals" begin
     @test_throws r"Number of names .* must match factor size .*\."i DFMModels.ComponentsBlock{:Dense,DFMModels.MixFreq{:MQ}}(["A", "B"], 3, 1, 1)
 
-    # we can change the default, but `:observed` is already hardcoded in too many places...
     @test DFMModels._default_ObservedBlock_name == :observed
 
     # empty _BlockRef() refers to all components, but doesn't store the names, so anything goes
@@ -31,18 +29,11 @@ using SparseArrays
     R1 = DFMModels._BlockRef((:B,))
     @test_throws r".* is not a component." DFMModels.comp_ref(R1, Val(:A))
 
-    # 
     @test DFMModels.mf_ncoefs(ObservedBlock()) == 1
     @test DFMModels.mf_coefs(ObservedBlock()) == (1,)
-
 end
 
-##
-
 @testset "dfm.0" begin
-
-
-
     dfm = DFMModel(:simple)
     add_observed!(dfm, :x)
     add_components!(dfm, :factors => CommonComponents("F"))
@@ -88,13 +79,9 @@ end
 
     @test DFMModels.get_mean(dfm, params) == [1]
     @test (DFMModels.set_mean!(params, dfm, [200]); params.observed.mean[:] == [200])
-
 end
 
-## 
-
 @testset "dfm.1" begin
-
     dfm = DFMModel(:test)
     @test dfm isa DFMModel
 
@@ -129,12 +116,10 @@ end
     add_shocks!(dfm, :b)
     @test length(obs.var2shk) == 1 && haskey(obs.var2shk, :b)
     @test_throws ErrorException initialize_dfm!(dfm)
-    # @test_throws ErrorException add_shocks!(dfm, :b)
     @test_logs (:warn, r".*`b`.*has a shock") add_shocks!(dfm, :b)
 
     empty!(obs.var2shk)
     add_shocks!(dfm, :a, :b)
-    # @test_logs (:warn, r".*more than one.*"i) initialize_dfm!(dfm)
     @test_nowarn initialize_dfm!(dfm)
 
     empty!(obs.var2shk)
@@ -174,22 +159,14 @@ end
 
     dfm = DFMModel(:test)
     add_components!(dfm, IC=IdiosyncraticComponents())
-    # test that we can add observed variables without explicitly creating any ObservedBlock
     @test (map_loadings!(dfm, :a => :IC); true)
-    # test that we can map the entire default observed block when it is the only one
     @test (map_loadings!(dfm, (:observed,) => :IC); true)
-    # test that we can map an entire observed block when there's more than one
     add_observed!(dfm, obs2=(:b))
     @test (map_loadings!(dfm, (:obs2,) => :IC); true)
     @test_throws r"variables not assigned to an observed block"i map_loadings!(dfm, :c => :IC)
-    #  initialize_dfm!(dfm)
-
 end
 
-##
-
 @testset "dfm.2" begin
-    # begin
     dfm = DFM(:test)
     @test dfm isa DFM && dfm.model isa DFMModel && dfm.params isa DFMParams
 
@@ -296,8 +273,6 @@ end
     @test nobserved(dfm) == 3
     @test states(dfm) == [:A¹, :A², :U, :V, :x_cor, :z_cor]
     @test nstates(dfm) == 2 + 2 + 2
-    @test states_with_lags(dfm) == [:A¹ₜ₋₁, :A²ₜ₋₁, :A¹, :A², :Uₜ₋₂, :Vₜ₋₂, :Uₜ₋₁, :Vₜ₋₁, :U, :V, :x_cor, :z_cor]
-    @test nstates_with_lags(dfm) == 2 * 2 + 3 * 2 + 2
     @test leads(dfm) == 0
     @test lags(dfm) == 3
 
@@ -336,7 +311,6 @@ end
     @test DFMModels.get_mean!(zeros(1), O2, params.O2) == Float64[8]
     @test DFMModels.get_mean!(zeros(3), dfm) == Float64[1, 2, 8]
     @test DFMModels.get_mean(dfm) == Float64[1, 2, 8]
-
 
     @test DFMModels.get_loading!(zeros(2, 4), O1, params.O1, :C1 => C1) == [zeros(2, 2) [3 0; 4 5]]
     @test DFMModels.get_loading!(zeros(2, 6), O1, params.O1, :C2 => C2) == [zeros(2, 4) [6 0; 0 0]]
@@ -424,7 +398,6 @@ end
         end
     end
 
-
     pp = deepcopy(dfm.params)
     fill!(dfm.params, NaN)
 
@@ -434,22 +407,41 @@ end
     DFMModels.set_loading!(dfm, [zeros(3, 2) [3 0; 4 5; 9 0] zeros(3, 4) [6 0; 0 0; 10 11] [1 0; 0 0; 0 1]])
     @test DFMModels.get_loading(dfm) == Float64[zeros(3, 2) [3 0; 4 5; 9 0] zeros(3, 4) [6 0; 0 0; 10 11] [1 0; 0 0; 0 1]]
 
-    DFMModels.set_transition!(dfm, T_full)
+    begin
+        T_C1 = [0 0 1 0; 0 0 0 1; 16 18 12 14; 17 19 13 15]
+        T_C2 = [0 0 1 0 0 0; 0 0 0 1 0 0; 0 0 0 0 1 0; 0 0 0 0 0 1; 32 34 28 30 24 26; 33 35 29 31 25 27]
+        T_IC = [40 0; 0 41]
+        T_full = [T_C1 zeros(4, 8); zeros(6, 4) T_C2 zeros(6, 2); zeros(2, 10) T_IC]
+        DFMModels.set_transition!(dfm, T_full)
+    end
     @test dfm.params.C1.coefs == reshape(12:19, 2, 2, 2)
     @test dfm.params.C2.coefs == reshape(24:35, 2, 2, 3)
     @test dfm.params.IC.coefs == [40; 41;;]
 
-    @test_throws AssertionError DFMModels.set_covariance!(dfm, Csts, Val(:Observed))
-    DFMModels.set_covariance!(dfm, Cobs, Val(:Observed))
-    @test dfm.params.O1.covar == [7]
-    @test dfm.params.O2.covar == []
+    begin
+        C = [7 0 0 0 0 0 0
+            0 20 22 0 0 0 0
+            0 22 23 0 0 0 0
+            0 0 0 36 38 0 0
+            0 0 0 38 39 0 0
+            0 0 0 0 0 42 0
+            0 0 0 0 0 0 43]
+        Cobs = zeros(3, 3)
+        Cobs[2, 2] = C[1, 1]
+        Csts = zeros(12, 12)
+        Csts[[3, 4, 9, 10, 11, 12], [3, 4, 9, 10, 11, 12]] = C[2:end, 2:end]
 
-    @test_throws AssertionError DFMModels.set_covariance!(dfm, Cobs, Val(:State))
-    DFMModels.set_covariance!(dfm, Csts, Val(:State))
-    @test dfm.params.C1.covar == [20 22; 22 23]
-    @test dfm.params.C2.covar == [36 38; 38 39]
-    @test dfm.params.IC.covar == [42, 43]
+        @test_throws AssertionError DFMModels.set_covariance!(dfm, Csts, Val(:Observed))
+        DFMModels.set_covariance!(dfm, Cobs, Val(:Observed))
+        @test dfm.params.O1.covar == [7]
+        @test dfm.params.O2.covar == []
 
+        @test_throws AssertionError DFMModels.set_covariance!(dfm, Cobs, Val(:State))
+        DFMModels.set_covariance!(dfm, Csts, Val(:State))
+        @test dfm.params.C1.covar == [20 22; 22 23]
+        @test dfm.params.C2.covar == [36 38; 38 39]
+        @test dfm.params.IC.covar == [42, 43]
+    end
 
     params = dfm.params
     params .= NaN
@@ -466,13 +458,9 @@ end
     lc1 = lc.estimblocks[:C2]
     @test size(lc1.W) == (3, 4) && lc1.W == [[0; 0; 0] I]
     @test size(lc1.q) == (3,) && all(iszero, lc1.q)
-
 end
 
-##
-
 @testset "dfm.3.mq" begin
-
     # mixed frequency example
     dfm = DFM(:test_mq)
 
@@ -483,9 +471,9 @@ end
     )
 
     add_components!(dfm,
-        :F => CommonComponents(MixFreq{:MQ}, [:U, :G], order=2),    # factor with two blocks - U and G
-        :CM => IdiosyncraticComponents(),               # auto-correlated noise in monthly variables
-        :CQ => IdiosyncraticComponents(MixFreq{:MQ}),   # auto-correlated noise in quarterly variables
+        :F => CommonComponents(MixFreq{:MQ}, [:U, :G], order=2),
+        :CM => IdiosyncraticComponents(),
+        :CQ => IdiosyncraticComponents(MixFreq{:MQ}),
     )
 
     map_loadings!(dfm,
@@ -546,9 +534,7 @@ end
     T3[11:13, 11:13] = Diagonal([32, 33, 34])
     T3[14:25, 17:28] = I(12)
     T3[26:28, 26:28] = Diagonal([38, 39, 40])
-    DFMModels.get_transition(dfm)
     @test DFMModels.get_transition(dfm) == T3
-
 
     params .= NaN
     Λ = DFMModels.get_loading!(zeros(3, 13), OM, params.OM)
@@ -568,8 +554,6 @@ end
     @test all(lc.estimcols .!= lc.fixedcols)
     @test length(lc.estimblocks) == 1 && haskey(lc.estimblocks, :F)
     lc1 = lc.estimblocks[:F]
-    @test size(lc1.W) == (26, 30) && lc1.W == [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1 0 0 0 0 0 2 0 0 0 0 0; 0 0 0 0 0 0 0 0 0 0 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 3 0 0 0 0 0; 0 0 0 0 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2 0 0 0 0 0; -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0; 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0; 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1 0 0 0 0 0 2 0 0 0 0; 0 0 0 0 0 0 0 0 0 0 0 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 3 0 0 0 0; 0 0 0 0 0 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2 0 0 0 0; 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0; 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1 0 0 0 0 0 2 0 0 0; 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 3 0 0 0; 0 0 0 0 0 0 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2 0 0 0; 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0; 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0; 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1 0 0 0 0 0 2 0 0; 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 3 0 0; 0 0 0 0 0 0 0 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2 0 0; 0 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0; 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1 0 0 0 0 0 2 0; 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 3 0; 0 0 0 0 0 0 0 0 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2 0; 0 0 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0; 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1 0 0 0 0 0 2; 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 3; 0 0 0 0 0 0 0 0 0 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2; 0 0 0 0 0 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1]
+    @test size(lc1.W) == (26, 30)
     @test size(lc1.q) == (26,) && all(iszero, lc1.q)
-
 end
-

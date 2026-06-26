@@ -331,24 +331,34 @@ export var"@initialize", var"@reinitialize"
     @initialize model
 
 Freeze `model` (a `ModelDef`) into a `CompiledModel`, cache it on
-`model.compiled`, and return `model`. Supports both the legacy in-place
-statement form (`@initialize model`) and the binding form
-(`m = @initialize m`) — the return value is the same `ModelDef` (A1, the
-v0.8.0 lifecycle decision).
+`model.compiled`, and return the `CompiledModel`.
+
+Both idioms keep working:
+- legacy in-place `@initialize model` then `model.maxlag`/`model.eqns` — the
+  cached compiled model is reached through the `ModelDef` property shim;
+- `cm = @initialize model` — `cm` is the `CompiledModel` directly.
+
+Either way the returned object carries the full legacy property surface
+(A1, the v0.8.0 lifecycle decision: ModelDef caches its compiled model).
 """
 macro initialize(def)
     return esc(quote
         local _d = $def
         _d.compiled = $(Compile.initialize_model)(_d)
-        _d
     end)
 end
 
 """
     @reinitialize model
+    @reinitialize prev model
 
-Rebuild `model.compiled` after `model` was edited, reusing RGFs for
-unchanged equations. Returns `model`.
+One-argument legacy form: rebuild `model.compiled` after `model` was
+edited (reusing RGFs for unchanged equations) and return the new
+`CompiledModel`.
+
+Two-argument RW form: `@reinitialize prev def` rebuilds `def` against the
+previous compiled model `prev` and returns the `(CompiledModel, n_rebuilt)`
+tuple (the RW-native semantics the parity suite asserts).
 """
 macro reinitialize(def)
     return esc(quote
@@ -359,8 +369,11 @@ macro reinitialize(def)
         else
             _d.compiled = first($(Compile.reinitialize_model)(_prev, _d))
         end
-        _d
     end)
+end
+
+macro reinitialize(prev, def)
+    return esc(:($(Compile.reinitialize_model)($prev, $def)))
 end
 
 # ----------------------------------------------------------------------
