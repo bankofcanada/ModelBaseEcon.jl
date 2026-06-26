@@ -37,7 +37,7 @@ using Test
         @shocks m begin
             e
         end
-        # accessors (A2)
+        # accessors
         @test nvariables(m) == 2
         @test nshocks(m) == 1
         @test nparameters(m) == 2
@@ -45,7 +45,7 @@ using Test
         @test [s.name for s in shocks(m)] == [:e]
         @test length(allvars(m)) == 3
         @test nallvars(m) == 3
-        # predicates (A3)
+        # predicates
         @test islin(m, :x)
         @test islog(m, :k)
         @test !islog(m, :x)
@@ -119,7 +119,7 @@ using Test
     end
 
     # ------------------------------------------------------------------
-    # selectively_linearize (legacy "lin"/"sel_lin", via A6).
+    # selectively_linearize.
     # ------------------------------------------------------------------
     @testset "selectively_linearize" begin
         m = Model(:lin)
@@ -191,7 +191,7 @@ using Test
     end
 
     # ------------------------------------------------------------------
-    # @auxvar drop is permanent (legacy "AUX"/auxsubs → drop-enforcement).
+    # @auxvar drop is permanent (legacy "AUX"/auxsubs -> drop-enforcement).
     # See decision_auxvar_never_existed: the auto aux-substitution engine is
     # removed; the Symbolics core differentiates subexpressions directly.
     # ------------------------------------------------------------------

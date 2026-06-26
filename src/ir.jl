@@ -31,8 +31,7 @@ same thing - a data column in `e_full`, read by equations, never solved
 for. They are stored in the single `ModelDef.shocks` list so the solver,
 symbolic core, and validator need no exogenous-specific code path. The
 `exogenous` flag preserves the source-level distinction for
-introspection and `@autoexogenize`. See the `@exogenous` macro and
-PLAN_v2 §8 (Chunk Y).
+introspection and `@autoexogenize`. See the `@exogenous` macro.
 """
 struct ShockDecl
     name::Symbol
@@ -47,7 +46,7 @@ A parameter declaration.
 
 - `kind == PARAM_SCALAR`: `value` is a `Float64` (or convertible).
 - `kind == PARAM_ARRAY`:  `value` is a `Vector{Float64}`.
-- `kind == PARAM_LINKED`: `value` is the defining `Expr` (resolved later in Chunk C).
+- `kind == PARAM_LINKED`: `value` is the defining `Expr` (resolved later at compile time).
 """
 struct ParamDecl
     name::Symbol
@@ -101,11 +100,10 @@ struct AutoexogPair
 end
 
 # ----------------------------------------------------------------------
-# Steady-state user equations (v2.1 G4)
+# Steady-state user equations
 #
 # `@steadystate model lhs = rhs` adds an extra equation to the SS system.
-# At v2.1 only `@level` constraints are supported; `@slope` is deferred
-# to v2.2 per REQUIREMENTS_v2.1 §6 q2 LOCK.
+# Only `@level` constraints are supported; `@slope` is not yet implemented.
 #
 # The residual Expr stores the variable references without time
 # indexing (`c`, not `c[t]`) - legacy syntax. The symbolic-kernel build
@@ -117,9 +115,9 @@ end
 
 """
 A user-supplied steady-state equation. `name` is the auto-assigned tag
-(`_SSEQ1`, `_SSEQ2`, …) unless the user supplied one. `residual` is the
+(`_SSEQ1`, `_SSEQ2`, ...) unless the user supplied one. `residual` is the
 already-rewritten `lhs - rhs` `Expr` over un-time-indexed variable
-names. `kind` is `SS_LEVEL` (the only supported kind at v2.1).
+names. `kind` is `SS_LEVEL` (the only currently supported kind).
 """
 struct SSEquationAST
     name::Symbol
@@ -149,13 +147,13 @@ mutable struct ModelDef
     # Compatibility slot (v0.8.0 alias layer): when the model is initialized
     # in-place via the legacy `@initialize model` idiom, the frozen compiled
     # `Model` is cached here so legacy property access (`model.maxlag`,
-    # `model.eqns`, residual evaluation, …) keeps working on the same object.
+    # `model.eqns`, residual evaluation, ...) keeps working on the same object.
     # Typed `Any` because `Model` is defined later (compile.jl). `nothing`
     # until initialized. Not part of the rewrite's own pipeline, which uses
     # `initialize_model(def) -> Model` directly.
     compiled::Any
     # Compatibility slot for the legacy model-level `flags` holder
-    # (`flags.linear`, …). Typed `Any` because the `ModelFlags` type is
+    # (`flags.linear`, ...). Typed `Any` because the `ModelFlags` type is
     # defined later (compat.jl). Travels with the object through `deepcopy`,
     # unlike an identity-keyed side table. `nothing` until first touched.
     flags::Any
@@ -242,7 +240,7 @@ end
     next_ss_eqn_name(model) -> Symbol
 
 Auto-generated tag for the next unnamed `@steadystate` equation:
-`_SSEQ1`, `_SSEQ2`, … picking the lowest free index.
+`_SSEQ1`, `_SSEQ2`, ... picking the lowest free index.
 """
 function next_ss_eqn_name(model::ModelDef)
     used = Set(e.name for e in model.ss_equations)

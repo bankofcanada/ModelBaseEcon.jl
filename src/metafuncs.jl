@@ -13,9 +13,9 @@ module MetaFuncs
 # uses `@d` and `@dlog` heavily (146 call sites); `@lag`/`@lead` round
 # out the set a model author expects alongside them.
 #
-# Scope note (PLAN_v2 "headline first"): the legacy moving-sum/average
-# family (`@movsum`, `@movav`, `@movsumw`, …) is intentionally NOT ported
-# - neither SW07 nor FRBUS_VAR uses it. Add it when a model needs it.
+# The moving-sum/average family (`@movsum`, `@movav`, `@movsumw`, ...) is
+# intentionally NOT ported - neither SW07 nor FRBUS_VAR uses it. Add it
+# when a model needs it.
 # ----------------------------------------------------------------------
 
 using MacroTools: @capture

@@ -13,18 +13,18 @@ The v0.8.0 backward-compatibility layer for the Symbolics-based rewrite.
 The rewrite split the legacy mutable `Model` into two types: `ModelDef`
 (the DSL-stage builder all macros append to) and `CompiledModel` (the
 frozen, solver-facing record produced by `@initialize`). This module
-re-surfaces the *legacy* public API on top of that split so existing BoC
-code — `m = Model()`, mutate, `@initialize m`, then `m.maxlag` /
-`m.sstate` / `parameters(m)` / `islog(m, :v)` — keeps working unchanged.
+re-surfaces the *legacy* public API on top of that split so existing
+code - `m = Model()`, mutate, `@initialize m`, then `m.maxlag` /
+`m.sstate` / `parameters(m)` / `islog(m, :v)` - keeps working unchanged.
 
 Three pieces:
 
-1. `Model(...)` builds a `ModelDef` (legacy public name = the builder, A1).
+1. `Model(...)` builds a `ModelDef` (legacy public name = the builder).
 2. `getproperty(::ModelDef, sym)` forwards the legacy property surface to
    the declarations (pre-`@initialize`) or to the cached `CompiledModel`
    (post-`@initialize`), falling through to `getfield` for the real
    `ModelDef` fields the rewrite's own code uses.
-3. Accessor (A2) / predicate (A3) functions and the `@initialize` /
+3. Accessor / predicate functions and the `@initialize` /
    `@reinitialize` / example-loader macros, in their legacy spellings.
 """
 module Compat
@@ -35,10 +35,10 @@ using ..Linearize
 # The DFM subsystem already owns the generic names `shocks`/`nshocks`/
 # `isshock`/`allvars`/`nallvars` (defined on DFM block/model types). We
 # extend those same generics with equation-model methods so there is one
-# binding per name — no export clash at the top-level module entry.
+# binding per name - no export clash at the top-level module entry.
 import ..DFMModels: shocks, nshocks, isshock, allvars, nallvars
 
-# A1 — the public legacy type name `Model` builds a ModelDef.
+# The public legacy type name `Model` builds a ModelDef.
 # `Model()` / `Model(:name)` is the legacy entry point; the rewrite's own
 # code constructs `ModelDef` directly.
 export Model
@@ -48,12 +48,12 @@ export Model
 Construct an empty model. In the Symbolics rewrite the user-facing model
 object is a `ModelDef` (the DSL-stage builder); `@initialize` freezes it
 into a `CompiledModel`. `Model` is kept as the legacy public spelling of
-the builder constructor (A1).
+the builder constructor.
 """
 Model(name::Symbol = :model) = IR.ModelDef(name)
 
 # ----------------------------------------------------------------------
-# A2 — generic accessors over a ModelDef.
+# Generic accessors over a ModelDef.
 #
 # These mirror the legacy free-function accessors. They read the
 # declaration vectors directly so they work both before and after
@@ -65,15 +65,15 @@ Model(name::Symbol = :model) = IR.ModelDef(name)
 export parameters, variables, equations
 export nvariables, nparameters, nequations, alleqns
 
-"Parameter declarations of the model (A2)."
+"Parameter declarations of the model."
 parameters(m::IR.ModelDef) = m.params
-"Variable declarations of the model (A2)."
+"Variable declarations of the model."
 variables(m::IR.ModelDef) = m.vars
-"Equation ASTs of the model (A2)."
+"Equation ASTs of the model."
 equations(m::IR.ModelDef) = m.equations
-"Shock declarations of the model (A2)."
+"Shock declarations of the model."
 shocks(m::IR.ModelDef) = m.shocks
-"Variables followed by shocks — the full solver column order (A2)."
+"Variables followed by shocks - the full solver column order."
 allvars(m::IR.ModelDef) = vcat(m.vars, m.shocks)
 
 # Legacy `length(model)` / `model[i]` count and index equations. On a
@@ -89,15 +89,15 @@ nshocks(m::IR.ModelDef) = length(m.shocks)
 nparameters(m::IR.ModelDef) = length(m.params)
 nequations(m::IR.ModelDef) = length(m.equations)
 nallvars(m::IR.ModelDef) = length(m.vars) + length(m.shocks)
-"Equation ASTs of the model (legacy `alleqns` spelling, A2)."
+"Equation ASTs of the model (legacy `alleqns` spelling)."
 alleqns(m::IR.ModelDef) = m.equations
 
 # ----------------------------------------------------------------------
-# A3 — predicates over a variable's declared kind.
+# Predicates over a variable's declared kind.
 #
-# The rewrite stores kind as a `VarKind` enum (the improvement, preserve
-# C2); these predicates are the legacy compat surface. They accept either
-# a `VarDecl`/`ShockDecl` directly or a `(model, name)` pair.
+# The rewrite stores kind as a `VarKind` enum; these predicates are the
+# legacy compat surface. They accept either a `VarDecl`/`ShockDecl`
+# directly or a `(model, name)` pair.
 # ----------------------------------------------------------------------
 
 # `isshock` is exported via DFM; we extend that generic here.
@@ -109,17 +109,17 @@ _finddecl(m::IR.ModelDef, name::Symbol) = begin
     error("no variable or shock named $name")
 end
 
-"True iff the variable is a `@log` variable (A3)."
+"True iff the variable is a `@log` variable."
 islog(v::IR.VarDecl) = v.kind === IR.VAR_LOG
 islog(::IR.ShockDecl) = false
 islog(m::IR.ModelDef, name::Symbol) = islog(_finddecl(m, name))
 
-"True iff the variable is linear/normal (not `@log`); legacy predicate (A3)."
+"True iff the variable is linear/normal (not `@log`); legacy predicate."
 islin(v::IR.VarDecl) = v.kind === IR.VAR_NORMAL
 islin(::IR.ShockDecl) = false
 islin(m::IR.ModelDef, name::Symbol) = islin(_finddecl(m, name))
 
-"True iff the name is a shock (A3)."
+"True iff the name is a shock."
 isshock(::IR.VarDecl) = false
 isshock(::IR.ShockDecl) = true
 isshock(m::IR.ModelDef, name::Symbol) = isshock(_finddecl(m, name))
@@ -129,8 +129,8 @@ isshock(m::IR.ModelDef, name::Symbol) = isshock(_finddecl(m, name))
 #
 # Legacy models carry a mutable `flags` object with a `linear` field (and
 # the model exposes `m.linear` directly). The rewrite treats linearity
-# per-equation (`@lin`), so the model-level flag is purely informational —
-# but legacy code and the E1–E7 example models set and read it, so we keep
+# per-equation (`@lin`), so the model-level flag is purely informational -
+# but legacy code and the E1-E7 example models set and read it, so we keep
 # a real mutable holder. `substitutions` (the removed aux-substitution
 # engine) is accepted and ignored.
 # ----------------------------------------------------------------------
@@ -145,7 +145,7 @@ Base.show(io::IO, f::ModelFlags) = print(io, "ModelFlags(linear=", f.linear,
 Base.show(io::IO, ::MIME"text/plain", f::ModelFlags) = show(io, f)
 
 # ----------------------------------------------------------------------
-# A5 — `update_links!` is a documented no-op.
+# `update_links!` is a documented no-op.
 #
 # The eager core resolves @link parameters at `@initialize`, so there is
 # nothing to refresh at runtime. Kept so legacy callers are unbroken.
@@ -155,7 +155,7 @@ export update_links!
     update_links!(m) -> m
 
 No-op in the Symbolics rewrite: `@link` parameters are resolved eagerly at
-`@initialize`, so there is no lazy link table to refresh (A5). Returns `m`.
+`@initialize`, so there is no lazy link table to refresh. Returns `m`.
 """
 update_links!(m) = m
 
@@ -163,13 +163,13 @@ update_links!(m) = m
 # getproperty forwarding shim on ModelDef.
 #
 # Legacy code accesses model properties (`m.variables`, `m.maxlag`,
-# `m.sstate`, …) that are NOT raw fields of `ModelDef`. We forward those
+# `m.sstate`, ...) that are NOT raw fields of `ModelDef`. We forward those
 # names to the accessors (pre-init) or to the cached `CompiledModel`
 # (post-init), and fall through to `getfield` for the real fields the
-# rewrite's own code uses (`m.vars`, `m.equations`, `m.compiled`, …).
+# rewrite's own code uses (`m.vars`, `m.equations`, `m.compiled`, ...).
 # ----------------------------------------------------------------------
 
-# Real ModelDef fields — always served by getfield, never intercepted.
+# Real ModelDef fields - always served by getfield, never intercepted.
 const _MODELDEF_FIELDS = fieldnames(IR.ModelDef)
 
 # Lazily materialize the legacy `flags` holder on the ModelDef's `flags`
@@ -235,7 +235,7 @@ end
 
 # maxlag / maxlead are derivable from the declared equations' time refs even
 # before compile, but the authoritative values come from the compiled model;
-# pre-init we scan the AST for `[t ± k]` offsets.
+# pre-init we scan the AST for `[t +/- k]` offsets.
 function _lagleads(m::IR.ModelDef)
     maxlag = 0
     maxlead = 0
@@ -276,7 +276,7 @@ end
 # ----------------------------------------------------------------------
 # getproperty forwarding on CompiledModel.
 #
-# Legacy code reads `m.eqns`/`m.maxlag`/`m.name`/… off the model. The
+# Legacy code reads `m.eqns`/`m.maxlag`/`m.name`/... off the model. The
 # CompiledModel struct stores `name`/`eqns`/`param_layout`/`defs`/`ss_eqns`
 # as real fields; the remaining legacy names are derived here.
 # ----------------------------------------------------------------------
@@ -318,7 +318,7 @@ function Base.propertynames(m::Compile.CompiledModel, private::Bool = false)
 end
 
 # ----------------------------------------------------------------------
-# Compat @initialize / @reinitialize — cache the compiled model on the def.
+# Compat @initialize / @reinitialize - cache the compiled model on the def.
 #
 # Legacy idiom is `@initialize model` (statement form, model mutated in
 # place) AND `m = @initialize m`. We make both work: the macro builds the
@@ -334,12 +334,12 @@ Freeze `model` (a `ModelDef`) into a `CompiledModel`, cache it on
 `model.compiled`, and return the `CompiledModel`.
 
 Both idioms keep working:
-- legacy in-place `@initialize model` then `model.maxlag`/`model.eqns` — the
+- legacy in-place `@initialize model` then `model.maxlag`/`model.eqns` - the
   cached compiled model is reached through the `ModelDef` property shim;
-- `cm = @initialize model` — `cm` is the `CompiledModel` directly.
+- `cm = @initialize model` - `cm` is the `CompiledModel` directly.
 
 Either way the returned object carries the full legacy property surface
-(A1, the v0.8.0 lifecycle decision: ModelDef caches its compiled model).
+(the lifecycle: a `ModelDef` caches its compiled model).
 """
 macro initialize(def)
     return esc(quote
@@ -378,7 +378,7 @@ end
 
 # ----------------------------------------------------------------------
 # Example-loader macros (ported from the legacy module entry, cf06e17).
-# Used by the surviving E1–E7 testsets to load examples/<name>.jl.
+# Used by the surviving E1-E7 testsets to load examples/<name>.jl.
 # ----------------------------------------------------------------------
 
 export var"@using_example", var"@include_example"
@@ -431,7 +431,7 @@ macro include_example(name, args...)
 end
 
 # ----------------------------------------------------------------------
-# moduleof — legacy introspection helper used by a few surviving testsets.
+# moduleof - legacy introspection helper used by a few surviving testsets.
 # ----------------------------------------------------------------------
 export moduleof
 "Module in which the model's generated code lives (legacy introspection)."

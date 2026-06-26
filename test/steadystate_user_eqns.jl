@@ -33,10 +33,10 @@
         @test m.ss_equations[1].kind === SS_LEVEL
     end
 
-    @testset "@slope deferred to v2.2 (raises)" begin
+    @testset "@slope not yet supported (raises)" begin
         m = ModelDef(:g4_slope)
         @variables m begin; y; end
-        # Macro expansion itself raises (LOCK per REQUIREMENTS_v2.1 §6 q2).
+        # Macro expansion itself raises.
         @test_throws Exception @eval (@steadystate $m @slope y = 1.0)
     end
 
@@ -96,7 +96,7 @@
         @test sseq.name === :_SSEQ1
         @test sseq.kind === SS_LEVEL
         # The Equation's tsrefs are the bare variables, all offset 0
-        # (set by the rewrite `y` → `y[t]`).
+        # (set by the rewrite `y` -> `y[t]`).
         refs = sseq.eqn.tsrefs
         @test all(r -> r.offset == 0, refs)
         @test :y in [r.name for r in refs]

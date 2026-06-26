@@ -36,7 +36,7 @@ Base.showerror(io::IO, e::ValidationError) = print(io, "ValidationError: ", e.ms
 Raised by `link_topology` when the `@link` parameter graph contains a
 cycle. `cycle` is the path of parameter names forming the loop, with the
 entry parameter repeated at the end - e.g. `[:a, :b, :a]` for
-`a = @link b + 1`, `b = @link a - 1` (REQUIREMENTS.md §4.4, PLAN_v2 §5).
+`a = @link b + 1`, `b = @link a - 1`.
 """
 struct LinkCycleError <: Exception
     cycle::Vector{Symbol}
@@ -126,7 +126,7 @@ end
 """
 Return the `Set{Symbol}` of symbols that appear in equations as names
 (not function-position calls), excluding the symbol `t` (the time index).
-Variables and shocks are referenced via `name[t±k]`, so we look inside
+Variables and shocks are referenced via `name[t+/-k]`, so we look inside
 `:ref` expressions.
 """
 function _equation_referenced_names(eq::IR.EquationAST)

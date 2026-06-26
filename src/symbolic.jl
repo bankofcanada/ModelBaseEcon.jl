@@ -47,10 +47,10 @@ Symbolic representation of one equation, ready for codegen.
             *root* parameters (linked params have been substituted away).
 `residual` - `Symbolics.Num` representing F such that F = 0.
 `gradient` - `Vector{Num}` with `length == length(tsrefs)`. ∂F/∂x_i.
-`hessian`  - `Matrix{Num}` (size `n×n`) when `max_hod_order ≥ 2`, else `nothing`.
+`hessian`  - `Matrix{Num}` (size `n x n`) when `max_hod_order >= 2`, else `nothing`.
 `hod`      - `Vector{Array{Num,N}}` for orders 3..max_hod_order, else `nothing`.
             Order N tensor stored as a full Array{Num,N} for now; sparse
-            symmetric storage is a Chunk D refinement (PLAN_v1 §5).
+            symmetric storage is a possible future refinement.
 `flags`    - copied from `EquationAST.flags`.
 `doc`      - copied from `EquationAST.doc`.
 `src`      - copied from `EquationAST.src`.
@@ -81,7 +81,7 @@ end
 For each param in `model.params`, return the Symbolics expression it
 ultimately resolves to. Linked params are substituted to their defining
 expression in topological order, so a chain `c = @link b*2; b = @link a*2`
-gives `c → 4a` (or `4*a` after Symbolics canonicalization).
+gives `c -> 4a` (or `4*a` after Symbolics canonicalization).
 
 Returns `(table::Dict{Symbol,Num}, root_layout::Vector{ParamRef})`:
 
@@ -127,7 +127,7 @@ end
 # ----------------------------------------------------------------------
 
 """
-Walk an equation's residual `Expr`, collecting every `var[t±k]` reference.
+Walk an equation's residual `Expr`, collecting every `var[t+/-k]` reference.
 Returns `Vector{TimeRef}` deduplicated, in (declaration_order, offset_ascending)
 order using `model` as the source of declaration order.
 """
@@ -194,7 +194,7 @@ function _eval_time_offset(idx, src)
 end
 
 # ----------------------------------------------------------------------
-# Expr → Num conversion
+# Expr -> Num conversion
 # ----------------------------------------------------------------------
 
 """
@@ -226,7 +226,7 @@ function _expr_to_num_with_table(ex, table::Dict{Symbol,Any};
             head isa Symbol || error("unexpected indexed expr at $src: $e")
             # Check if `head` resolves to an array binding (e.g. parameter
             # `arr = [1.0, 2.0, 3.0]`). If so, treat as plain integer
-            # indexing into a Vector{Num}; otherwise it's a (var, t±k) ref.
+            # indexing into a Vector{Num}; otherwise it's a (var, t+/-k) ref.
             if haskey(table, head) && table[head] isa Vector
                 idx = e.args[2]
                 idx isa Integer ||
@@ -291,14 +291,14 @@ function _apply_registered(fn::Symbol, args::Vector)
         return Base.div(args[1], args[2])
     elseif fn === :ifelse
         # `Base.ifelse` lifts to a symbolic `ifelse` term on Num args
-        # (Symbolics ≥ 7 dropped the old `Symbolics.IfElse` submodule).
+        # (Symbolics >= 7 dropped the old `Symbolics.IfElse` submodule).
         return ifelse(args[1], args[2], args[3])
     elseif fn === :min
         return min(args...)
     elseif fn === :max
         return max(args...)
     elseif fn === :heaviside
-        # Step function → CTarget-friendly ifelse. Single-arg only.
+        # Step function -> CTarget-friendly ifelse. Single-arg only.
         return ifelse(args[1] >= 0, Num(1.0), Num(0.0))
     elseif fn in (:(==), :(!=), :<, :>, :<=, :>=, :&, :|, :!)
         return getfield(Base, fn)(args...)
@@ -318,7 +318,7 @@ Build all equation kernels for a validated model. Returns
 `Vector{EquationKernel}`, one per equation in `model.equations`, in the
 same order.
 
-`max_hod_order ≥ 2` enables Hessian; `≥ 3` enables higher-order tensors.
+`max_hod_order >= 2` enables Hessian; `>= 3` enables higher-order tensors.
 """
 function build_equation_kernels(model::IR.ModelDef; max_hod_order::Int = 1)
     Validate.validate(model)
@@ -341,7 +341,7 @@ function _build_one_kernel(model, eq, param_table, root_layout, p_syms,
     tsrefs = _collect_tsrefs(model, eq)
     # Per-equation x symbols, named so derivative output is readable.
     x_syms = Num[Symbolics.variable(_tsref_symname(r)) for r in tsrefs]
-    # `@log` variable transform (PLAN_v2 §7 subtask): a VAR_LOG variable's
+    # `@log` variable transform: a VAR_LOG variable's
     # solver unknown `x` *is* the log of the variable. Every appearance of
     # such a variable in an equation therefore sees `exp(x)`. The residual
     # is built against this transformed table; the gradient is still taken
@@ -352,7 +352,7 @@ function _build_one_kernel(model, eq, param_table, root_layout, p_syms,
     for (r, xs) in zip(tsrefs, x_syms)
         tsref_table[r] = r.name in log_var_names ? exp(xs) : xs
     end
-    # Build a flat name→Num table that includes both per-(var,offset)
+    # Build a flat name->Num table that includes both per-(var,offset)
     # entries (handled via tsref_table during walk) and parameter entries.
     name_table = Dict{Symbol, Any}()
     for (name, val) in param_table
@@ -417,7 +417,7 @@ function equation_residual_symbolic(model::IR.ModelDef, eq_index::Int;
 end
 
 # ----------------------------------------------------------------------
-# Steady-state user equations (v2.1 G4)
+# Steady-state user equations
 #
 # An SS equation's residual stores bare variable names (`c`, not `c[t]`).
 # Rewrite them to `name[t]` so the existing dynamic-equation kernel

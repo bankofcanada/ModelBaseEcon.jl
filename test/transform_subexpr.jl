@@ -10,7 +10,7 @@
 #
 # The legacy engine (model.substitutions = true / update_auxvars / auxvars /
 # auxeqns) existed only to make equations containing a transform of a non-trivial
-# subexpression — e.g. log(x[t] + x[t-1]) — tractable for the ForwardDiff backend,
+# subexpression - e.g. log(x[t] + x[t-1]) - tractable for the ForwardDiff backend,
 # by rewriting them into extra auxiliary variables and identity equations. The
 # Symbolics core differentiates through such expressions directly, so the engine
 # is gone. This test pins that behavior: the same equations the legacy auxsubs
@@ -33,7 +33,7 @@
     end
 
     kernels, params = build_equation_kernels(m)
-    # All six equations build directly — none is split into auxiliary equations.
+    # All six equations build directly - none is split into auxiliary equations.
     @test length(kernels) == 6
 
     # The compiled model carries no auxiliary variables/equations: the variable
@@ -41,7 +41,7 @@
     @test length(m.vars) == 2
 
     # The equation log(x[t] + x[t-1]) = 1.01 + log(s[t]) is differentiated through
-    # the (x[t] + x[t-1]) subexpression directly — under the legacy ForwardDiff
+    # the (x[t] + x[t-1]) subexpression directly - under the legacy ForwardDiff
     # backend this required an auxiliary variable. It references x[t-1], x[t] and
     # s[t] (three slots), and the residual/gradient evaluate to finite numbers with
     # a nonzero sensitivity to both x slots (proving the chain rule ran through the

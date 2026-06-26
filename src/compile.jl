@@ -12,7 +12,7 @@ export model_tuple_threshold, DEFAULT_MODEL_TUPLE_THRESHOLD
 export var"@initialize", var"@reinitialize"
 
 # ----------------------------------------------------------------------
-# Equation - the frozen, codegen-ready record (PLAN_v1 §0.1)
+# Equation - the frozen, codegen-ready record
 #
 # Field types are concrete (Function for the RGFs) so all Equation
 # instances share one Julia type. Heterogeneity moves up to Model{Eqns},
@@ -36,7 +36,7 @@ struct Equation
     n_p::Int
     expr_hash::UInt64
     # Symbolic argument vectors for `residual` / kernel tensors. Exposed
-    # so downstream consumers (notably RW-ModelBaseEconC) can call
+    # so downstream consumers (notably ModelBaseEconC) can call
     # `Symbolics.build_function(eq.residual, eq.x_syms, eq.p_syms;
     # target=Symbolics.CTarget())` without having to re-run
     # `Symbolic.build_equation_kernels`.
@@ -54,8 +54,8 @@ end
 # `MODEL_TUPLE_THRESHOLD` and `initialize_model`.
 #
 # Either way `eqns` supports `iterate`/`getindex`, so all of
-# RW-StateSpaceEcon's solver code is shape-agnostic. Note v1's `Equation`
-# already erases its RGF evaluators to `::Function` fields (PLAN_v1 §0.1),
+# StateSpaceEcon's solver code is shape-agnostic. Note `Equation`
+# already erases its RGF evaluators to `::Function` fields,
 # so the per-equation call is a dynamic dispatch regardless of `Eqns` -
 # the `Tuple` form buys loop unrolling, not call-site devirtualization.
 #
@@ -66,7 +66,7 @@ end
 """
 A user-supplied SS equation, post-compile. Wraps the standard
 `Equation` (residual + RGFs + tsrefs) with the SS-equation `name`
-and `kind` so RW-SSE can introspect them when augmenting the
+and `kind` so StateSpaceEcon can introspect them when augmenting the
 SS Newton system.
 
 The wrapped `Equation`'s tsrefs all carry `offset = 0` (SS collapse).
@@ -84,7 +84,7 @@ struct CompiledModel{Eqns<:Union{Tuple, Vector{Equation}}}
     defs::IR.ModelDef
     ss_eqns::Vector{SteadyStateUserEquation}
 end
-# Backward-compat constructor: pre-G4 callers that built a CompiledModel with
+# Backward-compat constructor: callers that built a CompiledModel with
 # four positional args still work; ss_eqns defaults to empty.
 CompiledModel(name::Symbol, eqns, param_layout::Vector{Symbolic.ParamRef},
       defs::IR.ModelDef) =
@@ -94,7 +94,7 @@ Base.length(m::CompiledModel) = length(m.eqns)
 Base.getindex(m::CompiledModel, i::Int) = m.eqns[i]
 
 # ----------------------------------------------------------------------
-# Tuple-vs-vector threshold (PLAN_v2 §1.1 / Chunk T)
+# Tuple-vs-vector threshold
 #
 # Models with `> MODEL_TUPLE_THRESHOLD` equations are built as
 # `Model{Vector{Equation}}`; smaller ones stay `Model{Tuple}`. The
@@ -159,7 +159,7 @@ end
 """
     initialize_model(def::ModelDef; max_hod_order=1) -> Model
 
-Runs validation → symbolic kernels → codegen, returning a frozen `Model`.
+Runs validation -> symbolic kernels -> codegen, returning a frozen `Model`.
 Marks `def.initialized = true`. Subsequent edits to `def` followed by
 `reinitialize_model` will reuse RGFs for unchanged equations.
 """
@@ -225,9 +225,9 @@ Reuse rules:
   AND none of the *symbolic environment* (vars, shocks, params, link table)
   affecting that equation has changed.
 
-The third condition is conservative - for v1 we treat any change to vars,
+The third condition is conservative - we treat any change to vars,
 shocks, or params as invalidating *all* equations. Per-equation dependency
-tracking is a v1.5 refinement.
+tracking is a possible future refinement.
 """
 function reinitialize_model(prev::CompiledModel, def::IR.ModelDef;
                             max_hod_order::Int = 1)
@@ -304,7 +304,7 @@ macro reinitialize(prev, def)
 end
 
 # ----------------------------------------------------------------------
-# Equation metadata accessors (G9)
+# Equation metadata accessors
 # ----------------------------------------------------------------------
 
 """

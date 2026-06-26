@@ -22,7 +22,7 @@ function _min_alloc(f, args...; repeats = 20)
     best
 end
 
-@testset "RW parity" begin
+@testset "parity" begin
 
     @testset "module loads" begin
         @test isdefined(ModelBaseEcon, :ModelBaseEcon)
@@ -208,7 +208,7 @@ end
             a = @link b + 1
             b = @link a + 1
         end
-        # Chunk V: cycles now raise the typed LinkCycleError.
+        # Cycles now raise the typed LinkCycleError.
         @test_throws Validate.LinkCycleError validate(m)
         err = try
             validate(m)
@@ -243,11 +243,11 @@ end
     end
 
     # ------------------------------------------------------------------
-    # Chunk V (v2): @link deep-chain resolution + typed cycle error
+    # @link deep-chain resolution + typed cycle error
     # ------------------------------------------------------------------
 
     @testset "ChunkV: 3-level @link chain resolves to a number" begin
-        # a = b + 1, b = c * 2, c = 3.0  →  b = 6, a = 7.
+        # a = b + 1, b = c * 2, c = 3.0  ->  b = 6, a = 7.
         m = ModelDef()
         @parameters m begin
             a = @link b + 1
@@ -284,7 +284,7 @@ end
         @test !("a" in free) && !("b" in free)
         funcs = build_equation_functions(k)
         # F = y[t] - a*y[t-1], a = (c*2)+1 = 7 at c=3.
-        # tsrefs: y[t-1], y[t]. x = [2.0, 5.0] → F = 5 - 7*2 = -9.
+        # tsrefs: y[t-1], y[t]. x = [2.0, 5.0] -> F = 5 - 7*2 = -9.
         @test funcs.eval_resid([2.0, 5.0], [3.0]) ≈ -9.0 atol = 1e-12
     end
 
@@ -343,7 +343,7 @@ end
     end
 
     # ------------------------------------------------------------------
-    # Chunk C: symbolic kernels
+    # Symbolic kernels
     # ------------------------------------------------------------------
 
     @testset "symbolic: linear equation gradient" begin
@@ -517,7 +517,7 @@ end
     end
 
     # ------------------------------------------------------------------
-    # Chunk D: codegen (RGF emission)
+    # Codegen (RGF emission)
     # ------------------------------------------------------------------
 
     @testset "codegen: residual RGF matches manual evaluation" begin
@@ -653,7 +653,7 @@ end
         end
     end
 
-    @testset "codegen: world-age safe — RGF callable from freshly compiled function" begin
+    @testset "codegen: world-age safe - RGF callable from freshly compiled function" begin
         # Construct an RGF inside this testset, then call it from a function
         # defined here, after construction. If world-age were broken, this
         # would throw MethodError or require invokelatest.
@@ -672,7 +672,7 @@ end
     end
 
     # ------------------------------------------------------------------
-    # Chunk E: Equation API + @initialize / @reinitialize
+    # Equation API + @initialize / @reinitialize
     # ------------------------------------------------------------------
 
     @testset "compile: @initialize freezes a Model" begin
@@ -692,8 +692,8 @@ end
         @test length(compiled) == 1
         @test compiled[1] isa Equation
         # eqns storage is Tuple (small model) or Vector{Equation} (large /
-        # forced via RW_MBE_TUPLE_THRESHOLD) - Chunk T owns the shape
-        # assertions; here we only require it iterates as expected.
+        # forced via RW_MBE_TUPLE_THRESHOLD); here we only require it
+        # iterates as expected.
         @test compiled.eqns isa Union{Tuple, Vector{Equation}}
         @test length(compiled.eqns) == 1
         # `initialized` flag set on the source ModelDef.
@@ -719,7 +719,7 @@ end
             LineNumberNode(99, :b),
         )
         @test expr_hash(e1) == expr_hash(e2)
-        # Different residual → different hash.
+        # Different residual -> different hash.
         e3 = IR.EquationAST(
             :(y[t] - α*y[t-2]),
             Set{IR.EquationFlag}(),
@@ -727,7 +727,7 @@ end
             LineNumberNode(1, :a),
         )
         @test expr_hash(e1) != expr_hash(e3)
-        # Different flags → different hash.
+        # Different flags -> different hash.
         e4 = IR.EquationAST(
             :(y[t] - α*y[t-1]),
             Set{IR.EquationFlag}([IR.EQ_LIN]),
@@ -802,7 +802,7 @@ end
         end
         prev = @initialize m
 
-        # Same equation, but param value changed → env signature differs.
+        # Same equation, but param value changed -> env signature differs.
         m2 = ModelDef(:envchg)
         @parameters m2 begin; α = 0.7; end       # value changed
         @variables m2 begin; y; end
@@ -838,7 +838,7 @@ end
     end
 
     # ------------------------------------------------------------------
-    # Chunk G: selective linearization
+    # Selective linearization
     # ------------------------------------------------------------------
 
     @testset "linearize: identical results for an exactly linear equation" begin
@@ -906,7 +906,7 @@ end
             @lin y[t] = α * y[t-1] + c
         end
         compiled = @initialize m
-        # Wrong SS: real y_ss = 2.0, supply 5.0 → residual = 5 - 0.5*5 - 1 = 1.5
+        # Wrong SS: real y_ss = 2.0, supply 5.0 -> residual = 5 - 0.5*5 - 1 = 1.5
         @test_throws LinearizationError selectively_linearize(compiled, [5.0])
     end
 
@@ -943,7 +943,7 @@ end
         compiled = @initialize m
         # SS residual: y_ss - α*y_ss - c - 0 = 0. Should not throw.
         lin_model = selectively_linearize(compiled, [y_ss])
-        # Off-SS check: F = y - α*y_lag - c - e, linear → exact.
+        # Off-SS check: F = y - α*y_lag - c - e, linear -> exact.
         # tsrefs: y[t-1], y[t], e[t]; param: α, c.
         x = [3.0, 5.0, 0.7]
         p = [0.5, 1.0]
@@ -953,7 +953,7 @@ end
     end
 
     # ------------------------------------------------------------------
-    # Chunk T (v2): Model{Vector{Equation}} for large models
+    # Model{Vector{Equation}} for large models
     # ------------------------------------------------------------------
 
     # Build a synthetic model with `n` equations of the form
@@ -1079,10 +1079,10 @@ end
     end
 
     # ------------------------------------------------------------------
-    # Chunk Y.1 (v2): @lag / @lead / @d / @dlog meta-function expansion
+    # @lag / @lead / @d / @dlog meta-function expansion
     # ------------------------------------------------------------------
 
-    @testset "ChunkY1: metafunc expansion — syntactic forms" begin
+    @testset "metafunc expansion - syntactic forms" begin
         using ModelBaseEcon: MetaFuncs
         ex = MetaFuncs.expand_metafuncs
 
@@ -1169,7 +1169,7 @@ end
     end
 
     # ------------------------------------------------------------------
-    # Chunk Y.2 (v2): @exogenous block + inline @log in @variables
+    # @exogenous block + inline @log in @variables
     # ------------------------------------------------------------------
 
     @testset "ChunkY2: @exogenous registers exogenous shock-list entries" begin
@@ -1232,7 +1232,7 @@ end
     end
 
     # ------------------------------------------------------------------
-    # Chunk Y.3 (v2): @autoshocks
+    # @autoshocks
     # ------------------------------------------------------------------
 
     @testset "ChunkY3: @autoshocks generates one shock per variable" begin
@@ -1342,13 +1342,13 @@ end
 
     include("equation_metadata.jl")
     include("export_model.jl")
-    include("steadystate_user_eqns.jl")  # v2.1 Chunk G4 - @steadystate
-    include("dfm_models.jl")             # v2.1 Chunk G2.1 - DFM DSL/IR/params
+    include("steadystate_user_eqns.jl")  # @steadystate user constraints
+    include("dfm_models.jl")             # DFM DSL / IR / params
 
-    @testset "G10: @auxvar is dropped (REQUIREMENTS §10.1)" begin
-        # Legacy @auxvar / update_auxvars surface is dropped permanently
-        # per REQUIREMENTS.md §10.1. The RW package must not export it, and
-        # using the unqualified macro must fail loudly.
+    @testset "@auxvar is dropped" begin
+        # The legacy @auxvar / update_auxvars surface is dropped permanently.
+        # The package must not export it, and using the unqualified macro
+        # must fail loudly.
         @test !isdefined(ModelBaseEcon, Symbol("@auxvar"))
         @test !isdefined(ModelBaseEcon, :update_auxvars)
         @test !isdefined(ModelBaseEcon, :auxvars)

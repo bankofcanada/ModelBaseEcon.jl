@@ -68,7 +68,7 @@ export LinEqnEvalData, LinearizationError, linearize_equation, selectively_linea
 
 # Backward-compatibility layer (v0.8.0 alias surface, compat.jl).
 # `shocks`/`nshocks`/`allvars`/`nallvars`/`isshock` are exported below via
-# the DFM subsystem — the compat layer extends those same generics.
+# the DFM subsystem - the compat layer extends those same generics.
 export Model
 export parameters, variables, equations
 export nvariables, nparameters, nequations, alleqns
@@ -76,7 +76,7 @@ export islog, islin
 export update_links!, moduleof
 export var"@using_example", var"@include_example"
 
-# DFM subsystem (G2). Self-contained above the equation-kernel layer; accessed as
+# DFM subsystem. Self-contained above the equation-kernel layer; accessed as
 # `ModelBaseEcon.DFMModels` (matches the legacy access path). We export the
 # submodule plus the user-facing DSL surface; the model-internal state-space
 # accessors stay qualified (DFMModels.get_loading etc.) to avoid clashing with
@@ -107,7 +107,7 @@ export states_with_lags, nstates_with_lags
 # upstream deps Symbolics.jl and ModelingToolkit.jl.
 @setup_workload begin
     @compile_workload begin
-        # Subsystem 1: deep @link chain → resolved_link_table → substitute.
+        # Subsystem 1: deep @link chain -> resolved_link_table -> substitute.
         m = ModelDef()
         @parameters m begin
             a = @link b + 1
@@ -148,7 +148,7 @@ export states_with_lags, nstates_with_lags
         funcs.eval_resid(x, p)
         funcs.eval_RJ!(J, x, p)
 
-        # Subsystem 3 (G2): the DFM DSL → build → params → state-space-accessor
+        # Subsystem 3: the DFM DSL -> build -> params -> state-space-accessor
         # paths. These are a wholly separate compile graph from the equation-model
         # kernels above (ComponentArrays-typed params, NamedList block plumbing,
         # get_loading/get_transition/get_covariance). The first DFM the test suite

@@ -9,8 +9,8 @@ export LinearizationError
 
 """
 Hard error raised when a `@lin`-flagged equation has a nonzero residual
-at the supplied steady-state point. Per REQUIREMENTS.md §11 #3 this
-replaces the warn-and-continue behavior of the legacy MBE.
+at the supplied steady-state point. This replaces the warn-and-continue
+behavior of the legacy package.
 """
 struct LinearizationError <: Exception
     eq_index::Int
@@ -130,8 +130,7 @@ are kept by reference (object identity preserved). `x_ss` must have
 length `length(model.defs.vars)`.
 
 Throws `LinearizationError` on the first `@lin` equation whose residual
-at `x_ss` exceeds `tol` - per REQUIREMENTS.md §11 #3, this is a hard
-failure, not a warning.
+at `x_ss` exceeds `tol` - this is a hard failure, not a warning.
 """
 function selectively_linearize(model::Compile.CompiledModel,
                                 x_ss::AbstractVector{Float64};

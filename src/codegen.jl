@@ -13,8 +13,7 @@ export EquationFunctions, build_equation_functions, build_model_functions
 
 """
 Callable evaluators for one equation, all `RuntimeGeneratedFunction`s
-wrapped behind `Function` to keep the field type uniform across equations
-(per PLAN_v1 §0.1).
+wrapped behind `Function` to keep the field type uniform across equations.
 
 - `eval_resid(x, p)` returns the scalar residual `F(x, p)`.
 - `eval_RJ!(J, x, p)` writes the gradient `∇F(x, p)` into the preallocated
@@ -61,13 +60,13 @@ function build_equation_functions(kernel::Symbolic.EquationKernel)
     x_syms = kernel.x_syms
     p_syms = kernel.p_syms
 
-    # Residual: scalar Num → single Expr.
+    # Residual: scalar Num -> single Expr.
     resid_expr = Symbolics.build_function(kernel.residual, x_syms, p_syms;
                                           expression = Val{true})
     eval_resid_rgf = _rgf(resid_expr)
     eval_resid = (x, p) -> eval_resid_rgf(x, p)::Float64
 
-    # Gradient: Vector{Num} → (oop_expr, ip_expr). Use in-place form.
+    # Gradient: Vector{Num} -> (oop_expr, ip_expr). Use in-place form.
     _grad_oop, grad_ip_expr = Symbolics.build_function(
         kernel.gradient, x_syms, p_syms; expression = Val{true})
     eval_grad_rgf = _rgf(grad_ip_expr)

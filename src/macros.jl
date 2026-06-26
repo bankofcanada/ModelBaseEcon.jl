@@ -15,12 +15,12 @@ export var"@variables", var"@logvariables", var"@shocks", var"@parameters",
 # @variables. We walk it linearly, tracking pending docstrings.
 #
 # Patterns we accept inside a decl block:
-#   "doc"; name              → name with doc
-#   name                     → bare name
-#   name = value             → name with value (parameters)
-#   name = @link expr        → linked parameter
-#   name; name; name         → multiple bare names on one line (Expr(:block) of Symbols)
-#   var = shock              → autoexog pair
+#   "doc"; name              -> name with doc
+#   name                     -> bare name
+#   name = value             -> name with value (parameters)
+#   name = @link expr        -> linked parameter
+#   name; name; name         -> multiple bare names on one line (Expr(:block) of Symbols)
+#   var = shock              -> autoexog pair
 # Comments and LineNumberNodes are skipped. Trailing `;` is accommodated by
 # Julia's parser collapsing them to nothing.
 # ----------------------------------------------------------------------
@@ -226,7 +226,7 @@ Classify a `@parameters` RHS. Returns `(:scalar, value_expr)`,
 function _classify_param_rhs(rhs)
     if rhs isa Expr && rhs.head === :macrocall &&
        (rhs.args[1] === Symbol("@link") || rhs.args[1] === GlobalRef(@__MODULE__, Symbol("@link")))
-        # rhs = :(@link expr)  →  args = [Symbol("@link"), LineNumberNode, expr]
+        # rhs = :(@link expr)  ->  args = [Symbol("@link"), LineNumberNode, expr]
         defining = rhs.args[end]
         return (:linked, defining)
     elseif rhs isa Expr && rhs.head === :vect
@@ -301,7 +301,7 @@ end
 # ----------------------------------------------------------------------
 # `@autoshocks model [suffix]` - for every endogenous variable `v`
 # (declared via @variables, i.e. not exogenous, not a shock) create a
-# shock named `Symbol(v, suffix)` and an autoexogenize pair `v => v⟨suffix⟩`.
+# shock named `Symbol(v, suffix)` and an autoexogenize pair `v => v<suffix>`.
 # Default suffix is `_shk`. FRBUS_VAR uses `@autoshocks model _a`.
 #
 # Must run AFTER @variables / @exogenous so the variable list is complete,
@@ -377,7 +377,7 @@ function _take_tag!(tags::Vector{Symbol}, tag_expr)
 end
 
 """
-Strip leading `:tag => …` prefix(es) off `stmt`. Returns
+Strip leading `:tag => ...` prefix(es) off `stmt`. Returns
 `(tags::Vector{Symbol}, inner_stmt)`. Each tag must be a
 `QuoteNode(::Symbol)`; anything else raises.
 
@@ -468,13 +468,13 @@ macro equations(modelvar, blk)
 end
 
 # ----------------------------------------------------------------------
-# @steadystate (v2.1 G4)
+# @steadystate
 # ----------------------------------------------------------------------
-# Surface (legacy `@steadystate`, REQUIREMENTS_v2.1 §3.2):
+# Surface:
 #
 #   @steadystate model lhs = rhs
 #   @steadystate model @level lhs = rhs
-#   @steadystate model @slope lhs = rhs        # → error at v2.1
+#   @steadystate model @slope lhs = rhs        # -> error (not yet supported)
 #   @steadystate model begin
 #       lhs = rhs
 #       @level lhs = rhs
@@ -517,8 +517,8 @@ end
 """
 Peel a leading `@level` / `@slope` qualifier off a single `@steadystate`
 entry. Returns `(kind::IR.SSEquationKind, inner_stmt)`. Default kind is
-`SS_LEVEL`. At v2.1 a `@slope` qualifier raises during macro expansion;
-PLAN_v2.1 §3.2 LOCK defers it to v2.2.
+`SS_LEVEL`. A `@slope` qualifier raises during macro expansion; it is not
+yet supported.
 """
 function _peel_ss_qualifier(stmt)
     if stmt isa Expr && stmt.head === :macrocall
@@ -527,8 +527,7 @@ function _peel_ss_qualifier(stmt)
         if sym === Symbol("@level")
             return IR.SS_LEVEL, stmt.args[end]
         elseif sym === Symbol("@slope")
-            error("@steadystate @slope: deferred to v2.2 per REQUIREMENTS_v2.1 §6 q2; " *
-                  "v2.1 supports @level only")
+            error("@steadystate @slope is not yet supported; @level only")
         end
     end
     return IR.SS_LEVEL, stmt
@@ -560,7 +559,7 @@ macro steadystate(modelvar, ex)
         return :(IR.delete_ss_equations!($(esc(modelvar)),
             $(Expr(:vect, [QuoteNode(n) for n in names]...))))
     end
-    # Block form: `@steadystate model begin … end`
+    # Block form: `@steadystate model begin ... end`
     if ex isa Expr && ex.head === :block
         out = Expr(:block)
         last_src = src
