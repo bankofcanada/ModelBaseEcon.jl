@@ -1,14 +1,10 @@
 ##################################################################################
-# This file is part of ModelBaseEcon.jl
-# BSD 3-Clause License
-# Copyright (c) 2020-2025, Bank of Canada
-# All rights reserved.
+# Verbatim port of ModelBaseEcon.jl/src/dfm/params.jl (BSD 3-Clause, Bank of Canada).
 ##################################################################################
 
 export init_params, init_params!
 
 const DFMParams{T<:Real} = ComponentArray{T}
-# DFMParams(x::DFMParams{T}; kwargs...)::DFMParams{T} where {T} = DFMParams{T}(; x..., kwargs...)
 
 function _make_loading(blk::CommonComponents, crefs::NamedList{_BlockComponentRef}, T::Type{<:Real}=Float64)
     nobserved = length(crefs)
@@ -18,17 +14,10 @@ function _make_loading(blk::CommonComponents, crefs::NamedList{_BlockComponentRe
     return Vector{T}(undef, nnz)
 end
 
-# function _make_loading(blk::IdiosyncraticComponents, vars_comprefs::NamedList{_BlockComponentRef}, T::Type{<:Real}=Float64)
-#     nobserved = length(vars_comprefs)
-#     nobserved == blk.size || throw(DimensionMismatch("Size of idiosyncratic components block ($(blk.size)) does not match number of observed variables ($nobserved)."))
-#     Vector{T}(undef, nobserved)
-# end
-
 @inline init_params(any::DFMBlockOrModel, T::Type{<:Real}=Float64) = init_params!(DFMParams{T}(), any)
 
 function init_params!(p::DFMParams{T}, blk::CommonComponents) where {T<:Real}
     return DFMParams{T}(; p...,
-        # mean = zeros(blk.size)
         coefs=Array{T}(undef, blk.size, blk.size, blk.order),
         covar=Array{T}(undef, nshocks(blk), nshocks(blk))
     )
@@ -37,7 +26,6 @@ end
 function init_params!(p::DFMParams{T}, blk::IdiosyncraticComponents) where {T<:Real}
     # matrices are diagonal, so keep only diagonal in 1d-array
     return DFMParams{T}(; p...,
-        # mean = zeros(blk.size)
         coefs=Array{T}(undef, blk.size, blk.order),
         covar=Array{T}(undef, nshocks(blk))
     )
