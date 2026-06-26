@@ -28,7 +28,7 @@ include("codegen.jl")
 include("compile.jl")
 include("linearize.jl")
 include("export_model.jl")
-include("dfm/dfm.jl")
+include("dfm/DFMModels.jl")
 include("compat.jl")
 
 using .IR
