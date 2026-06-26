@@ -1,6 +1,12 @@
 ##################################################################################
-# DFM{T} wrapper + DFM-level accessors. Split out of the legacy DFMModels.jl tail
-# so it can be included after utils/params/evals (it references DFMParams etc.).
+# This file is part of ModelBaseEcon.jl
+# BSD 3-Clause License
+# Copyright (c) 2020-2025, Bank of Canada
+# All rights reserved.
+##################################################################################
+#
+# DFM{T} wrapper + DFM-level accessors. Split out so it can be included after
+# utils/params/evals (it references DFMParams etc.).
 ##################################################################################
 
 export DFM

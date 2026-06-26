@@ -1,8 +1,12 @@
-# RW parity suite — the Symbolics-rewrite guard tests ported in as-is from
-# RW-ModelBaseEcon (the ≤1e-8 / bit-identical-vs-legacy-reference evidence,
-# the C-ledger guards). Ported mechanically: module RWModelBaseEcon ->
-# ModelBaseEcon, compiled type Model -> CompiledModel. This is the "RW
-# parity" half of the dual-green gate (api_and_tests §5).
+##################################################################################
+# This file is part of ModelBaseEcon.jl
+# BSD 3-Clause License
+# Copyright (c) 2020-2025, Bank of Canada
+# All rights reserved.
+##################################################################################
+
+# Parity suite - the Symbolics-rewrite guard tests (the <=1e-8 /
+# bit-identical-vs-reference numerical evidence).
 using ModelBaseEcon
 using ModelBaseEcon: IR, Validate, Symbolic
 using Symbolics: Symbolics, Num, substitute

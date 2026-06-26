@@ -1,4 +1,11 @@
-@testset "G9: equation doc and tag metadata" begin
+##################################################################################
+# This file is part of ModelBaseEcon.jl
+# BSD 3-Clause License
+# Copyright (c) 2020-2025, Bank of Canada
+# All rights reserved.
+##################################################################################
+
+@testset "equation doc and tag metadata" begin
 
     @testset "docstring attached to equation" begin
         m = ModelDef()

@@ -1,6 +1,13 @@
-# v2.1 Chunk G4 - @steadystate user-supplied SS constraints (MBE side).
+##################################################################################
+# This file is part of ModelBaseEcon.jl
+# BSD 3-Clause License
+# Copyright (c) 2020-2025, Bank of Canada
+# All rights reserved.
+##################################################################################
 
-@testset "G4: @steadystate macro (MBE)" begin
+# @steadystate user-supplied steady-state constraints.
+
+@testset "@steadystate macro" begin
 
     @testset "single-equation @level (implicit default)" begin
         m = ModelDef(:g4_single)

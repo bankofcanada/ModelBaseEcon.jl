@@ -1,9 +1,14 @@
 ##################################################################################
-# G2.1 - DFM DSL / IR / params / state-space-assembly structural tests.
-# Transcribed from ModelBaseEcon.jl/test/dfmmodels.jl (BSD 3-Clause, Bank of
-# Canada). These are deterministic structural asserts - no legacy numbers
-# needed (the params fixtures are `copyto!(params, 1:n)` / `1:length(params)`),
-# so they validate the DSL + accessors + evals + constraints port exactly.
+# This file is part of ModelBaseEcon.jl
+# BSD 3-Clause License
+# Copyright (c) 2020-2025, Bank of Canada
+# All rights reserved.
+##################################################################################
+#
+# DFM DSL / IR / params / state-space-assembly structural tests. These are
+# deterministic structural asserts - no reference numbers needed (the params
+# fixtures are `copyto!(params, 1:n)` / `1:length(params)`), so they validate
+# the DSL + accessors + evals + constraints exactly.
 ##################################################################################
 
 using Test

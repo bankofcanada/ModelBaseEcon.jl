@@ -1,23 +1,29 @@
-# Legacy (against RW internals) — the BoC-terms half of the dual-green gate.
+##################################################################################
+# This file is part of ModelBaseEcon.jl
+# BSD 3-Clause License
+# Copyright (c) 2020-2025, Bank of Canada
+# All rights reserved.
+##################################################################################
+
+# Legacy behavioral claims re-asserted on the public compatibility layer.
 #
 # The Symbolics rewrite removed the legacy model-level evaluator
-# (`eval_RJ`/`eval_R!`), the in-MBE steady-state solver (`m.sstate`, now in
-# StateSpaceEcon), the `Options`/`evaldata`/`ModelSymbol` machinery, and the
-# ForwardDiff backend. The legacy `test/codegen.jl` probed those internals
-# directly, so it cannot run verbatim (M-i decision #1: don't re-shim dead
-# internals). Per the curated-rewrite decision, this file re-asserts the
-# BEHAVIORAL legacy claims on the PUBLIC alias surface (compat.jl): the
-# legacy `Model()` builder, `@initialize`, property access, accessors (A2),
-# predicates (A3), `selectively_linearize` (A6), model edits + `@reinitialize`,
-# the example models, and the permanent `@auxvar` drop.
+# (`eval_RJ`/`eval_R!`), the in-package steady-state solver (`m.sstate`, now
+# in StateSpaceEcon), the `Options`/`evaldata`/`ModelSymbol` machinery, and
+# the ForwardDiff backend. The legacy `test/codegen.jl` probed those
+# internals directly, so it cannot run verbatim. Instead, this file
+# re-asserts the BEHAVIORAL legacy claims on the public API surface
+# (compat.jl): the legacy `Model()` builder, `@initialize`, property access,
+# accessors, predicates, `selectively_linearize`, model edits +
+# `@reinitialize`, the example models, and the permanent `@auxvar` drop.
 #
-# This is parity *in BoC's own terms*: the public API a legacy caller uses
-# still builds the same models and answers the same questions.
+# This is parity in the legacy package's own terms: the public API a legacy
+# caller uses still builds the same models and answers the same questions.
 
 using ModelBaseEcon
 using Test
 
-@testset "legacy (against RW internals)" begin
+@testset "legacy compatibility" begin
 
     # ------------------------------------------------------------------
     # Build with the legacy `Model()` idiom + accessor/predicate surface.

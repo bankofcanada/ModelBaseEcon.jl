@@ -1,7 +1,13 @@
-@testset "G8: export_model round-trip" begin
+##################################################################################
+# This file is part of ModelBaseEcon.jl
+# BSD 3-Clause License
+# Copyright (c) 2020-2025, Bank of Canada
+# All rights reserved.
+##################################################################################
 
-    # Build a simple_RBC-shaped model end-to-end. Mirrors the validate-
-    # round-trip model from runtests.jl §validate: full simple_RBC-style.
+@testset "export_model round-trip" begin
+
+    # Build a simple_RBC-shaped model end-to-end.
     function _build_rbc()
         m = ModelDef(:simple_RBC)
         @parameters m begin

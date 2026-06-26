@@ -1,12 +1,17 @@
 ##################################################################################
-# Self-contained slice of ModelBaseEcon.jl's `ModelVariable` machinery needed by
-# the DFM subsystem. The legacy DFM imports `ModelVariable`, `to_shock`,
-# `isshock`, `shocks`, `nshocks`, `allvars`, `nallvars`, `eval_resid`/`eval_RJ`/
-# `eval_R!`, `AbstractModel` from the parent `ModelBaseEcon` module. The RW
-# rewrite has none of these (it works in plain `Symbol`s and routes equation
-# models through a kernel pipeline that the DFM does not use), so we provide the
-# minimal faithful subset here. Behaviour is a verbatim restriction of
-# ModelBaseEcon.jl/src/variables.jl + abstract.jl to what the DFM exercises.
+# This file is part of ModelBaseEcon.jl
+# BSD 3-Clause License
+# Copyright (c) 2020-2025, Bank of Canada
+# All rights reserved.
+##################################################################################
+#
+# Self-contained slice of the `ModelVariable` machinery needed by the DFM
+# subsystem. The DFM imports `ModelVariable`, `to_shock`, `isshock`, `shocks`,
+# `nshocks`, `allvars`, `nallvars`, `eval_resid`/`eval_RJ`/`eval_R!`,
+# `AbstractModel` from the parent module. The Symbolics-based core has none of
+# these (it works in plain `Symbol`s and routes equation models through a kernel
+# pipeline that the DFM does not use), so we provide the minimal faithful subset
+# here.
 ##################################################################################
 
 export ModelVariable, ModelSymbol
