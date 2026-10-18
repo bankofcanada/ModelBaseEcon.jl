@@ -79,7 +79,7 @@ function funcsyms(mod, eqn_name::Symbol, expr::Expr, tssyms, sssyms, psyms)
     eqn_data = (expr, collect(tssyms), collect(sssyms), collect(psyms))
     myhash = @static UInt == UInt64 ? 0x2270e9673a0822b5 : 0x2ce87a13
     myhash = Base.hash(eqn_data, myhash)
-    he = mod._hashed_expressions
+    he = Base.invokelatest(getfield, mod, :_hashed_expressions)
     hits = get!(he, myhash, valtype(he)())
     ind = indexin([eqn_data], hits)[1]
     if isnothing(ind)
@@ -99,7 +99,7 @@ const MAX_CHUNK_SIZE = 4
 struct FunctionWrapper <: Function
     f::Function
 end
-(f::FunctionWrapper)(x) = f.f(x)
+(f::FunctionWrapper)(x) = Base.invokelatest(f.f, x)
 
 """
     makefuncs(expr, tssyms, sssyms, psyms, mod)
@@ -221,8 +221,8 @@ end
 # selectively linearized equations.
 
 abstract type AbstractEqnEvalData end
-eval_RJ(eqn::AbstractEquation, x) = eqn.eval_RJ(x)
-eval_resid(eqn::AbstractEquation, x) = eqn.eval_resid(x)
+eval_RJ(eqn::AbstractEquation, x) = Base.invokelatest(eqn.eval_RJ, x)
+eval_resid(eqn::AbstractEquation, x) = Base.invokelatest(eqn.eval_resid, x)
 
 abstract type DynEqnEvalData <: AbstractEqnEvalData end
 struct DynEqnEvalData0 <: DynEqnEvalData end
@@ -252,13 +252,13 @@ function DynEqnEvalData(eqn, model, var_to_ind=get_var_to_idx(model))
     )
 end
 
-eval_resid(eqn::AbstractEquation, x, ed::DynEqnEvalDataN) = eqn.eval_resid(vcat(x, ed.ss))
+eval_resid(eqn::AbstractEquation, x, ed::DynEqnEvalDataN) = eval_resid(eqn, vcat(x, ed.ss))
 @inline function eval_RJ(eqn::AbstractEquation, x, ed::DynEqnEvalDataN)
-    R, J = eqn.eval_RJ(vcat(x, ed.ss))
+    R, J = eval_RJ(eqn, vcat(x, ed.ss))
     return (R, J[1:length(x)])
 end
-eval_resid(eqn::AbstractEquation, x, ::DynEqnEvalData0) = eqn.eval_resid(x)
-eval_RJ(eqn::AbstractEquation, x, ::DynEqnEvalData0) = eqn.eval_RJ(x)
+eval_resid(eqn::AbstractEquation, x, ::DynEqnEvalData0) = eval_resid(eqn, x)
+eval_RJ(eqn::AbstractEquation, x, ::DynEqnEvalData0) = eval_RJ(eqn, x)
 
 
 """

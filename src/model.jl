@@ -45,6 +45,15 @@ function Base.show(io::IO, flags::ModelFlags)
     end
 end
 
+# Copying modules is not supported, and as of 1.13 errors
+# This is a hacky way around that to wrap up the module in a wrapper
+# and just relink to it in deepcopy rather than actually copying.
+struct ModuleEval <: Function
+    mod::Module
+end
+(me::ModuleEval)(expr) = Core.eval(me.mod, expr)
+Base.deepcopy_internal(me::ModuleEval, ::IdDict) = me
+
 """
     mutable struct Model <: AbstractModel ⋯ end
 
@@ -1400,7 +1409,7 @@ function initialize!(model::Model, modelmodule::Module)
         modelerror("Model already initialized.")
     end
     initfuncs(modelmodule)
-    model._module_eval = modelmodule.eval
+    model._module_eval = ModuleEval(modelmodule)
     samename = Symbol[intersect(model.allvars, keys(model.parameters))...]
     if !isempty(samename)
         modelerror("Found $(length(samename)) names that are both variables and parameters: $(join(samename, ", "))")
@@ -1566,7 +1575,7 @@ function update_auxvars(data::AbstractArray{Float64,2}, model::Model;
         aux_eqn_count += 1
         for t in (eqn.maxlag+1):(nt-eqn.maxlead)
             idx = [CartesianIndex((t + ti, var_to_idx[var])) for (var, ti) in keys(eqn.tsrefs)]
-            res = eqn.eval_resid(result[idx])
+            res = eval_resid(eqn, result[idx])
             # TODO: what is this logic?
             if res < 1.0
                 result[t, nvarshk+aux_eqn_count] = log(1.0 - res)

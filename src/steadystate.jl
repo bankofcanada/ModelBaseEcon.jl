@@ -421,11 +421,11 @@ dynamic equation using information from the given [`SSEqnData`](@ref).
 function sseqn_resid_RJ(s::SSEqnData)
     function _resid(pt::Vector{<:Real})
         _update_eqn_params!(s.eqn.eval_resid, s.model[].parameters)
-        return s.eqn.eval_resid(__to_dyn_pt(pt, s))
+        return eval_resid(s.eqn, __to_dyn_pt(pt, s))
     end
     function _RJ(pt::Vector{<:Real})
         _update_eqn_params!(s.eqn.eval_resid, s.model[].parameters)
-        R, jj = s.eqn.eval_RJ(__to_dyn_pt(pt, s))
+        R, jj = eval_RJ(s.eqn, __to_dyn_pt(pt, s))
         return R, __to_ssgrad(pt, jj, s)
     end
     return _resid, _RJ

@@ -46,7 +46,11 @@ import ModelBaseEcon.update
         @test_logs (:warn, r".*do not specify transformation directly.*"i) @test update(m.ly, transformation=LogTransform).tr_type == :log
         @test_logs (:warn, r".*do not specify transformation directly.*"i) @test update(m.lmy, tr_type=:neglog, transformation=NegLogTransform).tr_type == :neglog
 
-        @test_throws ErrorException m.dummy = nothing
+        if VERSION >= v"1.12"
+            @test_throws FieldError m.dummy = Nothing
+        else
+            @test_throws ErrorException m.dummy = nothing
+        end
 
     end
 end
@@ -442,7 +446,12 @@ end
 
         @test m.exogenous == ModelVariable[]
         @test m.nexog == 0
-        @test_throws ErrorException m.dummy
+
+        if VERSION >= v"1.12"
+            @test_throws FieldError m.dummy
+        else
+            @test_throws ErrorException m.dummy
+        end
 
         @test show(IOBuffer(), MIME"text/plain"(), m.flags) === nothing
     end
@@ -480,10 +489,17 @@ end
 @testset "Abstract" begin
     struct AM <: ModelBaseEcon.AbstractModel end
     m = AM()
-    @test_throws ErrorException ModelBaseEcon.alleqns(m)
-    @test_throws ErrorException ModelBaseEcon.allvars(m)
-    @test_throws ErrorException ModelBaseEcon.nalleqns(m) == 0
-    @test_throws ErrorException ModelBaseEcon.nallvars(m) == 0
+    if VERSION >= v"1.12"
+        @test_throws FieldError ModelBaseEcon.alleqns(m)
+        @test_throws FieldError ModelBaseEcon.allvars(m)
+        @test_throws FieldError ModelBaseEcon.nalleqns(m) == 0
+        @test_throws FieldError ModelBaseEcon.nallvars(m) == 0
+    else
+        @test_throws ErrorException ModelBaseEcon.alleqns(m)
+        @test_throws ErrorException ModelBaseEcon.allvars(m)
+        @test_throws ErrorException ModelBaseEcon.nalleqns(m) == 0
+        @test_throws ErrorException ModelBaseEcon.nallvars(m) == 0
+    end
     @test_throws ErrorException ModelBaseEcon.moduleof(m) == @__MODULE__
 end
 
@@ -997,12 +1013,12 @@ end
     for i = 1:5
         α = 0.132434
         new_E1 = E1_noparams.newmodel()
-        prev_length = length(names(modelmodule, all=true))
+        prev_length = length(Base.invokelatest(names, modelmodule; all=true))
         @equations new_E1 begin
             :maineq => y[t] = $α * y[t-1] + $(1 - α) * y[t+1] + y_shk[t]
         end
         @reinitialize(new_E1)
-        new_length = length(names(modelmodule, all=true))
+        new_length = length(Base.invokelatest(names, modelmodule; all=true))
         if i == 1
             @test new_length == prev_length + 3
         else
@@ -1011,7 +1027,7 @@ end
         @test ModelBaseEcon.moduleof(new_E1.equations[:maineq]) === E1_noparams
         # also make sure moduleof doesn't add any new symbols to modules
         @test ModelBaseEcon.moduleof(new_E1) === E1_noparams
-        @test new_length == length(names(modelmodule, all=true))
+        @test new_length == length(Base.invokelatest(names, modelmodule; all=true))
     end
 end
 
@@ -1731,7 +1747,7 @@ end
         x = Float64[0, 0.375, 0.128, 0]
         x[1] = model.parameters.c[1] * x[2] + model.parameters.c[2] * x[3]
         eq = model.equations[:E1]
-        @test 0 == eq.eval_resid(x)
+        @test 0 == ModelBaseEcon.eval_resid(eq, x)
     end
 end
 
