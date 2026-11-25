@@ -115,7 +115,8 @@ function linearize!(model::Model;
     sspt = [repeat(sstate.values[1:2:(2nvars)], inner=ntimes); zeros(ntimes * nshks)]
     sspt = reshape(sspt, ntimes, nvars + nshks)
 
-    res, _ = eval_RJ(sspt, med)  # updates med.J in place, returns updated R and J
+    # see the note above `eval_RJ(point, model)`
+    res, _ = Base.invokelatest(eval_RJ, sspt, med)  # updates med.J in place, returns updated R and J
     med.R .= res
 
     setevaldata!(model, linearize=LinearizedModelEvaluationData(deviation, sspt, med))

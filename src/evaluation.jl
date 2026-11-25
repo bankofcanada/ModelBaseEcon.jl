@@ -75,11 +75,33 @@ end
 #     return fn1, fn2, fn3
 # end
 
+"""
+    _isdefined_latest(mod, sym)
+
+Like `isdefined(mod, sym)`, but also sees globals that were created by `eval`
+earlier in the same call.
+
+!!! warning
+    Internal function. Do not call directly.
+
+### Implementation (for developers)
+Since Julia 1.12, global bindings are partitioned by world age: a global that
+`eval` creates is invisible to the code that called `eval` until control returns
+to top level, so plain `isdefined` returns `false` for it.
+"""
+_isdefined_latest(mod::Module, sym::Symbol) = Base.invokelatest(isdefined, mod, sym)::Bool
+
+const HashedExpressions = Dict{UInt,Vector{Tuple{Expr,Vector{Symbol},Vector{Symbol},Vector{Symbol}}}}
+
+# The `_hashed_expressions` registry that `initfuncs` creates in the model module,
+# possibly earlier in the same call (see `_isdefined_latest`).
+_hashed_expressions(mod::Module) = Base.invokelatest(getglobal, mod, :_hashed_expressions)::HashedExpressions
+
 function funcsyms(mod, eqn_name::Symbol, expr::Expr, tssyms, sssyms, psyms)
     eqn_data = (expr, collect(tssyms), collect(sssyms), collect(psyms))
     myhash = @static UInt == UInt64 ? 0x2270e9673a0822b5 : 0x2ce87a13
     myhash = Base.hash(eqn_data, myhash)
-    he = mod._hashed_expressions
+    he = _hashed_expressions(mod)
     hits = get!(he, myhash, valtype(he)())
     ind = indexin([eqn_data], hits)[1]
     if isnothing(ind)
@@ -126,7 +148,7 @@ function makefuncs(eqn_name, expr, tssyms, sssyms, psyms, mod)
     nargs = length(tssyms) + length(sssyms)
     chunk = min(nargs, MAX_CHUNK_SIZE)
     fn1, fn2, fn3 = funcsyms(mod, eqn_name, expr, tssyms, sssyms, psyms)
-    if isdefined(mod, fn1) && isdefined(mod, fn2) && isdefined(mod, fn3)
+    if _isdefined_latest(mod, fn1) && _isdefined_latest(mod, fn2) && _isdefined_latest(mod, fn3)
         return mod.eval(:(($fn1, $fn2, $fn3, $chunk)))
     end
     x = gensym("x")
@@ -188,9 +210,9 @@ together with a `DiffResult` and a `GradientConfig` used by `ForwardDiff`. Its
 call is defined here and computes the residual and the gradient.
 """
 function initfuncs(mod::Module)
-    if !isdefined(mod, :EquationEvaluator)
+    if !_isdefined_latest(mod, :EquationEvaluator)
         mod.eval(quote
-            const _hashed_expressions = Dict{UInt,Vector{Tuple{Expr,Vector{Symbol},Vector{Symbol},Vector{Symbol}}}}()
+            const _hashed_expressions = $(HashedExpressions)()
             struct EquationEvaluator{FN} <: Function
                 rev::Ref{UInt}
                 params::$(@__MODULE__).LittleDictVec{Symbol,Any}
@@ -513,6 +535,11 @@ This function calculates the residuals of the provided equation `eqn` for each t
 - `res::Vector{Float64}`: A vector of residuals for each time point in the range `rng`. Entries for time points where residuals cannot be computed (due to insufficient lags or leads) are filled with `NaN`.
 """
 function eval_equation(model::AbstractModel, eqn::AbstractEquation, sim_data::AbstractMatrix{Float64}, rng::UnitRange{Int64} = 1:size(sim_data,1))
+    # see the note above `eval_RJ(point, model)`
+    return Base.invokelatest(_eval_equation, model, eqn, sim_data, rng)::Vector{Float64}
+end
+
+function _eval_equation(model::AbstractModel, eqn::AbstractEquation, sim_data::AbstractMatrix{Float64}, rng::UnitRange{Int64})
     # Check bounds
     @assert rng[begin] >= 1 && rng[end] <= size(sim_data, 1) "Error: The range specified is out of bounds. Ensure that the range starts from 1 or higher and ends within the size of the data."
 
@@ -560,7 +587,9 @@ current steady state solution while the rest of the eq
 
 """
 function selective_linearize!(model::AbstractModel)
-    setevaldata!(model, selective_linearize=SelectiveLinearizationMED(model))
+    # see the note above `eval_RJ(point, model)`
+    slmed = Base.invokelatest(SelectiveLinearizationMED, model)::SelectiveLinearizationMED
+    setevaldata!(model, selective_linearize=slmed)
     return model
 end
 export selective_linearize!

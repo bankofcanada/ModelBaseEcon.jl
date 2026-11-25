@@ -188,6 +188,22 @@ end
 
 ##
 
+@testset "CommonComponents names" begin
+    _names(c) = [v.name for v in c.vars]
+    # a single name, with subscripts generated for size > 1
+    @test _names(CommonComponents(:F)) == [:F]
+    @test _names(CommonComponents("F", 2)) == [:F¹, :F²]
+    # a list of names; a tuple may mix Symbol and String
+    @test _names(CommonComponents([:U, :V])) == [:U, :V]
+    @test _names(CommonComponents((:x, "y"))) == [:x, :y]
+    @test _names(CommonComponents((:x, "y"), 2)) == [:x, :y]
+    c = CommonComponents((:x, "y"); order=2)
+    @test _names(c) == [:x, :y] && c.order == 2
+    @test_throws ArgumentError CommonComponents((:x, "y"), 3)
+    # mixed frequency
+    @test _names(CommonComponents(MixFreq{:MQ}, (:x, "y"))) == [:x, :y]
+end
+
 @testset "dfm.2" begin
     # begin
     dfm = DFM(:test)

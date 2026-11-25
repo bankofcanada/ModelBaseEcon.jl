@@ -62,7 +62,7 @@ function Base.show(io::IO, model::DFMModel)
         println(io, "  Loadings map")
         for block in values(model.observed)
             for (var, refs) in block.var2comps
-                print_padded(io, "     $var ~", Iterators.map(DFMModels.vars_comp_refs, values(refs))..., delim=" + ")
+                print_padded(io, "     $var ~", Iterators.map(vars_comp_refs, values(refs))..., delim=" + ")
             end
         end
     end

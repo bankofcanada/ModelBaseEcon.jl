@@ -14,14 +14,14 @@ StateSpaceEcon works with model objects defined with ModelBaseEcon.
 """
 module ModelBaseEcon
 
-using OrderedCollections
-using MacroTools
-using LinearAlgebra
-using SparseArrays
-using DiffResults
-using ForwardDiff
-using Printf
-using Crayons
+using OrderedCollections: OrderedCollections, LittleDict, OrderedDict
+using MacroTools: MacroTools, @capture, isexpr
+using LinearAlgebra: LinearAlgebra
+using SparseArrays: SparseArrays, SparseMatrixCSC, findnz
+using DiffResults: DiffResults
+using ForwardDiff: ForwardDiff
+using Printf: Printf
+using Crayons: Crayons, @crayon_str  # crayon"..." is used in code built and evaluated by prettyprint_equation
 
 # Note: The full type specification for `LittleDict` has 4 parameters.
 # Specifying only the first two in a struct as:

@@ -55,7 +55,7 @@ mutable struct Model <: AbstractModel
     Should not be directly manipulated."
     _state::Symbol
     "the module in which all model equations will be compiled"
-    _module_eval::Union{Nothing,Function}
+    _modelmodule::Union{Nothing,ModelModule}
     "Options are various hyper-parameters for tuning the algorithms"
     options::Options
     "Flags contain meta information about the type of model"
@@ -769,7 +769,7 @@ Replace equations with the given keys with the equation provided. Equations prov
 a key or with a non-existing key will be added to the model.
 The keys must be provided with their full symbol reference, including the `:`.
 
-To find the key for an equation, see [`summarize`](@ref). For equation details, see [`Equation`](@ref).
+To find the key for an equation, see [`findequations`](@ref). For equation details, see [`Equation`](@ref).
 
 Changes like this should be followed by a call to [`@reinitialize`](@ref) on the model.
 """
@@ -998,7 +998,7 @@ function process_equation(model::Model, expr::Expr;
             return sym
         end
         # is this symbol a valid name in the model module?
-        if isdefined(modelmodule, sym)
+        if _isdefined_latest(modelmodule, sym)
             return sym
         end
         # no idea what this is!
@@ -1026,7 +1026,7 @@ function process_equation(model::Model, expr::Expr;
             end
             # check if we have a corresponding meta function
             metafuncname = Symbol("at_", macroname) # replace @ with at_
-            metafunc = isdefined(modelmodule, metafuncname) ? :($modelmodule.$metafuncname) :
+            metafunc = _isdefined_latest(modelmodule, metafuncname) ? :($modelmodule.$metafuncname) :
                        isdefined(ModelBaseEcon, metafuncname) ? :(ModelBaseEcon.$metafuncname) : nothing
             if metafunc !== nothing
                 metaargs = map(filter(!MacroTools.isline, ex.args[3:end])) do arg
@@ -1400,7 +1400,7 @@ function initialize!(model::Model, modelmodule::Module)
         modelerror("Model already initialized.")
     end
     initfuncs(modelmodule)
-    model._module_eval = modelmodule.eval
+    model._modelmodule = ModelModule(modelmodule)
     samename = Symbol[intersect(model.allvars, keys(model.parameters))...]
     if !isempty(samename)
         modelerror("Found $(length(samename)) names that are both variables and parameters: $(join(samename, ", "))")
@@ -1512,8 +1512,13 @@ end
 
 ##########################
 
-eval_RJ(point::AbstractMatrix{Float64}, model::Model, variant::Symbol=model.options.variant) = eval_RJ(point, getevaldata(model, variant))
-eval_R!(res::AbstractVector{Float64}, point::AbstractMatrix{Float64}, model::Model, variant::Symbol=model.options.variant) = eval_R!(res, point, getevaldata(model, variant))
+# Public entry points that may run right after the model was built in the same
+# call (e.g. inside a function or a `@testset`). The residual and gradient
+# functions are created by `eval`, so these use `invokelatest` once, at the top,
+# to see them (see `_isdefined_latest`). Solvers that call these repeatedly
+# should call the methods for `getevaldata(model)` instead.
+eval_RJ(point::AbstractMatrix{Float64}, model::Model, variant::Symbol=model.options.variant) = Base.invokelatest(eval_RJ, point, getevaldata(model, variant))
+eval_R!(res::AbstractVector{Float64}, point::AbstractMatrix{Float64}, model::Model, variant::Symbol=model.options.variant) = Base.invokelatest(eval_R!, res, point, getevaldata(model, variant))
 @inline issssolved(model::Model) = issssolved(model.sstate)
 
 ##########################
@@ -1561,6 +1566,13 @@ function update_auxvars(data::AbstractArray{Float64,2}, model::Model;
         modelerror("Insufficient time periods $nt. Expected $mintimes or more.")
     end
     result = [data[:, 1:nvarshk] zeros(nt, nauxs)]
+    # see the note above `eval_RJ(point, model)`
+    Base.invokelatest(_update_auxvars!, result, model, var_to_idx, nvarshk, default)
+    return result
+end
+
+function _update_auxvars!(result::AbstractMatrix{Float64}, model::Model, var_to_idx, nvarshk::Int, default::Float64)
+    nt = size(result, 1)
     aux_eqn_count = 0
     for (k, eqn) in model.auxeqns
         aux_eqn_count += 1
@@ -1575,7 +1587,7 @@ function update_auxvars(data::AbstractArray{Float64,2}, model::Model;
             end
         end
     end
-    return result
+    return nothing
 end
 
 """

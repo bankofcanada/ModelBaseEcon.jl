@@ -23,10 +23,10 @@ import ..isshock
 
 import ..AbstractModel
 
-using LinearAlgebra
-using OrderedCollections
-using ComponentArrays
-using SparseArrays
+using LinearAlgebra: LinearAlgebra, Diagonal, I, Symmetric, diag, dot, lmul!
+using OrderedCollections: OrderedCollections, LittleDict
+using ComponentArrays: ComponentArrays, Axis, ComponentArray, FlatAxis
+using SparseArrays: SparseArrays, spzeros
 # using FillArrays
 
 ####################################################
@@ -229,7 +229,8 @@ would be handled automatically and there is no need for the user to specify
 CommonComponents
 
 const CommonComponents{MF<:MixedFrequency} = ComponentsBlock{:Dense,MF}
-CommonComponents(name, size::Integer=name isa LikeVec ? length(name) : 1; order::Integer=1, nlags::Integer=order) = CommonComponents{NoMixFreq}(name, size, order, nlags)
+CommonComponents(name::Sym, size::Integer=1; order::Integer=1, nlags::Integer=order) = CommonComponents{NoMixFreq}(name, size, order, nlags)
+CommonComponents(names::SymVec, size::Integer=length(names); order::Integer=1, nlags::Integer=order) = CommonComponents{NoMixFreq}(names, size, order, nlags)
 CommonComponents(MF::Type{<:MixedFrequency}, name, size::Integer=name isa LikeVec ? length(name) : 1; order::Integer=1, nlags::Integer=order) = CommonComponents{MF}(name, size, order, nlags)
 
 """

@@ -88,6 +88,16 @@ export equations, nequations
 export sstate
 #######
 
+"""
+    ModelModule
+
+The module in which a model's equations are compiled. `deepcopy` of a model
+shares the module instead of copying it, because modules cannot be copied.
+"""
+struct ModelModule
+    mod::Module
+end
+Base.deepcopy_internal(x::ModelModule, ::IdDict) = x
 
 # @inline moduleof(f::Function) = parentmodule(f)
 """
@@ -99,9 +109,9 @@ Return the module in which the given equation or model was initialized.
 function moduleof end
 moduleof(e::AbstractEquation) = parentmodule(eval_resid(e))
 function moduleof(m::M) where {M<:AbstractModel}
-    if hasfield(M, :_module_eval) 
-        mod_eval = m._module_eval
-        isnothing(mod_eval) || return parentmodule(mod_eval(:(EquationEvaluator)))
+    if hasfield(M, :_modelmodule)
+        mm = getfield(m, :_modelmodule)
+        isnothing(mm) || return mm.mod
     end
     # for (_, eqn) in equations(m)
     #     mod = parentmodule(eval_resid(eqn))
